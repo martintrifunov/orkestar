@@ -36,6 +36,7 @@ type Snapshot struct {
 	Agents      []Agent             `json:"agents"`
 	Permissions []PermissionRequest `json:"permissions"`
 	Tasks       []workflow.Task     `json:"tasks"`
+	Leases      []workflow.Lease    `json:"leases"`
 }
 
 type Server struct {
@@ -49,6 +50,7 @@ type Server struct {
 	agents      map[string]*agentSession
 	permissions map[string]PermissionRequest
 	tasks       *workflow.Board
+	leases      *workflow.LeaseManager
 	stop        chan struct{}
 	stopOnce    sync.Once
 }
@@ -62,6 +64,7 @@ func NewServer(socketPath string) *Server {
 		agents:      make(map[string]*agentSession),
 		permissions: make(map[string]PermissionRequest),
 		tasks:       workflow.NewBoard(),
+		leases:      workflow.NewLeaseManager(),
 		stop:        make(chan struct{}),
 	}
 }
@@ -207,6 +210,10 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.createTaskWorktree(context.Background(), request.Params)
 	case "task.removeWorktree":
 		result, err = s.removeTaskWorktree(context.Background(), request.Params)
+	case "resource.acquire":
+		result, err = s.acquireLease(request.Params)
+	case "resource.release":
+		result, err = s.releaseLease(request.Params)
 	default:
 		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
 	}
@@ -259,6 +266,7 @@ func (s *Server) snapshot() Snapshot {
 		Agents:      agents,
 		Permissions: permissions,
 		Tasks:       s.tasks.List(),
+		Leases:      s.leases.ListAll(),
 	}
 }
 

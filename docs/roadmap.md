@@ -40,7 +40,7 @@ each vertical slice before broadening the surface.
 - [ ] Diff and changed-file TUI
 - [ ] Test/log/diff artifacts
 - [ ] Reviewer-agent workflow
-- [ ] Resource leases
+- [x] Resource leases
 
 ## M4: MCP gateway
 
