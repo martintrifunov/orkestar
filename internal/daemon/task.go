@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
+	"github.com/martintrifunov/orkestar/internal/git"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -48,4 +51,71 @@ func (s *Server) assignTask(rawParams json.RawMessage) (workflow.Task, error) {
 		return workflow.Task{}, fmt.Errorf("decode task assign params: %w", err)
 	}
 	return s.tasks.Assign(params.TaskID, params.AgentID)
+}
+
+// createTaskWorktree gives a task its own git worktree and branch,
+// sibling to its workspace's directory, so an agent can work on it without
+// disturbing the workspace's primary checkout.
+func (s *Server) createTaskWorktree(ctx context.Context, rawParams json.RawMessage) (workflow.Task, error) {
+	var params struct {
+		TaskID string `json:"task_id"`
+		Branch string `json:"branch"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return workflow.Task{}, fmt.Errorf("decode task worktree params: %w", err)
+	}
+
+	task, err := s.tasks.Get(params.TaskID)
+	if err != nil {
+		return workflow.Task{}, err
+	}
+
+	s.mu.RLock()
+	workspace, ok := s.workspaces[task.WorkspaceID]
+	s.mu.RUnlock()
+	if !ok {
+		return workflow.Task{}, fmt.Errorf("workspace %q does not exist", task.WorkspaceID)
+	}
+
+	branch := params.Branch
+	if branch == "" {
+		branch = "task/" + task.ID
+	}
+	worktreePath := filepath.Join(filepath.Dir(workspace.Directory), filepath.Base(workspace.Directory)+"-worktrees", task.ID)
+
+	if err := git.AddWorktree(ctx, workspace.Directory, worktreePath, branch); err != nil {
+		return workflow.Task{}, fmt.Errorf("create task worktree: %w", err)
+	}
+	return s.tasks.SetWorktree(task.ID, worktreePath, branch)
+}
+
+// removeTaskWorktree removes a task's git worktree from disk and clears
+// its worktree metadata.
+func (s *Server) removeTaskWorktree(ctx context.Context, rawParams json.RawMessage) (workflow.Task, error) {
+	var params struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return workflow.Task{}, fmt.Errorf("decode task worktree params: %w", err)
+	}
+
+	task, err := s.tasks.Get(params.TaskID)
+	if err != nil {
+		return workflow.Task{}, err
+	}
+	if task.WorktreePath == "" {
+		return workflow.Task{}, fmt.Errorf("task %q has no worktree", task.ID)
+	}
+
+	s.mu.RLock()
+	workspace, ok := s.workspaces[task.WorkspaceID]
+	s.mu.RUnlock()
+	if !ok {
+		return workflow.Task{}, fmt.Errorf("workspace %q does not exist", task.WorkspaceID)
+	}
+
+	if err := git.RemoveWorktree(ctx, workspace.Directory, task.WorktreePath); err != nil {
+		return workflow.Task{}, fmt.Errorf("remove task worktree: %w", err)
+	}
+	return s.tasks.SetWorktree(task.ID, "", "")
 }

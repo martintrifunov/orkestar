@@ -36,7 +36,7 @@ each vertical slice before broadening the surface.
 ## M3: Tasks and review
 
 - [x] Tasks, dependencies, and assignments
-- [ ] Git worktree association
+- [x] Git worktree association
 - [ ] Diff and changed-file TUI
 - [ ] Test/log/diff artifacts
 - [ ] Reviewer-agent workflow

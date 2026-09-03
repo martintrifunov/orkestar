@@ -41,6 +41,8 @@ type Task struct {
 	Description     string    `json:"description,omitempty"`
 	DependsOn       []string  `json:"depends_on,omitempty"`
 	AssigneeAgentID string    `json:"assignee_agent_id,omitempty"`
+	WorktreePath    string    `json:"worktree_path,omitempty"`
+	WorktreeBranch  string    `json:"worktree_branch,omitempty"`
 	Status          Status    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -136,6 +138,24 @@ func (b *Board) Assign(taskID, agentID string) (Task, error) {
 		return Task{}, fmt.Errorf("task %q does not exist", taskID)
 	}
 	task.AssigneeAgentID = agentID
+	task.UpdatedAt = time.Now().UTC()
+	b.tasks[taskID] = task
+	return task, nil
+}
+
+// SetWorktree records the git worktree path and branch associated with a
+// task. It only tracks metadata; creating or removing the worktree on disk
+// is the caller's responsibility (see internal/git).
+func (b *Board) SetWorktree(taskID, path, branch string) (Task, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	task, ok := b.tasks[taskID]
+	if !ok {
+		return Task{}, fmt.Errorf("task %q does not exist", taskID)
+	}
+	task.WorktreePath = path
+	task.WorktreeBranch = branch
 	task.UpdatedAt = time.Now().UTC()
 	b.tasks[taskID] = task
 	return task, nil

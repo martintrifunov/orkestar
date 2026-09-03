@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +12,29 @@ import (
 	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
+
+func initRepo(t *testing.T) string {
+	t.Helper()
+
+	directory := t.TempDir()
+	run := func(args ...string) {
+		command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+		command.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	run("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(directory, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "initial commit")
+	return directory
+}
 
 func TestTaskCreateDependencyAndAssignment(t *testing.T) {
 	t.Parallel()
@@ -107,6 +131,75 @@ func TestTaskCreateDependencyAndAssignment(t *testing.T) {
 	}
 	if len(snapshot.Tasks) != 2 {
 		t.Fatalf("unexpected tasks in snapshot: %#v", snapshot.Tasks)
+	}
+}
+
+func TestTaskWorktreeCreateAndRemove(t *testing.T) {
+	t.Parallel()
+
+	repoDirectory := initRepo(t)
+	socketDirectory, err := os.MkdirTemp("/tmp", "orkestar-task-worktree-test-")
+	if err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
+	socketPath := filepath.Join(socketDirectory, "orkestar.sock")
+
+	server := daemon.NewServer(socketPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-serverError; err != nil {
+			t.Errorf("server shutdown: %v", err)
+		}
+	})
+
+	client := ipc.NewClient(socketPath)
+	waitForServer(t, client)
+	callContext, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer callCancel()
+
+	var workspace daemon.Workspace
+	if err := client.Call(callContext, "workspace.create", map[string]string{
+		"directory": repoDirectory,
+	}, &workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	var task workflow.Task
+	if err := client.Call(callContext, "task.create", map[string]any{
+		"workspace_id": workspace.ID,
+		"title":        "isolated work",
+	}, &task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	var withWorktree workflow.Task
+	if err := client.Call(callContext, "task.createWorktree", map[string]string{
+		"task_id": task.ID,
+	}, &withWorktree); err != nil {
+		t.Fatalf("create task worktree: %v", err)
+	}
+	if withWorktree.WorktreePath == "" || withWorktree.WorktreeBranch == "" {
+		t.Fatalf("expected worktree metadata to be set: %#v", withWorktree)
+	}
+	if _, err := os.Stat(filepath.Join(withWorktree.WorktreePath, "README.md")); err != nil {
+		t.Fatalf("expected worktree checkout on disk: %v", err)
+	}
+
+	var cleared workflow.Task
+	if err := client.Call(callContext, "task.removeWorktree", map[string]string{
+		"task_id": task.ID,
+	}, &cleared); err != nil {
+		t.Fatalf("remove task worktree: %v", err)
+	}
+	if cleared.WorktreePath != "" || cleared.WorktreeBranch != "" {
+		t.Fatalf("expected worktree metadata to be cleared: %#v", cleared)
+	}
+	if _, err := os.Stat(withWorktree.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("expected worktree directory to be removed, stat err: %v", err)
 	}
 }
 

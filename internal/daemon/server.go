@@ -203,6 +203,10 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.setTaskStatus(request.Params)
 	case "task.assign":
 		result, err = s.assignTask(request.Params)
+	case "task.createWorktree":
+		result, err = s.createTaskWorktree(context.Background(), request.Params)
+	case "task.removeWorktree":
+		result, err = s.removeTaskWorktree(context.Background(), request.Params)
 	default:
 		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
 	}

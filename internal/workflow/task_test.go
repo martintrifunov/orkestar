@@ -84,6 +84,28 @@ func TestAssignAndList(t *testing.T) {
 	}
 }
 
+func TestSetWorktree(t *testing.T) {
+	t.Parallel()
+
+	board := workflow.NewBoard()
+	task, err := board.Create("ws", "task", "", nil)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	updated, err := board.SetWorktree(task.ID, "/tmp/ws-worktrees/task_1", "task/task_1")
+	if err != nil {
+		t.Fatalf("set worktree: %v", err)
+	}
+	if updated.WorktreePath != "/tmp/ws-worktrees/task_1" || updated.WorktreeBranch != "task/task_1" {
+		t.Fatalf("unexpected worktree metadata: %#v", updated)
+	}
+
+	if _, err := board.SetWorktree("missing", "/tmp/x", "branch"); err == nil {
+		t.Fatal("expected set worktree to fail for a missing task")
+	}
+}
+
 func TestGetMissingTask(t *testing.T) {
 	t.Parallel()
 
