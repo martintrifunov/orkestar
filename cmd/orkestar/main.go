@@ -56,6 +56,8 @@ func run(args []string) error {
 		return runWorkspace(paths, args[1:])
 	case "terminal":
 		return runTerminal(paths, args[1:])
+	case "task":
+		return runTask(paths, args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -204,6 +206,13 @@ Usage:
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>
+  orkestar task create <workspace-id> <title> [--depends-on id1,id2] [--no-review]
+  orkestar task list [workspace-id]
+  orkestar task status <task-id> <pending|in_progress|done|cancelled>
+  orkestar task assign <task-id> <agent-id>
+  orkestar task worktree create <task-id> [branch]
+  orkestar task worktree remove <task-id>
+  orkestar task diff <task-id>
   orkestar help
 
 Detach from an attached terminal with ctrl+b q.
