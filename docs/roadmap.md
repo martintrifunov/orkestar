@@ -26,7 +26,7 @@ each vertical slice before broadening the surface.
 
 ## M2: Agent awareness
 
-- [ ] Agent adapter contract and capability model
+- [x] Agent adapter contract and capability model
 - [ ] Claude Code interactive adapter
 - [ ] OpenCode server adapter
 - [ ] Structured lifecycle and attention reasons
