@@ -164,16 +164,31 @@ rewrites.
 
 ## Embedded terminal rendering
 
-A terminal (plain shell or an interactive agent's bridged PTY) is rendered
-inline as a pane in the dashboard, not handed to a subprocess with the real
-TTY. The TUI opens `terminal.attach` itself, feeds the raw PTY byte stream
-into `github.com/charmbracelet/x/vt` (a VT100 emulator confined to
+A plain terminal session (started via `n` or attached from the Sessions
+panel, when it is not an agent's bridged terminal) is rendered inline as a
+pane in the dashboard, not handed to a subprocess with the real TTY. The
+TUI opens `terminal.attach` itself, feeds the raw PTY byte stream into
+`github.com/charmbracelet/x/vt` (a VT100 emulator confined to
 `internal/tui`), and renders its screen as one pane alongside the
 Workspaces/Tasks/Agents panels. Key presses are encoded back into raw bytes
 (`internal/tui/keyencode.go`) and sent as `terminal.attach` input, since
-Bubble Tea has already decoded them into structured events. The standalone
-`orkestar terminal attach` CLI command still exists and hands off the real
-TTY the old way; it is unaffected and useful outside the TUI.
+Bubble Tea has already decoded them into structured events.
+
+Agent sessions (Claude Code, OpenCode) instead use the subprocess hand-off
+(`orkestar terminal attach` run via `tea.ExecProcess`, the real TTY handed
+to the subprocess), the same mechanism used before the embedded pane
+existed. This split is deliberate, not a shortcut: embedding a rich,
+full-screen interactive CLI that does its own terminal-capability
+negotiation (Claude Code sends DEC mode and Kitty-keyboard-protocol queries
+that nothing answers once its PTY is consumed by `vt.Emulator` instead of a
+real terminal) silently stops Bubble Tea's own key reading after the first
+keystroke. This was confirmed as a bug in the `vt`/Bubble Tea stack itself,
+not in Orkestar's code: reproduced in a ~100-line program with no
+daemon/IPC involved at all — just `vt.Emulator` feeding a real spawned
+`claude` process's output into Bubble Tea. A plain shell embedded the same
+way has no such problem, which is why the split is by session kind
+(`Model.terminalIsAgentBridged`, checking whether any `Agent.TerminalID`
+matches) rather than an all-or-nothing choice.
 
 `x/vt` is unreleased (no tagged version) as of this writing. Its
 concurrency-safety wrapper is incomplete: only call `Write`, `Render`, and

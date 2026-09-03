@@ -98,6 +98,7 @@ func openEmbeddedTerminal(client *ipc.Client, terminalID string, columns, rows i
 			emulator:   emulator,
 			events:     make(chan tea.Msg, 64),
 		}
+		debugf("openEmbeddedTerminal: attached terminalID=%s columns=%d rows=%d", terminalID, columns, rows)
 		go embeddedReadLoop(term)
 		return embeddedReadyMsg{terminal: term}
 	}
@@ -153,11 +154,12 @@ func waitEmbeddedEvent(events chan tea.Msg) tea.Cmd {
 // time, and this is a local unix-socket write (microseconds), so calling
 // it inline preserves keystroke order at a cost too small to matter.
 func sendEmbeddedInput(stream *ipc.Stream, data []byte) {
-	_ = stream.Send(map[string]any{
+	err := stream.Send(map[string]any{
 		"version": ipc.Version,
 		"command": "input",
 		"data":    base64.StdEncoding.EncodeToString(data),
 	})
+	debugf("sendEmbeddedInput: %d bytes %q err=%v", len(data), data, err)
 }
 
 // sendEmbeddedResize resizes the local emulator and tells the daemon to

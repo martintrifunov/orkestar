@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,6 +33,10 @@ type snapshotMsg struct {
 type terminalStartedMsg struct {
 	terminal daemon.Terminal
 	err      error
+}
+
+type attachFinishedMsg struct {
+	err error
 }
 
 type diffMsg struct {
@@ -68,6 +73,7 @@ const (
 type Model struct {
 	client        *ipc.Client
 	directory     string
+	executable    string
 	snapshot      daemon.Snapshot
 	selected      int
 	taskSelected  int
@@ -93,20 +99,30 @@ type Model struct {
 	// embedded is the terminal rendered inline as a pane, if one is open.
 	// Only one can be open at a time; opening another one is not offered
 	// while this is set, and it swallows every key press except the
-	// ctrl+b q detach combo.
+	// ctrl+b q detach combo. Only used for plain terminal sessions (see
+	// attachSelected) — agent sessions use the subprocess hand-off
+	// instead, because embedding a rich interactive CLI like Claude Code
+	// hits a confirmed upstream bug in charmbracelet/x/vt (an unreleased
+	// library) that silently stops Bubble Tea's own key reading after the
+	// first keystroke. Reproduced in complete isolation from Orkestar's
+	// own code: a minimal program with no daemon/IPC, just vt.Emulator
+	// feeding a real spawned `claude` process's output into Bubble Tea,
+	// hits the exact same freeze. A plain shell embedded the same way
+	// never has this problem.
 	embedded *embeddedTerminal
 }
 
-func New(client *ipc.Client, directory string) Model {
+func New(client *ipc.Client, directory, executable string) Model {
 	return Model{
-		client:    client,
-		directory: directory,
-		loading:   true,
+		client:     client,
+		directory:  directory,
+		executable: executable,
+		loading:    true,
 	}
 }
 
-func Run(client *ipc.Client, directory string) error {
-	program := tea.NewProgram(New(client, directory))
+func Run(client *ipc.Client, directory, executable string) error {
+	program := tea.NewProgram(New(client, directory, executable))
 	_, err := program.Run()
 	return err
 }
@@ -125,6 +141,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			sendEmbeddedResize(m.embedded, columns, rows)
 		}
 	case tea.KeyPressMsg:
+		debugf("key: str=%q text=%q code=%d mod=%d embedded=%v", message.String(), message.Text, message.Code, message.Mod, m.embedded != nil)
 		if m.embedded != nil {
 			return m.updateEmbedded(message)
 		}
@@ -207,7 +224,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			return m, m.embedSelected()
+			return m, m.attachSelected()
 		case "d":
 			return m, m.loadDiff()
 		case "m":
@@ -242,6 +259,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, openEmbeddedTerminal(m.client, message.terminal.ID, columns, rows)
 		}
 	case embeddedReadyMsg:
+		debugf("embeddedReadyMsg: err=%v terminal=%v", message.err, message.terminal != nil)
 		m.err = message.err
 		if message.err != nil {
 			return m, nil
@@ -250,9 +268,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitEmbeddedEvent(message.terminal.events)
 	case embeddedEventMsg:
 		if m.embedded == nil || m.embedded.terminalID != message.terminalID {
+			debugf("embeddedEventMsg: stale/mismatched, dropping (embedded=%v msgID=%s)", m.embedded != nil, message.terminalID)
 			return m, nil
 		}
 		if message.exited {
+			debugf("embeddedEventMsg: exited err=%v", message.err)
 			_ = m.embedded.stream.Close()
 			m.embedded = nil
 			m.loading = true
@@ -287,11 +307,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if message.agent.TerminalID != "" {
-			columns, rows := embeddedPaneSize(m.width, m.height)
-			return m, openEmbeddedTerminal(m.client, message.agent.TerminalID, columns, rows)
+			// Agent sessions use the subprocess hand-off, not the
+			// embedded pane: see the embedded field's doc comment.
+			return m, attachTerminal(m.executable, message.agent.TerminalID)
 		}
 		m.loading = true
 		return m, m.loadSnapshot()
+	case attachFinishedMsg:
+		m.err = message.err
+		m.loading = true
+		return m, m.loadSnapshot()
+	default:
+		debugf("update: unhandled message type %T embedded=%v", message, m.embedded != nil)
 	}
 	return m, nil
 }
@@ -373,7 +400,6 @@ func (m Model) renderEmbedded(width, height int) string {
 		"",
 		m.renderAgents(),
 	}, "\n")
-	sidebarPanel := panelStyle.Width(sidebarWidth).Height(height - 4).Render(sidebar)
 
 	// embeddedPaneSize returns the emulator's grid dimensions (also used to
 	// size the emulator itself and the daemon's PTY), which is the box's
@@ -382,9 +408,13 @@ func (m Model) renderEmbedded(width, height int) string {
 	// so the box must be sized larger than the grid by that overhead —
 	// otherwise every line the emulator renders is wider than the box has
 	// room for, and lipgloss wraps each one, corrupting the whole layout.
+	// The sidebar uses the same outer height so the two boxes line up.
 	columns, rows := embeddedPaneSize(width, height)
+	outerHeight := rows + 2
+	sidebarPanel := panelStyle.Width(sidebarWidth).Height(outerHeight).Render(sidebar)
+
 	content := m.embedded.emulator.Render()
-	terminalPanel := panelStyle.Width(columns + 4).Height(rows + 2).Render(content)
+	terminalPanel := panelStyle.Width(columns + 4).Height(outerHeight).Render(content)
 
 	header := accentStyle.Render("Orkestar") + dimStyle.Render(fmt.Sprintf("  terminal %s", m.embedded.terminalID))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebarPanel, " ", terminalPanel)
@@ -681,13 +711,38 @@ func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
 	}
 }
 
-// embedSelected opens the currently selected session as an embedded pane.
-func (m Model) embedSelected() tea.Cmd {
+// attachSelected attaches to the currently selected session. Agent-bridged
+// terminals use the subprocess hand-off (see the embedded field's doc
+// comment for why); plain ones use the embedded pane.
+func (m Model) attachSelected() tea.Cmd {
 	if len(m.snapshot.Terminals) == 0 || m.selected >= len(m.snapshot.Terminals) {
 		return nil
 	}
+	terminal := m.snapshot.Terminals[m.selected]
+	if m.terminalIsAgentBridged(terminal.ID) {
+		return attachTerminal(m.executable, terminal.ID)
+	}
 	columns, rows := embeddedPaneSize(m.width, m.height)
-	return openEmbeddedTerminal(m.client, m.snapshot.Terminals[m.selected].ID, columns, rows)
+	return openEmbeddedTerminal(m.client, terminal.ID, columns, rows)
+}
+
+func (m Model) terminalIsAgentBridged(terminalID string) bool {
+	for _, agent := range m.snapshot.Agents {
+		if agent.TerminalID == terminalID {
+			return true
+		}
+	}
+	return false
+}
+
+// attachTerminal runs `orkestar terminal attach <id>` as a subprocess,
+// taking over the screen until the user detaches (ctrl+b q) or the process
+// exits, then returns control to the dashboard.
+func attachTerminal(executable, terminalID string) tea.Cmd {
+	command := exec.Command(executable, "terminal", "attach", terminalID)
+	return tea.ExecProcess(command, func(err error) tea.Msg {
+		return attachFinishedMsg{err: err}
+	})
 }
 
 // updateEmbedded handles a key press while an embedded terminal pane is
@@ -696,10 +751,12 @@ func (m Model) embedSelected() tea.Cmd {
 // detach shortcut, so the muscle memory is the same either way).
 func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	term := m.embedded
+	debugf("updateEmbedded: str=%q detachPending=%v terminalID=%s", msg.String(), term.detachPending, term.terminalID)
 
 	if term.detachPending {
 		term.detachPending = false
 		if msg.String() == "q" {
+			debugf("updateEmbedded: detaching terminalID=%s", term.terminalID)
 			_ = term.stream.Close()
 			m.embedded = nil
 			m.loading = true
@@ -715,11 +772,14 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'b' {
+		debugf("updateEmbedded: ctrl+b seen, arming detach")
 		term.detachPending = true
 		return m, nil
 	}
 
-	if data := encodeKey(msg); len(data) > 0 {
+	data := encodeKey(msg)
+	debugf("updateEmbedded: encodeKey -> %d bytes: %q", len(data), data)
+	if len(data) > 0 {
 		sendEmbeddedInput(term.stream, data)
 	}
 	return m, nil
