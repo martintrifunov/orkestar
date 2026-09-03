@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 )
 
@@ -29,27 +30,35 @@ type Workspace struct {
 }
 
 type Snapshot struct {
-	Workspaces []Workspace `json:"workspaces"`
-	Terminals  []Terminal  `json:"terminals"`
+	Workspaces  []Workspace         `json:"workspaces"`
+	Terminals   []Terminal          `json:"terminals"`
+	Agents      []Agent             `json:"agents"`
+	Permissions []PermissionRequest `json:"permissions"`
 }
 
 type Server struct {
 	socketPath string
 
-	mu         sync.RWMutex
-	listener   net.Listener
-	workspaces map[string]Workspace
-	terminals  map[string]*terminalSession
-	stop       chan struct{}
-	stopOnce   sync.Once
+	mu          sync.RWMutex
+	listener    net.Listener
+	workspaces  map[string]Workspace
+	terminals   map[string]*terminalSession
+	adapters    map[string]agent.Adapter
+	agents      map[string]*agentSession
+	permissions map[string]PermissionRequest
+	stop        chan struct{}
+	stopOnce    sync.Once
 }
 
 func NewServer(socketPath string) *Server {
 	return &Server{
-		socketPath: socketPath,
-		workspaces: make(map[string]Workspace),
-		terminals:  make(map[string]*terminalSession),
-		stop:       make(chan struct{}),
+		socketPath:  socketPath,
+		workspaces:  make(map[string]Workspace),
+		terminals:   make(map[string]*terminalSession),
+		adapters:    make(map[string]agent.Adapter),
+		agents:      make(map[string]*agentSession),
+		permissions: make(map[string]PermissionRequest),
+		stop:        make(chan struct{}),
 	}
 }
 
@@ -85,6 +94,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	defer func() {
 		s.closeTerminals()
+		s.closeAgents()
 		s.mu.Lock()
 		s.listener = nil
 		s.mu.Unlock()
@@ -137,6 +147,10 @@ func (s *Server) handleConnection(connection net.Conn) {
 			s.handleTerminalAttach(connection, scanner, encoder, request)
 			return
 		}
+		if request.Method == "agent.attach" {
+			s.handleAgentAttach(agentConnection{Scanner: scanner, Encoder: encoder, Request: request})
+			return
+		}
 		response := s.handleRequest(request)
 		if err := encoder.Encode(response); err != nil {
 			return
@@ -169,6 +183,16 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.createWorkspace(request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
+	case "agent.launch":
+		result, err = s.launchAgent(context.Background(), request.Params)
+	case "agent.prompt":
+		result, err = s.promptAgent(context.Background(), request.Params)
+	case "agent.interrupt":
+		result, err = s.interruptAgent(context.Background(), request.Params)
+	case "permission.list":
+		result = map[string]any{"permissions": s.listPermissions()}
+	case "permission.resolve":
+		result, err = s.resolvePermission(context.Background(), request.Params)
 	default:
 		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
 	}
@@ -201,7 +225,21 @@ func (s *Server) snapshot() Snapshot {
 	sort.Slice(terminals, func(left, right int) bool {
 		return terminals[left].CreatedAt.Before(terminals[right].CreatedAt)
 	})
-	return Snapshot{Workspaces: workspaces, Terminals: terminals}
+	agents := make([]Agent, 0, len(s.agents))
+	for _, entry := range s.agents {
+		agents = append(agents, entry.snapshot())
+	}
+	sort.Slice(agents, func(left, right int) bool {
+		return agents[left].CreatedAt.Before(agents[right].CreatedAt)
+	})
+	permissions := make([]PermissionRequest, 0, len(s.permissions))
+	for _, request := range s.permissions {
+		permissions = append(permissions, request)
+	}
+	sort.Slice(permissions, func(left, right int) bool {
+		return permissions[left].CreatedAt.Before(permissions[right].CreatedAt)
+	})
+	return Snapshot{Workspaces: workspaces, Terminals: terminals, Agents: agents, Permissions: permissions}
 }
 
 func (s *Server) closeTerminals() {

@@ -29,9 +29,9 @@ each vertical slice before broadening the surface.
 - [x] Agent adapter contract and capability model
 - [x] Claude Code interactive adapter
 - [x] OpenCode server adapter
-- [ ] Structured lifecycle and attention reasons
-- [ ] Native session identity and resume metadata
-- [ ] Unified permission inbox
+- [x] Structured lifecycle and attention reasons
+- [x] Native session identity and resume metadata
+- [x] Unified permission inbox
 
 ## M3: Tasks and review
 

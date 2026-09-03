@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/martintrifunov/orkestar/internal/agent/claude"
+	"github.com/martintrifunov/orkestar/internal/agent/opencode"
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/daemonclient"
@@ -127,7 +129,10 @@ func serveDaemon(paths runtimepath.Paths) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	return daemon.NewServer(paths.Socket).Serve(ctx)
+	server := daemon.NewServer(paths.Socket)
+	server.RegisterAdapter(claude.New(""))
+	server.RegisterAdapter(opencode.New("", nil))
+	return server.Serve(ctx)
 }
 
 func stopDaemon(paths runtimepath.Paths) error {
