@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
@@ -43,11 +44,55 @@ func run(args []string) error {
 		return printStatus(paths)
 	case "workspace":
 		return runWorkspace(paths, args[1:])
+	case "terminal":
+		return runTerminal(paths, args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
+	}
+}
+
+func runTerminal(paths runtimepath.Paths, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | orkestar terminal attach <terminal-id>")
+	}
+
+	switch args[0] {
+	case "start":
+		if len(args) < 3 {
+			return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...]")
+		}
+		commandIndex := 2
+		if args[commandIndex] == "--" {
+			commandIndex++
+		}
+		if commandIndex >= len(args) {
+			return errors.New("terminal command is required")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var terminal daemon.Terminal
+		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal.start", map[string]any{
+			"workspace_id": args[1],
+			"command":      args[commandIndex:],
+			"columns":      80,
+			"rows":         24,
+		}, &terminal); err != nil {
+			return err
+		}
+		fmt.Printf("%s\t%s\t%s\n", terminal.ID, terminal.State, terminal.Command[0])
+		return nil
+	case "attach":
+		if len(args) != 2 {
+			return errors.New("usage: orkestar terminal attach <terminal-id>")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return attach.Terminal(ctx, ipc.NewClient(paths.Socket), args[1], os.Stdin, os.Stdout)
+	default:
+		return fmt.Errorf("unknown terminal command %q", args[0])
 	}
 }
 
@@ -110,6 +155,10 @@ Usage:
   orkestar daemon serve
   orkestar status
   orkestar workspace create [directory]
+  orkestar terminal start <workspace-id> -- <command> [args...]
+  orkestar terminal attach <terminal-id>
   orkestar help
+
+Detach from an attached terminal with ctrl+b q.
 `)
 }

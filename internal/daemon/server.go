@@ -29,6 +29,7 @@ type Workspace struct {
 
 type Snapshot struct {
 	Workspaces []Workspace `json:"workspaces"`
+	Terminals  []Terminal  `json:"terminals"`
 }
 
 type Server struct {
@@ -37,12 +38,14 @@ type Server struct {
 	mu         sync.RWMutex
 	listener   net.Listener
 	workspaces map[string]Workspace
+	terminals  map[string]*terminalSession
 }
 
 func NewServer(socketPath string) *Server {
 	return &Server{
 		socketPath: socketPath,
 		workspaces: make(map[string]Workspace),
+		terminals:  make(map[string]*terminalSession),
 	}
 }
 
@@ -74,6 +77,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}()
 
 	defer func() {
+		s.closeTerminals()
 		s.mu.Lock()
 		s.listener = nil
 		s.mu.Unlock()
@@ -122,6 +126,10 @@ func (s *Server) handleConnection(connection net.Conn) {
 			_ = encoder.Encode(ipc.NewErrorResponse("", "invalid_request", "request is not valid JSON"))
 			continue
 		}
+		if request.Method == "terminal.attach" {
+			s.handleTerminalAttach(connection, scanner, encoder, request)
+			return
+		}
 		response := s.handleRequest(request)
 		if err := encoder.Encode(response); err != nil {
 			return
@@ -149,6 +157,8 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result = s.snapshot()
 	case "workspace.create":
 		result, err = s.createWorkspace(request.Params)
+	case "terminal.start":
+		result, err = s.startTerminal(request.Params)
 	default:
 		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
 	}
@@ -171,7 +181,23 @@ func (s *Server) snapshot() Snapshot {
 	for _, workspace := range s.workspaces {
 		workspaces = append(workspaces, workspace)
 	}
-	return Snapshot{Workspaces: workspaces}
+	terminals := make([]Terminal, 0, len(s.terminals))
+	for _, session := range s.terminals {
+		terminals = append(terminals, session.snapshot())
+	}
+	return Snapshot{Workspaces: workspaces, Terminals: terminals}
+}
+
+func (s *Server) closeTerminals() {
+	s.mu.RLock()
+	terminals := make([]*terminalSession, 0, len(s.terminals))
+	for _, session := range s.terminals {
+		terminals = append(terminals, session)
+	}
+	s.mu.RUnlock()
+	for _, session := range terminals {
+		_ = session.close()
+	}
 }
 
 func (s *Server) createWorkspace(rawParams json.RawMessage) (Workspace, error) {
