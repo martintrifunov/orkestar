@@ -39,7 +39,7 @@ each vertical slice before broadening the surface.
 - [x] Git worktree association
 - [x] Diff and changed-file TUI
 - [x] Test/log/diff artifacts
-- [ ] Reviewer-agent workflow
+- [x] Reviewer-agent workflow
 - [x] Resource leases
 
 ## M4: MCP gateway

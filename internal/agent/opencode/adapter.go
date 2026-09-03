@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,15 +105,28 @@ func (a *Adapter) requireSessionExists(ctx context.Context, sessionID string) er
 	return fmt.Errorf("session %q not found on server", sessionID)
 }
 
-func (a *Adapter) prompt(ctx context.Context, sessionID, text string) error {
+func (a *Adapter) prompt(ctx context.Context, sessionID, text string) (string, error) {
 	body := map[string]any{
 		"parts": []map[string]string{{"type": "text", "text": text}},
 	}
-	path := fmt.Sprintf("/session/%s/message", sessionID)
-	if err := a.doJSON(ctx, http.MethodPost, path, body, nil); err != nil {
-		return fmt.Errorf("send prompt: %w", err)
+	var response struct {
+		Parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"parts"`
 	}
-	return nil
+	path := fmt.Sprintf("/session/%s/message", sessionID)
+	if err := a.doJSON(ctx, http.MethodPost, path, body, &response); err != nil {
+		return "", fmt.Errorf("send prompt: %w", err)
+	}
+
+	var reply strings.Builder
+	for _, part := range response.Parts {
+		if part.Type == "text" {
+			reply.WriteString(part.Text)
+		}
+	}
+	return reply.String(), nil
 }
 
 func (a *Adapter) abort(ctx context.Context, sessionID string) error {
@@ -172,7 +186,10 @@ type Session struct {
 	events chan agent.LifecycleEvent
 }
 
-var _ agent.Session = (*Session)(nil)
+var (
+	_ agent.Session           = (*Session)(nil)
+	_ agent.ResponsiveSession = (*Session)(nil)
+)
 
 func (s *Session) ID() string              { return s.id }
 func (s *Session) NativeSessionID() string { return s.id }
@@ -186,14 +203,21 @@ func (s *Session) State() agent.State {
 // Prompt sends a message to the session and blocks until OpenCode finishes
 // the turn, mirroring the server's synchronous /session/:id/message call.
 func (s *Session) Prompt(ctx context.Context, text string) error {
+	_, err := s.PromptForResponse(ctx, text)
+	return err
+}
+
+// PromptForResponse sends a message and returns OpenCode's reply text,
+// concatenating every text part of the response.
+func (s *Session) PromptForResponse(ctx context.Context, text string) (string, error) {
 	s.emit(agent.StateWorking, "prompted")
-	err := s.adapter.prompt(ctx, s.id, text)
+	reply, err := s.adapter.prompt(ctx, s.id, text)
 	if err != nil {
 		s.emit(agent.StateReady, "prompt failed")
-		return fmt.Errorf("opencode session: %w", err)
+		return "", fmt.Errorf("opencode session: %w", err)
 	}
 	s.emit(agent.StateReady, "prompt completed")
-	return nil
+	return reply, nil
 }
 
 // Interrupt aborts the session's current turn.

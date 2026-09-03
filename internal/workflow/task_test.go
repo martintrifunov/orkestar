@@ -10,7 +10,7 @@ func TestCreateRejectsMissingDependency(t *testing.T) {
 	t.Parallel()
 
 	board := workflow.NewBoard()
-	if _, err := board.Create("ws", "build", "", []string{"missing"}); err == nil {
+	if _, err := board.Create("ws", "build", "", []string{"missing"}, true); err == nil {
 		t.Fatal("expected create to fail for a missing dependency")
 	}
 }
@@ -19,11 +19,11 @@ func TestSetStatusBlocksOnIncompleteDependency(t *testing.T) {
 	t.Parallel()
 
 	board := workflow.NewBoard()
-	dependency, err := board.Create("ws", "write tests", "", nil)
+	dependency, err := board.Create("ws", "write tests", "", nil, true)
 	if err != nil {
 		t.Fatalf("create dependency: %v", err)
 	}
-	task, err := board.Create("ws", "ship feature", "", []string{dependency.ID})
+	task, err := board.Create("ws", "ship feature", "", []string{dependency.ID}, true)
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSetStatusRejectsUnknownValue(t *testing.T) {
 	t.Parallel()
 
 	board := workflow.NewBoard()
-	task, err := board.Create("ws", "task", "", nil)
+	task, err := board.Create("ws", "task", "", nil, true)
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -61,11 +61,11 @@ func TestAssignAndList(t *testing.T) {
 	t.Parallel()
 
 	board := workflow.NewBoard()
-	first, err := board.Create("ws", "first", "", nil)
+	first, err := board.Create("ws", "first", "", nil, true)
 	if err != nil {
 		t.Fatalf("create first: %v", err)
 	}
-	second, err := board.Create("ws", "second", "", nil)
+	second, err := board.Create("ws", "second", "", nil, true)
 	if err != nil {
 		t.Fatalf("create second: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestSetWorktree(t *testing.T) {
 	t.Parallel()
 
 	board := workflow.NewBoard()
-	task, err := board.Create("ws", "task", "", nil)
+	task, err := board.Create("ws", "task", "", nil, true)
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}

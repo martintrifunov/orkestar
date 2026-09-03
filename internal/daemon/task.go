@@ -16,6 +16,10 @@ func (s *Server) createTask(rawParams json.RawMessage) (workflow.Task, error) {
 		Title       string   `json:"title"`
 		Description string   `json:"description"`
 		DependsOn   []string `json:"depends_on"`
+		// AutoReview defaults to true (a reviewer-agent verdict is
+		// required before the task can move to done) unless the caller
+		// explicitly opts out.
+		AutoReview *bool `json:"auto_review"`
 	}
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return workflow.Task{}, fmt.Errorf("decode task create params: %w", err)
@@ -28,10 +32,11 @@ func (s *Server) createTask(rawParams json.RawMessage) (workflow.Task, error) {
 		return workflow.Task{}, fmt.Errorf("workspace %q does not exist", params.WorkspaceID)
 	}
 
-	return s.tasks.Create(params.WorkspaceID, params.Title, params.Description, params.DependsOn)
+	autoReview := params.AutoReview == nil || *params.AutoReview
+	return s.tasks.Create(params.WorkspaceID, params.Title, params.Description, params.DependsOn, autoReview)
 }
 
-func (s *Server) setTaskStatus(rawParams json.RawMessage) (workflow.Task, error) {
+func (s *Server) setTaskStatus(ctx context.Context, rawParams json.RawMessage) (workflow.Task, error) {
 	var params struct {
 		TaskID string `json:"task_id"`
 		Status string `json:"status"`
@@ -39,6 +44,23 @@ func (s *Server) setTaskStatus(rawParams json.RawMessage) (workflow.Task, error)
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return workflow.Task{}, fmt.Errorf("decode task update params: %w", err)
 	}
+
+	if workflow.Status(params.Status) == workflow.StatusDone {
+		task, err := s.tasks.Get(params.TaskID)
+		if err != nil {
+			return workflow.Task{}, err
+		}
+		if task.AutoReview {
+			outcome, err := s.runAutomaticReview(ctx, task)
+			if err != nil {
+				return workflow.Task{}, fmt.Errorf("automatic review: %w", err)
+			}
+			if !outcome.Approved {
+				return workflow.Task{}, fmt.Errorf("reviewer requested changes: %s", outcome.Reason)
+			}
+		}
+	}
+
 	return s.tasks.SetStatus(params.TaskID, workflow.Status(params.Status))
 }
 

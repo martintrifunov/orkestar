@@ -108,6 +108,19 @@ type Session interface {
 	Close() error
 }
 
+// ResponsiveSession is an optional extension of Session for adapters that
+// can return the agent's reply text for a prompt, rather than only
+// delivering it and reporting lifecycle status. Callers that need
+// structured output — such as a reviewer-agent verdict — should type-assert
+// for this rather than assuming every Session supports it: PTY-backed
+// interactive sessions generally cannot, since their output is terminal
+// bytes, not a discrete reply.
+type ResponsiveSession interface {
+	Session
+	// PromptForResponse sends text to the agent and returns its reply.
+	PromptForResponse(ctx context.Context, text string) (string, error)
+}
+
 // Adapter launches and describes a specific agent integration.
 type Adapter interface {
 	// Capabilities describes what this adapter supports.

@@ -58,12 +58,19 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureServer) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		fixture.mu.Lock()
+		var sent string
 		if len(body.Parts) > 0 {
-			fixture.prompts = append(fixture.prompts, body.Parts[0].Text)
+			sent = body.Parts[0].Text
+			fixture.prompts = append(fixture.prompts, sent)
 		}
 		fixture.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"info": map[string]string{}, "parts": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"info": map[string]string{},
+			"parts": []map[string]string{
+				{"type": "text", "text": "echo: " + sent},
+			},
+		})
 	})
 	mux.HandleFunc("/session/ses_1/abort", func(w http.ResponseWriter, r *http.Request) {
 		fixture.mu.Lock()
@@ -146,6 +153,33 @@ func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {
 	fixture.mu.Unlock()
 	if aborted != "ses_1" {
 		t.Fatalf("expected session ses_1 to be aborted, got %q", aborted)
+	}
+}
+
+func TestSessionPromptForResponse(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newFixtureServer(t)
+	adapter := opencode.New(server.URL, server.Client())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	session, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: agent.ModeManaged})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer session.Close()
+
+	responsive, ok := session.(agent.ResponsiveSession)
+	if !ok {
+		t.Fatal("expected opencode session to implement agent.ResponsiveSession")
+	}
+	reply, err := responsive.PromptForResponse(ctx, "hello")
+	if err != nil {
+		t.Fatalf("prompt for response: %v", err)
+	}
+	if reply != "echo: hello" {
+		t.Fatalf("unexpected reply: %q", reply)
 	}
 }
 

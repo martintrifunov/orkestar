@@ -43,18 +43,19 @@ type Snapshot struct {
 type Server struct {
 	socketPath string
 
-	mu          sync.RWMutex
-	listener    net.Listener
-	workspaces  map[string]Workspace
-	terminals   map[string]*terminalSession
-	adapters    map[string]agent.Adapter
-	agents      map[string]*agentSession
-	permissions map[string]PermissionRequest
-	tasks       *workflow.Board
-	leases      *workflow.LeaseManager
-	artifacts   *workflow.ArtifactStore
-	stop        chan struct{}
-	stopOnce    sync.Once
+	mu              sync.RWMutex
+	listener        net.Listener
+	workspaces      map[string]Workspace
+	terminals       map[string]*terminalSession
+	adapters        map[string]agent.Adapter
+	agents          map[string]*agentSession
+	permissions     map[string]PermissionRequest
+	tasks           *workflow.Board
+	leases          *workflow.LeaseManager
+	artifacts       *workflow.ArtifactStore
+	reviewerAdapter string
+	stop            chan struct{}
+	stopOnce        sync.Once
 }
 
 func NewServer(socketPath string) *Server {
@@ -206,7 +207,7 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 	case "task.create":
 		result, err = s.createTask(request.Params)
 	case "task.setStatus":
-		result, err = s.setTaskStatus(request.Params)
+		result, err = s.setTaskStatus(context.Background(), request.Params)
 	case "task.assign":
 		result, err = s.assignTask(request.Params)
 	case "task.createWorktree":

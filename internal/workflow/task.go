@@ -35,17 +35,21 @@ func (s Status) valid() bool {
 // assignee. Dependencies are other task IDs that must reach StatusDone
 // before this task may move to StatusInProgress.
 type Task struct {
-	ID              string    `json:"id"`
-	WorkspaceID     string    `json:"workspace_id"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description,omitempty"`
-	DependsOn       []string  `json:"depends_on,omitempty"`
-	AssigneeAgentID string    `json:"assignee_agent_id,omitempty"`
-	WorktreePath    string    `json:"worktree_path,omitempty"`
-	WorktreeBranch  string    `json:"worktree_branch,omitempty"`
-	Status          Status    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string   `json:"id"`
+	WorkspaceID     string   `json:"workspace_id"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description,omitempty"`
+	DependsOn       []string `json:"depends_on,omitempty"`
+	AssigneeAgentID string   `json:"assignee_agent_id,omitempty"`
+	WorktreePath    string   `json:"worktree_path,omitempty"`
+	WorktreeBranch  string   `json:"worktree_branch,omitempty"`
+	// AutoReview, when true, requires a reviewer-agent verdict before the
+	// task may move to StatusDone. Callers that don't want that gate must
+	// opt out explicitly when creating the task.
+	AutoReview bool      `json:"auto_review"`
+	Status     Status    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // Board tracks tasks across workspaces and enforces dependency and
@@ -63,8 +67,9 @@ func NewBoard() *Board {
 
 // Create adds a new task. DependsOn entries must reference existing tasks;
 // since a task can only depend on tasks that already exist, the dependency
-// graph is a DAG by construction.
-func (b *Board) Create(workspaceID, title, description string, dependsOn []string) (Task, error) {
+// graph is a DAG by construction. autoReview sets whether the task requires
+// a reviewer-agent verdict before it can move to StatusDone.
+func (b *Board) Create(workspaceID, title, description string, dependsOn []string, autoReview bool) (Task, error) {
 	if title == "" {
 		return Task{}, errors.New("task title is required")
 	}
@@ -89,6 +94,7 @@ func (b *Board) Create(workspaceID, title, description string, dependsOn []strin
 		Title:       title,
 		Description: description,
 		DependsOn:   append([]string(nil), dependsOn...),
+		AutoReview:  autoReview,
 		Status:      StatusPending,
 		CreatedAt:   now,
 		UpdatedAt:   now,
