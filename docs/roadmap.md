@@ -12,16 +12,16 @@ each vertical slice before broadening the surface.
 
 ## M1: Persistent terminal vertical slice
 
-- [ ] Single Orkestar executable
-- [ ] Local daemon discovery and startup
-- [ ] Versioned IPC ping and snapshot methods
-- [ ] Workspace creation
-- [ ] PTY-backed command launch
-- [ ] Terminal output subscription
-- [ ] Terminal input and resize
-- [ ] TUI workspace and terminal views
-- [ ] Detach and reattach without stopping the process
-- [ ] Graceful explicit daemon shutdown
+- [x] Single Orkestar executable
+- [x] Local daemon discovery and startup
+- [x] Versioned IPC ping and snapshot methods
+- [x] Workspace creation
+- [x] PTY-backed command launch
+- [x] Terminal output subscription
+- [x] Terminal input and resize
+- [x] TUI workspace and terminal views
+- [x] Detach and reattach without stopping the process
+- [x] Graceful explicit daemon shutdown
 - [x] Lifecycle and reconnect tests
 
 ## M2: Agent awareness
