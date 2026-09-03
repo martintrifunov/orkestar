@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,6 +201,78 @@ func TestTaskWorktreeCreateAndRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(withWorktree.WorktreePath); !os.IsNotExist(err) {
 		t.Fatalf("expected worktree directory to be removed, stat err: %v", err)
+	}
+}
+
+func TestTaskDiff(t *testing.T) {
+	t.Parallel()
+
+	repoDirectory := initRepo(t)
+	socketDirectory, err := os.MkdirTemp("/tmp", "orkestar-task-diff-test-")
+	if err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
+	socketPath := filepath.Join(socketDirectory, "orkestar.sock")
+
+	server := daemon.NewServer(socketPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-serverError; err != nil {
+			t.Errorf("server shutdown: %v", err)
+		}
+	})
+
+	client := ipc.NewClient(socketPath)
+	waitForServer(t, client)
+	callContext, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer callCancel()
+
+	var workspace daemon.Workspace
+	if err := client.Call(callContext, "workspace.create", map[string]string{
+		"directory": repoDirectory,
+	}, &workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	var task workflow.Task
+	if err := client.Call(callContext, "task.create", map[string]any{
+		"workspace_id": workspace.ID,
+		"title":        "diffable work",
+	}, &task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	var diff daemon.TaskDiff
+	if err := client.Call(callContext, "task.diff", map[string]string{
+		"task_id": task.ID,
+	}, &diff); err == nil {
+		t.Fatal("expected task diff to fail before a worktree exists")
+	}
+
+	var withWorktree workflow.Task
+	if err := client.Call(callContext, "task.createWorktree", map[string]string{
+		"task_id": task.ID,
+	}, &withWorktree); err != nil {
+		t.Fatalf("create task worktree: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(withWorktree.WorktreePath, "README.md"), []byte("hello\nchanged\n"), 0o644); err != nil {
+		t.Fatalf("modify worktree file: %v", err)
+	}
+
+	if err := client.Call(callContext, "task.diff", map[string]string{
+		"task_id": task.ID,
+	}, &diff); err != nil {
+		t.Fatalf("task diff: %v", err)
+	}
+	if len(diff.Files) != 1 || diff.Files[0].Path != "README.md" {
+		t.Fatalf("unexpected changed files: %#v", diff.Files)
+	}
+	if !strings.Contains(diff.Diff, "README.md") || !strings.Contains(diff.Diff, "+changed") {
+		t.Fatalf("unexpected diff content: %q", diff.Diff)
 	}
 }
 

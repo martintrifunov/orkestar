@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,45 @@ func TestAddWorktreeReusesExistingBranch(t *testing.T) {
 	secondPath := filepath.Join(t.TempDir(), "second")
 	if err := git.AddWorktree(ctx, repoDir, secondPath, "shared"); err != nil {
 		t.Fatalf("add second worktree reusing branch: %v", err)
+	}
+}
+
+func TestChangedFilesAndDiff(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if files, err := git.ChangedFiles(ctx, repoDir); err != nil || len(files) != 0 {
+		t.Fatalf("expected no changed files on a clean repo, got %#v, err %v", files, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("modify README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "NEW.md"), []byte("new file\n"), 0o644); err != nil {
+		t.Fatalf("write NEW.md: %v", err)
+	}
+
+	files, err := git.ChangedFiles(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("changed files: %v", err)
+	}
+	paths := make(map[string]bool)
+	for _, file := range files {
+		paths[file.Path] = true
+	}
+	if !paths["README.md"] || !paths["NEW.md"] {
+		t.Fatalf("expected README.md and NEW.md in changed files, got %#v", files)
+	}
+
+	diff, err := git.Diff(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if !strings.Contains(diff, "README.md") || !strings.Contains(diff, "+world") {
+		t.Fatalf("expected diff to mention README.md changes, got %q", diff)
 	}
 }
 

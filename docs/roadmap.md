@@ -37,7 +37,7 @@ each vertical slice before broadening the surface.
 
 - [x] Tasks, dependencies, and assignments
 - [x] Git worktree association
-- [ ] Diff and changed-file TUI
+- [x] Diff and changed-file TUI
 - [x] Test/log/diff artifacts
 - [ ] Reviewer-agent workflow
 - [x] Resource leases

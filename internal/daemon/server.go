@@ -213,6 +213,8 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.createTaskWorktree(context.Background(), request.Params)
 	case "task.removeWorktree":
 		result, err = s.removeTaskWorktree(context.Background(), request.Params)
+	case "task.diff":
+		result, err = s.taskDiff(context.Background(), request.Params)
 	case "resource.acquire":
 		result, err = s.acquireLease(request.Params)
 	case "resource.release":

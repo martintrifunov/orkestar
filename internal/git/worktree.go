@@ -68,7 +68,45 @@ func runGit(ctx context.Context, args ...string) (string, error) {
 	command.Stdout = &output
 	command.Stderr = &output
 	err := command.Run()
-	return strings.TrimSpace(output.String()), err
+	return strings.TrimRight(output.String(), "\n"), err
+}
+
+// ChangedFile is one entry from `git status --porcelain`.
+type ChangedFile struct {
+	Path   string
+	Status string
+}
+
+// ChangedFiles lists files with uncommitted changes (staged, unstaged, or
+// untracked) in repoDir.
+func ChangedFiles(ctx context.Context, repoDir string) ([]ChangedFile, error) {
+	output, err := runGit(ctx, "-C", repoDir, "status", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("status %q: %w: %s", repoDir, err, output)
+	}
+	if output == "" {
+		return nil, nil
+	}
+
+	var files []ChangedFile
+	for _, line := range strings.Split(output, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		files = append(files, ChangedFile{Status: line[:2], Path: strings.TrimSpace(line[3:])})
+	}
+	return files, nil
+}
+
+// Diff returns the unified diff of uncommitted changes in repoDir,
+// covering both staged and unstaged changes against HEAD. It does not
+// include untracked files; use ChangedFiles to see those.
+func Diff(ctx context.Context, repoDir string) (string, error) {
+	output, err := runGit(ctx, "-C", repoDir, "diff", "--no-color", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("diff %q: %w: %s", repoDir, err, output)
+	}
+	return output, nil
 }
 
 func parseWorktreeList(output string) []Worktree {

@@ -89,6 +89,42 @@ func (s *Server) createTaskWorktree(ctx context.Context, rawParams json.RawMessa
 	return s.tasks.SetWorktree(task.ID, worktreePath, branch)
 }
 
+// TaskDiff is the changed-file summary and unified diff for a task's
+// worktree.
+type TaskDiff struct {
+	Files []git.ChangedFile `json:"files"`
+	Diff  string            `json:"diff"`
+}
+
+// taskDiff returns the changed files and diff for a task's worktree. The
+// task must already have one, created via task.createWorktree.
+func (s *Server) taskDiff(ctx context.Context, rawParams json.RawMessage) (TaskDiff, error) {
+	var params struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return TaskDiff{}, fmt.Errorf("decode task diff params: %w", err)
+	}
+
+	task, err := s.tasks.Get(params.TaskID)
+	if err != nil {
+		return TaskDiff{}, err
+	}
+	if task.WorktreePath == "" {
+		return TaskDiff{}, fmt.Errorf("task %q has no worktree", task.ID)
+	}
+
+	files, err := git.ChangedFiles(ctx, task.WorktreePath)
+	if err != nil {
+		return TaskDiff{}, fmt.Errorf("list changed files: %w", err)
+	}
+	diff, err := git.Diff(ctx, task.WorktreePath)
+	if err != nil {
+		return TaskDiff{}, fmt.Errorf("diff worktree: %w", err)
+	}
+	return TaskDiff{Files: files, Diff: diff}, nil
+}
+
 // removeTaskWorktree removes a task's git worktree from disk and clears
 // its worktree metadata.
 func (s *Server) removeTaskWorktree(ctx context.Context, rawParams json.RawMessage) (workflow.Task, error) {
