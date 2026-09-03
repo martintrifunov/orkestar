@@ -1,8 +1,9 @@
-// Package opencode implements the OpenCode managed agent adapter. It talks
-// to an already-running OpenCode HTTP server (`opencode serve`, default
-// http://localhost:4096) rather than owning a PTY. Structured lifecycle
-// events from the server's SSE stream and interactive PTY fallback are not
-// implemented yet.
+// Package opencode implements the OpenCode agent adapter. Interactive mode
+// launches the installed `opencode` executable inside a PTY, the same way
+// the claude adapter does. Managed mode instead talks to an already-running
+// OpenCode HTTP server (`opencode serve`, default http://localhost:4096)
+// and returns structured replies, which interactive mode cannot. Structured
+// lifecycle events from the server's SSE stream are not implemented yet.
 package opencode
 
 import (
@@ -17,33 +18,44 @@ import (
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
+	"github.com/martintrifunov/orkestar/internal/agent/ptysession"
 )
 
-const defaultBaseURL = "http://localhost:4096"
+const (
+	defaultBaseURL    = "http://localhost:4096"
+	defaultExecutable = "opencode"
+)
 
-// Adapter drives an OpenCode server over its HTTP API.
+// Adapter drives OpenCode either interactively in a PTY or, in managed
+// mode, over its HTTP API.
 type Adapter struct {
-	baseURL string
-	client  *http.Client
+	executable string
+	baseURL    string
+	client     *http.Client
 }
 
-// New returns an Adapter targeting the given OpenCode server base URL. An
-// empty baseURL defaults to http://localhost:4096. A nil client uses
-// http.DefaultClient.
-func New(baseURL string, client *http.Client) *Adapter {
+// New returns an Adapter. executable is the CLI used for interactive mode
+// (empty defaults to "opencode" resolved from PATH). baseURL and client
+// configure managed mode (empty baseURL defaults to
+// http://localhost:4096; a nil client uses http.DefaultClient). Tests can
+// point executable at a fixture script instead of a real OpenCode install.
+func New(executable, baseURL string, client *http.Client) *Adapter {
+	if executable == "" {
+		executable = defaultExecutable
+	}
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &Adapter{baseURL: baseURL, client: client}
+	return &Adapter{executable: executable, baseURL: baseURL, client: client}
 }
 
 func (a *Adapter) Capabilities() agent.Capabilities {
 	return agent.Capabilities{
 		Name:                "opencode",
-		SupportsInteractive: false,
+		SupportsInteractive: true,
 		SupportsManaged:     true,
 		SupportsPrompt:      true,
 		SupportsInterrupt:   true,
@@ -52,6 +64,16 @@ func (a *Adapter) Capabilities() agent.Capabilities {
 }
 
 func (a *Adapter) Launch(ctx context.Context, options agent.LaunchOptions) (agent.Session, error) {
+	if options.Mode == agent.ModeInteractive {
+		if options.ResumeSessionID != "" {
+			return nil, errors.New("opencode adapter: resume is not supported in interactive mode")
+		}
+		session, err := ptysession.Launch("opencode", a.executable, options)
+		if err != nil {
+			return nil, fmt.Errorf("opencode adapter: %w", err)
+		}
+		return session, nil
+	}
 	if options.Mode != agent.ModeManaged {
 		return nil, fmt.Errorf("opencode adapter: mode %q is not supported", options.Mode)
 	}

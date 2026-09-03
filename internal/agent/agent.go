@@ -6,6 +6,8 @@ package agent
 import (
 	"context"
 	"time"
+
+	"github.com/martintrifunov/orkestar/internal/pty"
 )
 
 // State is a coarse agent lifecycle state, as described in
@@ -39,22 +41,22 @@ const (
 // adapt rather than assume uniform behavior across agents.
 type Capabilities struct {
 	// Name identifies the adapter, e.g. "claude-code" or "opencode".
-	Name string
+	Name string `json:"name"`
 	// SupportsInteractive is true when the adapter can launch the agent in
 	// an interactive PTY.
-	SupportsInteractive bool
+	SupportsInteractive bool `json:"supports_interactive"`
 	// SupportsManaged is true when the adapter can launch the agent in
 	// managed mode with structured lifecycle events.
-	SupportsManaged bool
+	SupportsManaged bool `json:"supports_managed"`
 	// SupportsPrompt is true when the adapter can accept a prompt without a
 	// human typing into the terminal.
-	SupportsPrompt bool
+	SupportsPrompt bool `json:"supports_prompt"`
 	// SupportsInterrupt is true when the adapter can interrupt an
 	// in-progress turn.
-	SupportsInterrupt bool
+	SupportsInterrupt bool `json:"supports_interrupt"`
 	// SupportsResume is true when the adapter can resume a native session
 	// by ID after a restart or reattachment.
-	SupportsResume bool
+	SupportsResume bool `json:"supports_resume"`
 }
 
 // LaunchOptions configures a new agent session.
@@ -119,6 +121,17 @@ type ResponsiveSession interface {
 	Session
 	// PromptForResponse sends text to the agent and returns its reply.
 	PromptForResponse(ctx context.Context, text string) (string, error)
+}
+
+// ProcessSession is an optional extension of Session for interactive,
+// PTY-backed sessions. The daemon type-asserts for this after Launch so it
+// can bridge the session into the same terminal buffer/subscriber/input
+// machinery used by plain terminal sessions, giving callers a real
+// attachable terminal instead of a second, parallel notion of "output".
+type ProcessSession interface {
+	Session
+	// Process returns the underlying PTY process.
+	Process() *pty.Process
 }
 
 // Adapter launches and describes a specific agent integration.

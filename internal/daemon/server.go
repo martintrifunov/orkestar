@@ -31,13 +31,14 @@ type Workspace struct {
 }
 
 type Snapshot struct {
-	Workspaces  []Workspace         `json:"workspaces"`
-	Terminals   []Terminal          `json:"terminals"`
-	Agents      []Agent             `json:"agents"`
-	Permissions []PermissionRequest `json:"permissions"`
-	Tasks       []workflow.Task     `json:"tasks"`
-	Leases      []workflow.Lease    `json:"leases"`
-	Artifacts   []workflow.Artifact `json:"artifacts"`
+	Workspaces  []Workspace          `json:"workspaces"`
+	Terminals   []Terminal           `json:"terminals"`
+	Agents      []Agent              `json:"agents"`
+	Permissions []PermissionRequest  `json:"permissions"`
+	Tasks       []workflow.Task      `json:"tasks"`
+	Leases      []workflow.Lease     `json:"leases"`
+	Artifacts   []workflow.Artifact  `json:"artifacts"`
+	Adapters    []agent.Capabilities `json:"adapters"`
 }
 
 type Server struct {
@@ -268,6 +269,14 @@ func (s *Server) snapshot() Snapshot {
 	sort.Slice(permissions, func(left, right int) bool {
 		return permissions[left].CreatedAt.Before(permissions[right].CreatedAt)
 	})
+	adapters := make([]agent.Capabilities, 0, len(s.adapters))
+	for _, registered := range s.adapters {
+		adapters = append(adapters, registered.Capabilities())
+	}
+	sort.Slice(adapters, func(left, right int) bool {
+		return adapters[left].Name < adapters[right].Name
+	})
+
 	return Snapshot{
 		Workspaces:  workspaces,
 		Terminals:   terminals,
@@ -276,6 +285,7 @@ func (s *Server) snapshot() Snapshot {
 		Tasks:       s.tasks.List(),
 		Leases:      s.leases.ListAll(),
 		Artifacts:   s.artifacts.List(),
+		Adapters:    adapters,
 	}
 }
 

@@ -114,8 +114,21 @@ the same:
 - emit structured lifecycle and permission events.
 
 Claude Code initially uses an interactive PTY. Its managed mode may consume
-streaming JSON or an optional SDK bridge. OpenCode initially uses its local
-HTTP server and event stream, with PTY mode as fallback.
+streaming JSON or an optional SDK bridge. OpenCode supports both: an
+interactive PTY the same way Claude Code does, and a managed mode over its
+local HTTP server for structured replies (used by the reviewer-agent
+workflow). Both interactive adapters share one PTY-backed Session
+implementation (`internal/agent/ptysession`) so a future interactive adapter
+does not reimplement PTY lifecycle, prompt/interrupt, or lifecycle-event
+plumbing.
+
+An interactive agent session is not a second, parallel notion of "terminal
+output". A session whose adapter exposes the underlying PTY process
+(`agent.ProcessSession`) is bridged by the daemon into the same terminal
+buffer/subscriber/input machinery used by plain terminal sessions
+(`terminal.start`), and gets a terminal ID a client can attach to with the
+ordinary `terminal.attach` — there is one terminal-attach mechanism, not one
+for plain commands and a different one for agents.
 
 ## MCP and game engines
 

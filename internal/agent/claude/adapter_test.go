@@ -78,11 +78,11 @@ func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {
 		t.Fatalf("interrupt: %v", err)
 	}
 
-	claudeSession, ok := session.(*claude.Session)
+	processSession, ok := session.(agent.ProcessSession)
 	if !ok {
-		t.Fatal("expected *claude.Session")
+		t.Fatal("expected session to implement agent.ProcessSession")
 	}
-	if err := claudeSession.Process().Close(); err != nil {
+	if err := processSession.Process().Close(); err != nil {
 		t.Fatalf("close process: %v", err)
 	}
 

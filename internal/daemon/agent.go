@@ -15,14 +15,20 @@ import (
 // session: structured lifecycle state plus whatever native identity the
 // adapter exposes for resume.
 type Agent struct {
-	ID              string    `json:"id"`
-	WorkspaceID     string    `json:"workspace_id"`
-	Adapter         string    `json:"adapter"`
-	Mode            string    `json:"mode"`
-	NativeSessionID string    `json:"native_session_id,omitempty"`
-	State           string    `json:"state"`
-	AttentionReason string    `json:"attention_reason,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string `json:"id"`
+	WorkspaceID     string `json:"workspace_id"`
+	Adapter         string `json:"adapter"`
+	Mode            string `json:"mode"`
+	NativeSessionID string `json:"native_session_id,omitempty"`
+	State           string `json:"state"`
+	AttentionReason string `json:"attention_reason,omitempty"`
+	// TerminalID is set for interactive, PTY-backed agent sessions
+	// (agent.Session implementing agent.ProcessSession): the daemon bridges
+	// the underlying PTY into the same terminal buffer/subscriber machinery
+	// used by plain terminal sessions, so this ID can be attached to with
+	// terminal.attach exactly like any other terminal.
+	TerminalID string    `json:"terminal_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // PermissionRequest is a pending attention item an agent has raised that a
@@ -199,6 +205,29 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		State:           string(session.State()),
 		CreatedAt:       time.Now().UTC(),
 	}
+
+	if processSession, ok := session.(agent.ProcessSession); ok {
+		terminalID, terr := newID("term")
+		if terr != nil {
+			_ = session.Close()
+			return Agent{}, terr
+		}
+		terminalMetadata := Terminal{
+			ID:          terminalID,
+			WorkspaceID: params.WorkspaceID,
+			Command:     []string{"agent:" + params.Adapter},
+			Directory:   workspace.Directory,
+			State:       "running",
+			CreatedAt:   metadata.CreatedAt,
+		}
+		terminal := newTerminalSession(terminalMetadata, processSession.Process())
+		metadata.TerminalID = terminalID
+
+		s.mu.Lock()
+		s.terminals[terminalID] = terminal
+		s.mu.Unlock()
+	}
+
 	entry := newAgentSession(metadata, session)
 
 	s.mu.Lock()

@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
@@ -27,7 +30,19 @@ func sampleSnapshot() daemon.Snapshot {
 			ID: "artifact_1", TaskID: "task_1", Kind: workflow.ArtifactReview,
 			Content: "VERDICT: REJECT\nMissing tests.", CreatedAt: now,
 		}},
+		Adapters: []agent.Capabilities{
+			{Name: "claude-code", SupportsInteractive: true, SupportsPrompt: true, SupportsInterrupt: true},
+			{Name: "opencode", SupportsInteractive: true, SupportsManaged: true, SupportsPrompt: true, SupportsInterrupt: true, SupportsResume: true},
+		},
 	}
+}
+
+func key(text string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Text: text}
+}
+
+func specialKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
 }
 
 func TestRenderShowsAgentsAndPermissions(t *testing.T) {
@@ -46,6 +61,94 @@ func TestRenderNarrowWidthStacksPanels(t *testing.T) {
 	output := model.render()
 	if !strings.Contains(output, "Agents") || !strings.Contains(output, "Tasks") {
 		t.Fatalf("expected stacked layout to still include all panels, got:\n%s", output)
+	}
+}
+
+func TestPressingAOpensAgentPicker(t *testing.T) {
+	model := Model{snapshot: sampleSnapshot(), width: 140, height: 40}
+
+	updated, cmd := model.Update(key("a"))
+	next := updated.(Model)
+
+	if !next.pickingAgent {
+		t.Fatal("expected pressing 'a' to open the agent picker")
+	}
+	if cmd != nil {
+		t.Fatal("expected opening the picker not to produce a command")
+	}
+
+	output := next.render()
+	for _, want := range []string{"New agent", "claude-code", "interactive", "opencode"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected picker render to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestAgentPickerNavigationAndCancel(t *testing.T) {
+	model := Model{snapshot: sampleSnapshot(), width: 140, height: 40, pickingAgent: true}
+
+	updated, _ := model.Update(specialKey(tea.KeyDown))
+	model = updated.(Model)
+	if model.agentPickerAt != 1 {
+		t.Fatalf("expected down to move selection to 1, got %d", model.agentPickerAt)
+	}
+
+	updated, _ = model.Update(specialKey(tea.KeyDown))
+	model = updated.(Model)
+	if model.agentPickerAt != 1 {
+		t.Fatalf("expected selection to clamp at the last adapter, got %d", model.agentPickerAt)
+	}
+
+	updated, _ = model.Update(specialKey(tea.KeyUp))
+	model = updated.(Model)
+	if model.agentPickerAt != 0 {
+		t.Fatalf("expected up to move selection back to 0, got %d", model.agentPickerAt)
+	}
+
+	updated, cmd := model.Update(specialKey(tea.KeyEsc))
+	model = updated.(Model)
+	if model.pickingAgent {
+		t.Fatal("expected esc to close the picker")
+	}
+	if cmd != nil {
+		t.Fatal("expected esc not to produce a command")
+	}
+}
+
+func TestAgentPickerEnterLaunchesAndClosesPicker(t *testing.T) {
+	model := Model{
+		client:    nil,
+		directory: "/repo",
+		snapshot:  sampleSnapshot(),
+		width:     140, height: 40,
+		pickingAgent:  true,
+		agentPickerAt: 1,
+	}
+
+	updated, cmd := model.Update(specialKey(tea.KeyEnter))
+	next := updated.(Model)
+
+	if next.pickingAgent {
+		t.Fatal("expected enter to close the picker")
+	}
+	if cmd == nil {
+		t.Fatal("expected enter to produce a launch command")
+	}
+}
+
+func TestPickingAgentInterceptsOtherKeys(t *testing.T) {
+	model := Model{snapshot: sampleSnapshot(), width: 140, height: 40, pickingAgent: true}
+
+	// Keys with meaning in the main view (e.g. tab focus-cycling) must not
+	// leak through while the picker overlay is open.
+	updated, _ := model.Update(specialKey(tea.KeyTab))
+	next := updated.(Model)
+	if next.focus != focusSessions {
+		t.Fatalf("expected focus to be unaffected while picker is open, got %v", next.focus)
+	}
+	if !next.pickingAgent {
+		t.Fatal("expected picker to remain open for an unhandled key")
 	}
 }
 

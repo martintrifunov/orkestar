@@ -126,7 +126,11 @@ func TestTerminalSurvivesDetachAndReattach(t *testing.T) {
 		t.Fatalf("detach first client: %v", err)
 	}
 
-	secondStream, secondReplay := openTerminal(t, callContext, client, started.ID)
+	// Detaching only closes the connection; the daemon frees the terminal's
+	// controller slot asynchronously as it notices the disconnect, so retry
+	// briefly rather than assuming that has happened the instant Close
+	// returns.
+	secondStream, secondReplay := openTerminalEventually(t, callContext, client, started.ID)
 	defer secondStream.Close()
 	if !bytes.Contains(secondReplay, []byte("ready")) {
 		t.Fatalf("replay did not preserve prior output: %q", secondReplay)
@@ -297,6 +301,37 @@ func openTerminal(t *testing.T, ctx context.Context, client *ipc.Client, termina
 		t.Fatalf("decode terminal replay: %v", err)
 	}
 	return stream, replay
+}
+
+// openTerminalEventually retries openTerminal while the daemon reports the
+// terminal as still busy, up to a short deadline. Use it after detaching
+// from a terminal the test intends to reattach to.
+func openTerminalEventually(t *testing.T, ctx context.Context, client *ipc.Client, terminalID string) (*ipc.Stream, []byte) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var result struct {
+			Replay string `json:"replay"`
+		}
+		stream, err := client.OpenStream(ctx, "terminal.attach", map[string]string{
+			"terminal_id": terminalID,
+		}, &result)
+		if err == nil {
+			replay, decodeErr := base64.StdEncoding.DecodeString(result.Replay)
+			if decodeErr != nil {
+				stream.Close()
+				t.Fatalf("decode terminal replay: %v", decodeErr)
+			}
+			return stream, replay
+		}
+
+		var remoteError *ipc.RemoteError
+		if !errors.As(err, &remoteError) || remoteError.Code != "terminal_busy" || time.Now().After(deadline) {
+			t.Fatalf("attach terminal: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func readUntil(t *testing.T, stream *ipc.Stream, initial, expected []byte) {

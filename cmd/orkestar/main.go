@@ -154,7 +154,7 @@ func serveDaemon(paths runtimepath.Paths) error {
 	defer cancel()
 	server := daemon.NewServer(paths.Socket)
 	server.RegisterAdapter(claude.New(""))
-	server.RegisterAdapter(opencode.New("", nil))
+	server.RegisterAdapter(opencode.New("", "", nil))
 	// OpenCode is the reviewer adapter because its managed mode returns a
 	// structured reply; Claude Code's interactive PTY adapter has no
 	// discrete response to parse a verdict from.

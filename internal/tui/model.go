@@ -54,6 +54,11 @@ type permissionActionMsg struct {
 	err error
 }
 
+type agentLaunchedMsg struct {
+	agent daemon.Agent
+	err   error
+}
+
 type tickMsg time.Time
 
 // focusPanel is which panel arrow keys move the selection cursor in.
@@ -83,6 +88,13 @@ type Model struct {
 	diffTaskID  string
 	diff        daemon.TaskDiff
 	diffErr     error
+
+	// pickingAgent shows the "choose an agent to launch" overlay, built
+	// dynamically from snapshot.Adapters rather than fixed keybindings, so
+	// a newly registered adapter (e.g. a future Codex adapter) appears
+	// automatically.
+	pickingAgent  bool
+	agentPickerAt int
 }
 
 func New(client *ipc.Client, directory, executable string) Model {
@@ -114,6 +126,24 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			switch message.String() {
 			case "esc", "d", "q":
 				m.viewingDiff = false
+			}
+			return m, nil
+		}
+		if m.pickingAgent {
+			switch message.String() {
+			case "esc", "q":
+				m.pickingAgent = false
+			case "up", "k":
+				if m.agentPickerAt > 0 {
+					m.agentPickerAt--
+				}
+			case "down", "j":
+				if m.agentPickerAt+1 < len(m.snapshot.Adapters) {
+					m.agentPickerAt++
+				}
+			case "enter":
+				m.pickingAgent = false
+				return m, m.launchPickedAgent()
 			}
 			return m, nil
 		}
@@ -164,10 +194,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadSnapshot()
 		case "n":
 			return m, m.startTerminal([]string{defaultShell()})
-		case "c":
-			return m, m.startTerminal([]string{"claude"})
-		case "o":
-			return m, m.startTerminal([]string{"opencode"})
+		case "a":
+			m.pickingAgent = true
+			if m.agentPickerAt >= len(m.snapshot.Adapters) {
+				m.agentPickerAt = 0
+			}
+			return m, nil
 		case "enter":
 			return m, m.attachSelected()
 		case "d":
@@ -228,6 +260,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, m.loadSnapshot()
 		}
+	case agentLaunchedMsg:
+		m.err = message.err
+		if message.err != nil {
+			return m, nil
+		}
+		if message.agent.TerminalID != "" {
+			return m, attachTerminal(m.executable, message.agent.TerminalID)
+		}
+		m.loading = true
+		return m, m.loadSnapshot()
 	}
 	return m, nil
 }
@@ -247,6 +289,9 @@ func (m Model) render() string {
 	}
 	if m.viewingDiff {
 		return m.renderDiff(width)
+	}
+	if m.pickingAgent {
+		return m.renderAgentPicker(width)
 	}
 
 	header := accentStyle.Render("Orkestar") + dimStyle.Render("  persistent agent runtime")
@@ -281,8 +326,37 @@ func (m Model) render() string {
 	if m.err != nil {
 		status = errorStyle.Render(m.err.Error())
 	}
-	help := dimStyle.Render("n shell  c claude  o opencode  enter attach  tab focus  d diff  m mark done  y/x allow/deny  r refresh  q detach UI")
+	help := dimStyle.Render("n shell  a new agent  enter attach  tab focus  d diff  m mark done  y/x allow/deny  r refresh  q detach UI")
 	return header + "\n\n" + body + "\n\n" + status + "\n" + help
+}
+
+// renderAgentPicker shows the list of registered adapters (from
+// snapshot.Adapters) to choose from when launching a new agent, so the set
+// of choices always matches what the daemon actually has available rather
+// than a fixed set of keybindings.
+func (m Model) renderAgentPicker(width int) string {
+	header := accentStyle.Render("New agent") + dimStyle.Render("  choose which agent to launch")
+
+	lines := []string{}
+	if len(m.snapshot.Adapters) == 0 {
+		lines = append(lines, dimStyle.Render("No agent adapters are registered with the daemon."))
+	}
+	for index, capabilities := range m.snapshot.Adapters {
+		mode := "managed only"
+		if capabilities.SupportsInteractive {
+			mode = "interactive"
+		}
+		line := fmt.Sprintf("%-16s  %s", capabilities.Name, mode)
+		if index == m.agentPickerAt {
+			line = selectedStyle.Render(" " + line + " ")
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
+	}
+	panel := panelStyle.Width(width - 4).Render(strings.Join(lines, "\n"))
+
+	return header + "\n\n" + panel + "\n\n" + dimStyle.Render("up/down select  enter launch  esc cancel")
 }
 
 func (m Model) renderTasks() string {
@@ -391,7 +465,7 @@ func (m Model) renderWorkspaces() string {
 func (m Model) renderTerminals() string {
 	lines := []string{accentStyle.Render("Sessions")}
 	if len(m.snapshot.Terminals) == 0 {
-		lines = append(lines, dimStyle.Render("No sessions."), "", "Press c to start Claude Code.")
+		lines = append(lines, dimStyle.Render("No sessions."), "", dimStyle.Render("Press a to launch an agent."))
 		return strings.Join(lines, "\n")
 	}
 	for index, terminal := range m.snapshot.Terminals {
@@ -417,36 +491,77 @@ func (m Model) loadSnapshot() tea.Cmd {
 	}
 }
 
+// ensureWorkspace returns the ID of the workspace rooted at m.directory,
+// creating it if it doesn't exist yet.
+func (m Model) ensureWorkspace(ctx context.Context) (string, error) {
+	for _, workspace := range m.snapshot.Workspaces {
+		if sameDirectory(workspace.Directory, m.directory) {
+			return workspace.ID, nil
+		}
+	}
+	var workspace daemon.Workspace
+	if err := m.client.Call(ctx, "workspace.create", map[string]string{
+		"directory": m.directory,
+	}, &workspace); err != nil {
+		return "", err
+	}
+	return workspace.ID, nil
+}
+
 func (m Model) startTerminal(command []string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		workspaceID := ""
-		for _, workspace := range m.snapshot.Workspaces {
-			if sameDirectory(workspace.Directory, m.directory) {
-				workspaceID = workspace.ID
-				break
-			}
-		}
-		if workspaceID == "" {
-			var workspace daemon.Workspace
-			if err := m.client.Call(ctx, "workspace.create", map[string]string{
-				"directory": m.directory,
-			}, &workspace); err != nil {
-				return terminalStartedMsg{err: err}
-			}
-			workspaceID = workspace.ID
+		workspaceID, err := m.ensureWorkspace(ctx)
+		if err != nil {
+			return terminalStartedMsg{err: err}
 		}
 
 		var started daemon.Terminal
-		err := m.client.Call(ctx, "terminal.start", map[string]any{
+		err = m.client.Call(ctx, "terminal.start", map[string]any{
 			"workspace_id": workspaceID,
 			"command":      command,
 			"columns":      max(m.width, 80),
 			"rows":         max(m.height, 24),
 		}, &started)
 		return terminalStartedMsg{terminal: started, err: err}
+	}
+}
+
+// launchPickedAgent launches the adapter currently selected in the agent
+// picker overlay. Interactive-capable adapters get an interactive session
+// (bridged to a terminal the TUI then attaches to); adapters that only
+// support managed mode get a managed session, visible in the Agents panel
+// but with no terminal to attach to.
+func (m Model) launchPickedAgent() tea.Cmd {
+	if len(m.snapshot.Adapters) == 0 || m.agentPickerAt >= len(m.snapshot.Adapters) {
+		return nil
+	}
+	capabilities := m.snapshot.Adapters[m.agentPickerAt]
+	mode := "managed"
+	if capabilities.SupportsInteractive {
+		mode = "interactive"
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		workspaceID, err := m.ensureWorkspace(ctx)
+		if err != nil {
+			return agentLaunchedMsg{err: err}
+		}
+
+		var launched daemon.Agent
+		err = m.client.Call(ctx, "agent.launch", map[string]any{
+			"workspace_id": workspaceID,
+			"adapter":      capabilities.Name,
+			"mode":         mode,
+			"columns":      max(m.width, 80),
+			"rows":         max(m.height, 24),
+		}, &launched)
+		return agentLaunchedMsg{agent: launched, err: err}
 	}
 }
 
@@ -512,7 +627,14 @@ func (m Model) attachSelected() tea.Cmd {
 	if len(m.snapshot.Terminals) == 0 || m.selected >= len(m.snapshot.Terminals) {
 		return nil
 	}
-	command := exec.Command(m.executable, "terminal", "attach", m.snapshot.Terminals[m.selected].ID)
+	return attachTerminal(m.executable, m.snapshot.Terminals[m.selected].ID)
+}
+
+// attachTerminal runs `orkestar terminal attach <id>` as a subprocess,
+// taking over the screen until the user detaches (ctrl+b q) or the process
+// exits, then returns control to the dashboard.
+func attachTerminal(executable, terminalID string) tea.Cmd {
+	command := exec.Command(executable, "terminal", "attach", terminalID)
 	return tea.ExecProcess(command, func(err error) tea.Msg {
 		return attachFinishedMsg{err: err}
 	})

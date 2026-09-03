@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -85,29 +87,93 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureServer) {
 	return server, fixture
 }
 
+// fixtureExecutable writes a small shell script that behaves enough like an
+// interactive CLI (reads stdin, ignores it, exits when its PTY closes) to
+// exercise interactive mode without depending on a real OpenCode install.
+func fixtureExecutable(t *testing.T) string {
+	t.Helper()
+
+	directory := t.TempDir()
+	path := filepath.Join(directory, "opencode")
+	script := "#!/bin/sh\ncat >/dev/null\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fixture executable: %v", err)
+	}
+	return path
+}
+
 func TestAdapterCapabilities(t *testing.T) {
 	t.Parallel()
 
-	capabilities := opencode.New("", nil).Capabilities()
+	capabilities := opencode.New("", "", nil).Capabilities()
 	if capabilities.Name != "opencode" {
 		t.Fatalf("unexpected adapter name: %q", capabilities.Name)
 	}
-	if !capabilities.SupportsManaged || !capabilities.SupportsPrompt || !capabilities.SupportsInterrupt || !capabilities.SupportsResume {
-		t.Fatalf("unexpected capabilities: %#v", capabilities)
-	}
-	if capabilities.SupportsInteractive {
+	if !capabilities.SupportsInteractive || !capabilities.SupportsManaged || !capabilities.SupportsPrompt ||
+		!capabilities.SupportsInterrupt || !capabilities.SupportsResume {
 		t.Fatalf("unexpected capabilities: %#v", capabilities)
 	}
 }
 
-func TestAdapterRejectsInteractiveMode(t *testing.T) {
+func TestAdapterRejectsUnknownMode(t *testing.T) {
 	t.Parallel()
 
-	adapter := opencode.New("", nil)
+	adapter := opencode.New("", "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: agent.ModeInteractive}); err == nil {
-		t.Fatal("expected interactive mode to be rejected")
+	if _, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: "bogus"}); err == nil {
+		t.Fatal("expected an unknown mode to be rejected")
+	}
+}
+
+func TestAdapterInteractiveLaunchPromptAndInterrupt(t *testing.T) {
+	t.Parallel()
+
+	adapter := opencode.New(fixtureExecutable(t), "", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	session, err := adapter.Launch(ctx, agent.LaunchOptions{
+		Mode:      agent.ModeInteractive,
+		Directory: t.TempDir(),
+		Columns:   80,
+		Rows:      24,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer session.Close()
+
+	waitForState(t, session, agent.StateReady)
+
+	if err := session.Prompt(ctx, "hello"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if err := session.Interrupt(ctx); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+
+	processSession, ok := session.(agent.ProcessSession)
+	if !ok {
+		t.Fatal("expected interactive session to implement agent.ProcessSession")
+	}
+	if err := processSession.Process().Close(); err != nil {
+		t.Fatalf("close process: %v", err)
+	}
+	waitForState(t, session, agent.StateStopped)
+}
+
+func TestAdapterInteractiveRejectsResume(t *testing.T) {
+	t.Parallel()
+
+	adapter := opencode.New(fixtureExecutable(t), "", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := adapter.Launch(ctx, agent.LaunchOptions{
+		Mode:            agent.ModeInteractive,
+		ResumeSessionID: "prior",
+	}); err == nil {
+		t.Fatal("expected resume to be rejected in interactive mode")
 	}
 }
 
@@ -115,7 +181,7 @@ func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {
 	t.Parallel()
 
 	server, fixture := newFixtureServer(t)
-	adapter := opencode.New(server.URL, server.Client())
+	adapter := opencode.New("", server.URL, server.Client())
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -160,7 +226,7 @@ func TestSessionPromptForResponse(t *testing.T) {
 	t.Parallel()
 
 	server, _ := newFixtureServer(t)
-	adapter := opencode.New(server.URL, server.Client())
+	adapter := opencode.New("", server.URL, server.Client())
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -187,7 +253,7 @@ func TestAdapterResumeRequiresExistingSession(t *testing.T) {
 	t.Parallel()
 
 	server, _ := newFixtureServer(t)
-	adapter := opencode.New(server.URL, server.Client())
+	adapter := opencode.New("", server.URL, server.Client())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
