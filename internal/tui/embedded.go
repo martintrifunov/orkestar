@@ -144,27 +144,29 @@ func waitEmbeddedEvent(events chan tea.Msg) tea.Cmd {
 	}
 }
 
-// sendEmbeddedInput forwards raw bytes to the daemon as terminal input,
-// as a Cmd so a key press never blocks Update on a socket write.
-func sendEmbeddedInput(stream *ipc.Stream, data []byte) tea.Cmd {
-	return func() tea.Msg {
-		_ = stream.Send(map[string]any{
-			"version": ipc.Version,
-			"command": "input",
-			"data":    base64.StdEncoding.EncodeToString(data),
-		})
-		return nil
-	}
+// sendEmbeddedInput forwards raw bytes to the daemon as terminal input.
+//
+// This is called synchronously from Update, not wrapped in a tea.Cmd:
+// Bubble Tea gives no ordering guarantee across concurrently-scheduled
+// Cmd goroutines, so a Cmd per keystroke could let fast typing reach the
+// daemon out of order. Update already runs strictly one message at a
+// time, and this is a local unix-socket write (microseconds), so calling
+// it inline preserves keystroke order at a cost too small to matter.
+func sendEmbeddedInput(stream *ipc.Stream, data []byte) {
+	_ = stream.Send(map[string]any{
+		"version": ipc.Version,
+		"command": "input",
+		"data":    base64.StdEncoding.EncodeToString(data),
+	})
 }
 
-// sendEmbeddedResize tells the daemon to resize the underlying PTY and
-// resizes the local emulator to match, as a Cmd so it never blocks Update.
-func sendEmbeddedResize(term *embeddedTerminal, columns, rows int) tea.Cmd {
-	return func() tea.Msg {
-		term.emulator.Resize(columns, rows)
-		_ = term.stream.Send(resizeCommand(columns, rows))
-		return nil
-	}
+// sendEmbeddedResize resizes the local emulator and tells the daemon to
+// resize the underlying PTY to match. Also called synchronously, for the
+// same reason as sendEmbeddedInput: a resize racing a keystroke's Cmd
+// could reach the daemon in the wrong order.
+func sendEmbeddedResize(term *embeddedTerminal, columns, rows int) {
+	term.emulator.Resize(columns, rows)
+	_ = term.stream.Send(resizeCommand(columns, rows))
 }
 
 func resizeCommand(columns, rows int) map[string]any {

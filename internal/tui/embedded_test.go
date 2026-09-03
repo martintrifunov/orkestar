@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 )
@@ -125,7 +127,40 @@ func TestOpenEmbeddedTerminalRendersRealOutput(t *testing.T) {
 	// Sending input must reach the real process and its reply must show
 	// up rendered in the SAME emulator, proving the pane and the process
 	// share one underlying PTY end to end.
-	sendEmbeddedInput(ready.terminal.stream, []byte("hello\n"))()
+	sendEmbeddedInput(ready.terminal.stream, []byte("hello\n"))
+	waitForEmbeddedEvent(t, ready.terminal, "echo:hello")
+}
+
+// TestUpdateEmbeddedPreservesKeystrokeOrder exercises the real Update path
+// a running app uses (Model.updateEmbedded), typing a sequence of distinct
+// keys and confirming the process receives them in the order they were
+// pressed. Sending was originally wrapped in a tea.Cmd per keystroke;
+// Bubble Tea gives no ordering guarantee across concurrently-scheduled Cmd
+// goroutines, so fast typing could have reached the daemon scrambled. This
+// guards against that regression by calling updateEmbedded directly, the
+// same way Update's tea.KeyPressMsg case does.
+func TestUpdateEmbeddedPreservesKeystrokeOrder(t *testing.T) {
+	t.Parallel()
+
+	client := startEmbeddedTestDaemon(t)
+	started := startEmbeddedTestTerminal(t, client, []string{
+		"/bin/sh", "-c", "printf 'ready\\n'; IFS= read -r line; printf 'echo:%s\\n' \"$line\"",
+	})
+
+	msg := openEmbeddedTerminal(client, started.ID, 80, 24)()
+	ready, ok := msg.(embeddedReadyMsg)
+	if !ok || ready.err != nil {
+		t.Fatalf("open embedded terminal: msg=%#v", msg)
+	}
+	defer ready.terminal.stream.Close()
+	waitForEmbeddedEvent(t, ready.terminal, "ready")
+
+	model := Model{embedded: ready.terminal}
+	for _, r := range "hello" {
+		model.updateEmbedded(tea.KeyPressMsg{Text: string(r), Code: r})
+	}
+	model.updateEmbedded(tea.KeyPressMsg{Code: tea.KeyEnter})
+
 	waitForEmbeddedEvent(t, ready.terminal, "echo:hello")
 }
 

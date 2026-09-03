@@ -122,7 +122,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = message.Height
 		if m.embedded != nil {
 			columns, rows := embeddedPaneSize(m.width, m.height)
-			return m, sendEmbeddedResize(m.embedded, columns, rows)
+			sendEmbeddedResize(m.embedded, columns, rows)
 		}
 	case tea.KeyPressMsg:
 		if m.embedded != nil {
@@ -375,9 +375,16 @@ func (m Model) renderEmbedded(width, height int) string {
 	}, "\n")
 	sidebarPanel := panelStyle.Width(sidebarWidth).Height(height - 4).Render(sidebar)
 
+	// embeddedPaneSize returns the emulator's grid dimensions (also used to
+	// size the emulator itself and the daemon's PTY), which is the box's
+	// INTERIOR size. panelStyle.Width/Height set the box's total size
+	// including its border (2 cols/rows) and horizontal padding (2 cols),
+	// so the box must be sized larger than the grid by that overhead —
+	// otherwise every line the emulator renders is wider than the box has
+	// room for, and lipgloss wraps each one, corrupting the whole layout.
 	columns, rows := embeddedPaneSize(width, height)
 	content := m.embedded.emulator.Render()
-	terminalPanel := panelStyle.Width(columns).Height(rows).Render(content)
+	terminalPanel := panelStyle.Width(columns + 4).Height(rows + 2).Render(content)
 
 	header := accentStyle.Render("Orkestar") + dimStyle.Render(fmt.Sprintf("  terminal %s", m.embedded.terminalID))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebarPanel, " ", terminalPanel)
@@ -700,10 +707,11 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		// The user meant a literal ctrl+b followed by this key, not a
 		// detach: forward both instead of swallowing the ctrl+b.
-		return m, tea.Batch(
-			sendEmbeddedInput(term.stream, []byte{0x02}),
-			sendEmbeddedInput(term.stream, encodeKey(msg)),
-		)
+		sendEmbeddedInput(term.stream, []byte{0x02})
+		if data := encodeKey(msg); len(data) > 0 {
+			sendEmbeddedInput(term.stream, data)
+		}
+		return m, nil
 	}
 
 	if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'b' {
@@ -712,7 +720,7 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if data := encodeKey(msg); len(data) > 0 {
-		return m, sendEmbeddedInput(term.stream, data)
+		sendEmbeddedInput(term.stream, data)
 	}
 	return m, nil
 }

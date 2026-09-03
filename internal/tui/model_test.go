@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/vt"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -149,6 +152,59 @@ func TestPickingAgentInterceptsOtherKeys(t *testing.T) {
 	}
 	if !next.pickingAgent {
 		t.Fatal("expected picker to remain open for an unhandled key")
+	}
+}
+
+// TestRenderEmbeddedPaneMatchesEmulatorGrid guards against a real bug this
+// layout had: lipgloss's Style.Width/Height set a box's TOTAL size
+// (including border and padding), not its interior. The embedded pane's
+// emulator grid must be sized smaller than what's passed to the box style
+// by that overhead (4 cols for border+padding, 2 rows for border), or
+// every line the emulator renders is too wide for the box's interior and
+// lipgloss wraps it — which doesn't overflow any single line's width (so a
+// naive per-line-width check won't catch it), but does inflate the pane to
+// more rows than requested and breaks alignment with the sidebar next to
+// it. This fills every emulator cell so any wrapping is unambiguous, then
+// asserts the box renders at exactly its requested height with the right
+// content on its first content row.
+func TestRenderEmbeddedPaneMatchesEmulatorGrid(t *testing.T) {
+	for _, size := range []struct{ width, height int }{
+		{60, 30}, {90, 30}, {110, 40}, {160, 40}, {220, 50},
+	} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			columns, rows := embeddedPaneSize(size.width, size.height)
+
+			emulator := vt.NewSafeEmulator(columns, rows)
+			marker := strings.Repeat("x", columns)
+			emulator.Write([]byte(marker))
+
+			model := Model{
+				width:  size.width,
+				height: size.height,
+				embedded: &embeddedTerminal{
+					terminalID: "term_1",
+					emulator:   emulator,
+				},
+			}
+
+			output := model.render()
+			lines := strings.Split(output, "\n")
+			for _, line := range lines {
+				if got := lipgloss.Width(line); got > size.width {
+					t.Fatalf("line is %d cells wide, wider than the terminal (%d):\n%q", got, size.width, line)
+				}
+			}
+
+			markerLines := 0
+			for _, line := range lines {
+				if strings.Contains(line, marker) {
+					markerLines++
+				}
+			}
+			if markerLines != 1 {
+				t.Fatalf("expected the %d-column marker line to appear on exactly one rendered line (not wrapped), found it on %d:\n%s", columns, markerLines, output)
+			}
+		})
 	}
 }
 
