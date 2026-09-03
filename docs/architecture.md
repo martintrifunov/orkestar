@@ -161,3 +161,21 @@ Bubble Tea is confined to `internal/tui`. PTY and virtual-terminal libraries
 are confined to `internal/pty` and `internal/terminal`. Domain packages consume
 small Orkestar-owned interfaces so dependencies can be replaced without broad
 rewrites.
+
+## Embedded terminal rendering
+
+A terminal (plain shell or an interactive agent's bridged PTY) is rendered
+inline as a pane in the dashboard, not handed to a subprocess with the real
+TTY. The TUI opens `terminal.attach` itself, feeds the raw PTY byte stream
+into `github.com/charmbracelet/x/vt` (a VT100 emulator confined to
+`internal/tui`), and renders its screen as one pane alongside the
+Workspaces/Tasks/Agents panels. Key presses are encoded back into raw bytes
+(`internal/tui/keyencode.go`) and sent as `terminal.attach` input, since
+Bubble Tea has already decoded them into structured events. The standalone
+`orkestar terminal attach` CLI command still exists and hands off the real
+TTY the old way; it is unaffected and useful outside the TUI.
+
+`x/vt` is unreleased (no tagged version) as of this writing. Its
+concurrency-safety wrapper is incomplete: only call `Write`, `Render`, and
+`Resize` on the emulator from outside its owning goroutine; check
+`safe_emulator.go` in the pinned version before adding any other call.

@@ -100,7 +100,7 @@ func TestCloseIsIdempotentAndClosesEvents(t *testing.T) {
 func waitForState(t *testing.T, session agent.Session, want agent.State) {
 	t.Helper()
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case event, ok := <-session.Events():

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,10 +32,6 @@ type snapshotMsg struct {
 type terminalStartedMsg struct {
 	terminal daemon.Terminal
 	err      error
-}
-
-type attachFinishedMsg struct {
-	err error
 }
 
 type diffMsg struct {
@@ -73,7 +68,6 @@ const (
 type Model struct {
 	client        *ipc.Client
 	directory     string
-	executable    string
 	snapshot      daemon.Snapshot
 	selected      int
 	taskSelected  int
@@ -95,19 +89,24 @@ type Model struct {
 	// automatically.
 	pickingAgent  bool
 	agentPickerAt int
+
+	// embedded is the terminal rendered inline as a pane, if one is open.
+	// Only one can be open at a time; opening another one is not offered
+	// while this is set, and it swallows every key press except the
+	// ctrl+b q detach combo.
+	embedded *embeddedTerminal
 }
 
-func New(client *ipc.Client, directory, executable string) Model {
+func New(client *ipc.Client, directory string) Model {
 	return Model{
-		client:     client,
-		directory:  directory,
-		executable: executable,
-		loading:    true,
+		client:    client,
+		directory: directory,
+		loading:   true,
 	}
 }
 
-func Run(client *ipc.Client, directory, executable string) error {
-	program := tea.NewProgram(New(client, directory, executable))
+func Run(client *ipc.Client, directory string) error {
+	program := tea.NewProgram(New(client, directory))
 	_, err := program.Run()
 	return err
 }
@@ -121,7 +120,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = message.Width
 		m.height = message.Height
+		if m.embedded != nil {
+			columns, rows := embeddedPaneSize(m.width, m.height)
+			return m, sendEmbeddedResize(m.embedded, columns, rows)
+		}
 	case tea.KeyPressMsg:
+		if m.embedded != nil {
+			return m.updateEmbedded(message)
+		}
 		if m.viewingDiff {
 			switch message.String() {
 			case "esc", "d", "q":
@@ -201,7 +207,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			return m, m.attachSelected()
+			return m, m.embedSelected()
 		case "d":
 			return m, m.loadDiff()
 		case "m":
@@ -232,12 +238,27 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err == nil {
 			m.snapshot.Terminals = append(m.snapshot.Terminals, message.terminal)
 			m.selected = len(m.snapshot.Terminals) - 1
-			return m, m.attachSelected()
+			columns, rows := embeddedPaneSize(m.width, m.height)
+			return m, openEmbeddedTerminal(m.client, message.terminal.ID, columns, rows)
 		}
-	case attachFinishedMsg:
+	case embeddedReadyMsg:
 		m.err = message.err
-		m.loading = true
-		return m, m.loadSnapshot()
+		if message.err != nil {
+			return m, nil
+		}
+		m.embedded = message.terminal
+		return m, waitEmbeddedEvent(message.terminal.events)
+	case embeddedEventMsg:
+		if m.embedded == nil || m.embedded.terminalID != message.terminalID {
+			return m, nil
+		}
+		if message.exited {
+			_ = m.embedded.stream.Close()
+			m.embedded = nil
+			m.loading = true
+			return m, m.loadSnapshot()
+		}
+		return m, waitEmbeddedEvent(m.embedded.events)
 	case tickMsg:
 		return m, tea.Batch(m.loadSnapshot(), tick())
 	case diffMsg:
@@ -266,7 +287,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if message.agent.TerminalID != "" {
-			return m, attachTerminal(m.executable, message.agent.TerminalID)
+			columns, rows := embeddedPaneSize(m.width, m.height)
+			return m, openEmbeddedTerminal(m.client, message.agent.TerminalID, columns, rows)
 		}
 		m.loading = true
 		return m, m.loadSnapshot()
@@ -286,6 +308,9 @@ func (m Model) render() string {
 	width := m.width
 	if width < 40 {
 		width = 40
+	}
+	if m.embedded != nil {
+		return m.renderEmbedded(width, m.height)
 	}
 	if m.viewingDiff {
 		return m.renderDiff(width)
@@ -334,6 +359,32 @@ func (m Model) render() string {
 // snapshot.Adapters) to choose from when launching a new agent, so the set
 // of choices always matches what the daemon actually has available rather
 // than a fixed set of keybindings.
+// renderEmbedded draws the live terminal pane alongside a compact sidebar
+// of Workspaces/Tasks/Agents, so those stay visible while an agent (or
+// plain shell) session is running, instead of taking over the whole
+// screen. This is the Herd-style layout the panel replaces a subprocess
+// hand-off with.
+func (m Model) renderEmbedded(width, height int) string {
+	sidebarWidth := embeddedSidebarWidth(width)
+	sidebar := strings.Join([]string{
+		m.renderWorkspaces(),
+		"",
+		m.renderTasks(),
+		"",
+		m.renderAgents(),
+	}, "\n")
+	sidebarPanel := panelStyle.Width(sidebarWidth).Height(height - 4).Render(sidebar)
+
+	columns, rows := embeddedPaneSize(width, height)
+	content := m.embedded.emulator.Render()
+	terminalPanel := panelStyle.Width(columns).Height(rows).Render(content)
+
+	header := accentStyle.Render("Orkestar") + dimStyle.Render(fmt.Sprintf("  terminal %s", m.embedded.terminalID))
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebarPanel, " ", terminalPanel)
+	help := dimStyle.Render("ctrl+b q  detach")
+	return header + "\n\n" + body + "\n" + help
+}
+
 func (m Model) renderAgentPicker(width int) string {
 	header := accentStyle.Render("New agent") + dimStyle.Render("  choose which agent to launch")
 
@@ -623,21 +674,47 @@ func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
 	}
 }
 
-func (m Model) attachSelected() tea.Cmd {
+// embedSelected opens the currently selected session as an embedded pane.
+func (m Model) embedSelected() tea.Cmd {
 	if len(m.snapshot.Terminals) == 0 || m.selected >= len(m.snapshot.Terminals) {
 		return nil
 	}
-	return attachTerminal(m.executable, m.snapshot.Terminals[m.selected].ID)
+	columns, rows := embeddedPaneSize(m.width, m.height)
+	return openEmbeddedTerminal(m.client, m.snapshot.Terminals[m.selected].ID, columns, rows)
 }
 
-// attachTerminal runs `orkestar terminal attach <id>` as a subprocess,
-// taking over the screen until the user detaches (ctrl+b q) or the process
-// exits, then returns control to the dashboard.
-func attachTerminal(executable, terminalID string) tea.Cmd {
-	command := exec.Command(executable, "terminal", "attach", terminalID)
-	return tea.ExecProcess(command, func(err error) tea.Msg {
-		return attachFinishedMsg{err: err}
-	})
+// updateEmbedded handles a key press while an embedded terminal pane is
+// open. Every key is forwarded to the pane's process as raw input except
+// the ctrl+b q detach combo (matching `orkestar terminal attach`'s own
+// detach shortcut, so the muscle memory is the same either way).
+func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	term := m.embedded
+
+	if term.detachPending {
+		term.detachPending = false
+		if msg.String() == "q" {
+			_ = term.stream.Close()
+			m.embedded = nil
+			m.loading = true
+			return m, m.loadSnapshot()
+		}
+		// The user meant a literal ctrl+b followed by this key, not a
+		// detach: forward both instead of swallowing the ctrl+b.
+		return m, tea.Batch(
+			sendEmbeddedInput(term.stream, []byte{0x02}),
+			sendEmbeddedInput(term.stream, encodeKey(msg)),
+		)
+	}
+
+	if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'b' {
+		term.detachPending = true
+		return m, nil
+	}
+
+	if data := encodeKey(msg); len(data) > 0 {
+		return m, sendEmbeddedInput(term.stream, data)
+	}
+	return m, nil
 }
 
 func tick() tea.Cmd {

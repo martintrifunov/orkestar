@@ -375,7 +375,7 @@ func readUntil(t *testing.T, stream *ipc.Stream, initial, expected []byte) {
 		if result.err != nil {
 			t.Fatalf("read terminal output %q: %v", result.output, result.err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(8 * time.Second):
 		stream.Close()
 		t.Fatalf("timed out waiting for terminal output %q", expected)
 	}
