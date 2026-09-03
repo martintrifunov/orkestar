@@ -18,6 +18,7 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
 var ErrAlreadyRunning = errors.New("orkestar daemon is already running")
@@ -34,6 +35,7 @@ type Snapshot struct {
 	Terminals   []Terminal          `json:"terminals"`
 	Agents      []Agent             `json:"agents"`
 	Permissions []PermissionRequest `json:"permissions"`
+	Tasks       []workflow.Task     `json:"tasks"`
 }
 
 type Server struct {
@@ -46,6 +48,7 @@ type Server struct {
 	adapters    map[string]agent.Adapter
 	agents      map[string]*agentSession
 	permissions map[string]PermissionRequest
+	tasks       *workflow.Board
 	stop        chan struct{}
 	stopOnce    sync.Once
 }
@@ -58,6 +61,7 @@ func NewServer(socketPath string) *Server {
 		adapters:    make(map[string]agent.Adapter),
 		agents:      make(map[string]*agentSession),
 		permissions: make(map[string]PermissionRequest),
+		tasks:       workflow.NewBoard(),
 		stop:        make(chan struct{}),
 	}
 }
@@ -193,6 +197,12 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result = map[string]any{"permissions": s.listPermissions()}
 	case "permission.resolve":
 		result, err = s.resolvePermission(context.Background(), request.Params)
+	case "task.create":
+		result, err = s.createTask(request.Params)
+	case "task.setStatus":
+		result, err = s.setTaskStatus(request.Params)
+	case "task.assign":
+		result, err = s.assignTask(request.Params)
 	default:
 		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
 	}
@@ -239,7 +249,13 @@ func (s *Server) snapshot() Snapshot {
 	sort.Slice(permissions, func(left, right int) bool {
 		return permissions[left].CreatedAt.Before(permissions[right].CreatedAt)
 	})
-	return Snapshot{Workspaces: workspaces, Terminals: terminals, Agents: agents, Permissions: permissions}
+	return Snapshot{
+		Workspaces:  workspaces,
+		Terminals:   terminals,
+		Agents:      agents,
+		Permissions: permissions,
+		Tasks:       s.tasks.List(),
+	}
 }
 
 func (s *Server) closeTerminals() {
