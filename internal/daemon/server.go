@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -39,6 +40,8 @@ type Server struct {
 	listener   net.Listener
 	workspaces map[string]Workspace
 	terminals  map[string]*terminalSession
+	stop       chan struct{}
+	stopOnce   sync.Once
 }
 
 func NewServer(socketPath string) *Server {
@@ -46,6 +49,7 @@ func NewServer(socketPath string) *Server {
 		socketPath: socketPath,
 		workspaces: make(map[string]Workspace),
 		terminals:  make(map[string]*terminalSession),
+		stop:       make(chan struct{}),
 	}
 }
 
@@ -72,7 +76,10 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.mu.Unlock()
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-s.stop:
+		}
 		_ = listener.Close()
 	}()
 
@@ -155,6 +162,9 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result = map[string]string{"status": "ok"}
 	case "system.snapshot":
 		result = s.snapshot()
+	case "system.shutdown":
+		result = map[string]string{"status": "stopping"}
+		s.stopOnce.Do(func() { close(s.stop) })
 	case "workspace.create":
 		result, err = s.createWorkspace(request.Params)
 	case "terminal.start":
@@ -181,10 +191,16 @@ func (s *Server) snapshot() Snapshot {
 	for _, workspace := range s.workspaces {
 		workspaces = append(workspaces, workspace)
 	}
+	sort.Slice(workspaces, func(left, right int) bool {
+		return workspaces[left].CreatedAt.Before(workspaces[right].CreatedAt)
+	})
 	terminals := make([]Terminal, 0, len(s.terminals))
 	for _, session := range s.terminals {
 		terminals = append(terminals, session.snapshot())
 	}
+	sort.Slice(terminals, func(left, right int) bool {
+		return terminals[left].CreatedAt.Before(terminals[right].CreatedAt)
+	})
 	return Snapshot{Workspaces: workspaces, Terminals: terminals}
 }
 

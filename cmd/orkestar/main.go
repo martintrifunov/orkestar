@@ -12,8 +12,10 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
+	"github.com/martintrifunov/orkestar/internal/daemonclient"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
+	"github.com/martintrifunov/orkestar/internal/tui"
 )
 
 func main() {
@@ -24,22 +26,28 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 0 {
-		printUsage()
-		return nil
-	}
-
 	paths, err := runtimepath.Resolve()
 	if err != nil {
 		return err
 	}
 
+	if len(args) == 0 {
+		return runTUI(paths)
+	}
+
 	switch args[0] {
 	case "daemon":
-		if len(args) != 2 || args[1] != "serve" {
-			return errors.New("usage: orkestar daemon serve")
+		if len(args) != 2 {
+			return errors.New("usage: orkestar daemon serve|stop")
 		}
-		return serveDaemon(paths)
+		switch args[1] {
+		case "serve":
+			return serveDaemon(paths)
+		case "stop":
+			return stopDaemon(paths)
+		default:
+			return errors.New("usage: orkestar daemon serve|stop")
+		}
 	case "status":
 		return printStatus(paths)
 	case "workspace":
@@ -52,6 +60,23 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runTUI(paths runtimepath.Paths) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := daemonclient.Ensure(ctx, paths); err != nil {
+		return err
+	}
+	directory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get current directory: %w", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find Orkestar executable: %w", err)
+	}
+	return tui.Run(ipc.NewClient(paths.Socket), directory, executable)
 }
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
@@ -105,6 +130,17 @@ func serveDaemon(paths runtimepath.Paths) error {
 	return daemon.NewServer(paths.Socket).Serve(ctx)
 }
 
+func stopDaemon(paths runtimepath.Paths) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var result map[string]string
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "system.shutdown", nil, &result); err != nil {
+		return err
+	}
+	fmt.Println(result["status"])
+	return nil
+}
+
 func printStatus(paths runtimepath.Paths) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -152,7 +188,9 @@ func printUsage() {
 	fmt.Print(`Orkestar coordinates persistent coding-agent sessions.
 
 Usage:
+  orkestar
   orkestar daemon serve
+  orkestar daemon stop
   orkestar status
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]

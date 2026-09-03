@@ -70,6 +70,11 @@ func (s *terminalSession) attach() ([]byte, <-chan terminalEvent, func(), error)
 	events := make(chan terminalEvent, 256)
 	s.subscribers[events] = struct{}{}
 	replay := s.buffer.Bytes()
+	if s.metadata.State != "running" {
+		if payload, err := json.Marshal(s.metadata); err == nil {
+			events <- terminalEvent{Name: "terminal.exit", Data: payload}
+		}
+	}
 	detach := func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
