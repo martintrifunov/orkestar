@@ -22,7 +22,7 @@ each vertical slice before broadening the surface.
 - [ ] TUI workspace and terminal views
 - [ ] Detach and reattach without stopping the process
 - [ ] Graceful explicit daemon shutdown
-- [ ] Lifecycle and reconnect tests
+- [x] Lifecycle and reconnect tests
 
 ## M2: Agent awareness
 

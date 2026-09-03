@@ -141,6 +141,144 @@ func TestTerminalSurvivesDetachAndReattach(t *testing.T) {
 	readUntil(t, secondStream, nil, []byte("got:hello"))
 }
 
+func TestSystemShutdownStopsServer(t *testing.T) {
+	t.Parallel()
+
+	socketDirectory, err := os.MkdirTemp("/tmp", "orkestar-shutdown-test-")
+	if err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
+	socketPath := filepath.Join(socketDirectory, "orkestar.sock")
+	server := daemon.NewServer(socketPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.Serve(ctx) }()
+
+	client := ipc.NewClient(socketPath)
+	waitForServer(t, client)
+
+	callContext, callCancel := context.WithTimeout(context.Background(), time.Second)
+	defer callCancel()
+	var result map[string]string
+	if err := client.Call(callContext, "system.shutdown", nil, &result); err != nil {
+		t.Fatalf("shutdown daemon: %v", err)
+	}
+	if result["status"] != "stopping" {
+		t.Fatalf("unexpected shutdown status %q", result["status"])
+	}
+
+	select {
+	case err := <-serverError:
+		if err != nil {
+			t.Fatalf("server exited with error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not stop after system.shutdown")
+	}
+
+	pingContext, pingCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer pingCancel()
+	if err := client.Call(pingContext, "system.ping", nil, &result); err == nil {
+		t.Fatal("expected ping to fail after shutdown")
+	}
+}
+
+func TestTerminalAttachReplaysExitAfterProcessEnds(t *testing.T) {
+	t.Parallel()
+
+	temporaryDirectory := t.TempDir()
+	socketDirectory, err := os.MkdirTemp("/tmp", "orkestar-exit-test-")
+	if err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
+	socketPath := filepath.Join(socketDirectory, "orkestar.sock")
+	server := daemon.NewServer(socketPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-serverError; err != nil {
+			t.Errorf("server shutdown: %v", err)
+		}
+	})
+
+	client := ipc.NewClient(socketPath)
+	waitForServer(t, client)
+	callContext, callCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer callCancel()
+
+	var workspace daemon.Workspace
+	if err := client.Call(callContext, "workspace.create", map[string]string{
+		"directory": temporaryDirectory,
+	}, &workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	var started daemon.Terminal
+	if err := client.Call(callContext, "terminal.start", map[string]any{
+		"workspace_id": workspace.ID,
+		"command":      []string{"/bin/sh", "-c", "exit 0"},
+		"columns":      80,
+		"rows":         24,
+	}, &started); err != nil {
+		t.Fatalf("start terminal: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var snapshot daemon.Snapshot
+		if err := client.Call(callContext, "system.snapshot", nil, &snapshot); err != nil {
+			t.Fatalf("get snapshot: %v", err)
+		}
+		if len(snapshot.Terminals) == 1 && snapshot.Terminals[0].State != "running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("terminal did not finish running in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	stream, err := client.OpenStream(callContext, "terminal.attach", map[string]string{
+		"terminal_id": started.ID,
+	}, new(struct {
+		Replay string `json:"replay"`
+	}))
+	if err != nil {
+		t.Fatalf("attach terminal: %v", err)
+	}
+	defer stream.Close()
+
+	var event ipc.Event
+	deadlineTime := time.Now().Add(2 * time.Second)
+	for {
+		if err := stream.Receive(&event); err != nil {
+			t.Fatalf("receive terminal event: %v", err)
+		}
+		if event.Event == "terminal.exit" {
+			break
+		}
+		if time.Now().After(deadlineTime) {
+			t.Fatal("did not receive terminal.exit event after attach")
+		}
+	}
+
+	var terminal daemon.Terminal
+	if err := json.Unmarshal(event.Data, &terminal); err != nil {
+		t.Fatalf("decode terminal.exit payload: %v", err)
+	}
+	if terminal.ID != started.ID {
+		t.Fatalf("unexpected terminal ID in exit event: %q", terminal.ID)
+	}
+	if terminal.State != "stopped" {
+		t.Fatalf("unexpected terminal state in exit event: %q", terminal.State)
+	}
+}
+
 func openTerminal(t *testing.T, ctx context.Context, client *ipc.Client, terminalID string) (*ipc.Stream, []byte) {
 	t.Helper()
 
