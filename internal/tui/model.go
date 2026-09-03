@@ -14,6 +14,7 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
 var (
@@ -39,8 +40,18 @@ type attachFinishedMsg struct {
 }
 
 type diffMsg struct {
-	diff daemon.TaskDiff
+	diff   daemon.TaskDiff
+	err    error
+	taskID string
+}
+
+type taskActionMsg struct {
+	task workflow.Task
 	err  error
+}
+
+type permissionActionMsg struct {
+	err error
 }
 
 type tickMsg time.Time
@@ -51,22 +62,25 @@ type focusPanel int
 const (
 	focusSessions focusPanel = iota
 	focusTasks
+	focusAgents
 )
 
 type Model struct {
-	client       *ipc.Client
-	directory    string
-	executable   string
-	snapshot     daemon.Snapshot
-	selected     int
-	taskSelected int
-	focus        focusPanel
-	width        int
-	height       int
-	loading      bool
-	err          error
+	client        *ipc.Client
+	directory     string
+	executable    string
+	snapshot      daemon.Snapshot
+	selected      int
+	taskSelected  int
+	agentSelected int
+	focus         focusPanel
+	width         int
+	height        int
+	loading       bool
+	err           error
 
 	viewingDiff bool
+	diffTaskID  string
 	diff        daemon.TaskDiff
 	diffErr     error
 }
@@ -107,26 +121,43 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
-			if m.focus == focusSessions {
+			switch m.focus {
+			case focusSessions:
 				m.focus = focusTasks
-			} else {
+			case focusTasks:
+				m.focus = focusAgents
+			default:
 				m.focus = focusSessions
 			}
 		case "up", "k":
-			if m.focus == focusTasks {
+			switch m.focus {
+			case focusTasks:
 				if m.taskSelected > 0 {
 					m.taskSelected--
 				}
-			} else if m.selected > 0 {
-				m.selected--
+			case focusAgents:
+				if m.agentSelected > 0 {
+					m.agentSelected--
+				}
+			default:
+				if m.selected > 0 {
+					m.selected--
+				}
 			}
 		case "down", "j":
-			if m.focus == focusTasks {
+			switch m.focus {
+			case focusTasks:
 				if m.taskSelected+1 < len(m.snapshot.Tasks) {
 					m.taskSelected++
 				}
-			} else if m.selected+1 < len(m.snapshot.Terminals) {
-				m.selected++
+			case focusAgents:
+				if m.agentSelected+1 < len(m.snapshot.Agents) {
+					m.agentSelected++
+				}
+			default:
+				if m.selected+1 < len(m.snapshot.Terminals) {
+					m.selected++
+				}
 			}
 		case "r":
 			m.loading = true
@@ -141,6 +172,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.attachSelected()
 		case "d":
 			return m, m.loadDiff()
+		case "m":
+			return m, m.markSelectedTaskDone()
+		case "y":
+			return m, m.resolveSelectedPermission("allow")
+		case "x":
+			return m, m.resolveSelectedPermission("deny")
 		}
 	case snapshotMsg:
 		m.loading = false
@@ -152,6 +189,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.taskSelected >= len(m.snapshot.Tasks) && m.taskSelected > 0 {
 				m.taskSelected = len(m.snapshot.Tasks) - 1
+			}
+			if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
+				m.agentSelected = len(m.snapshot.Agents) - 1
 			}
 		}
 	case terminalStartedMsg:
@@ -171,9 +211,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case diffMsg:
 		m.err = message.err
 		m.diffErr = message.err
+		m.diffTaskID = message.taskID
 		if message.err == nil {
 			m.diff = message.diff
 			m.viewingDiff = true
+		}
+	case taskActionMsg:
+		m.err = message.err
+		if message.err == nil {
+			m.loading = true
+			return m, m.loadSnapshot()
+		}
+	case permissionActionMsg:
+		m.err = message.err
+		if message.err == nil {
+			m.loading = true
+			return m, m.loadSnapshot()
 		}
 	}
 	return m, nil
@@ -200,19 +253,25 @@ func (m Model) render() string {
 	workspacePanel := m.renderWorkspaces()
 	terminalPanel := m.renderTerminals()
 	taskPanel := m.renderTasks()
+	agentPanel := m.renderAgents()
 
 	var body string
 	if width >= 110 {
-		columnWidth := width / 3
-		workspacePanel = panelStyle.Width(columnWidth - 4).Render(workspacePanel)
-		terminalPanel = panelStyle.Width(columnWidth - 4).Render(terminalPanel)
-		taskPanel = panelStyle.Width(width - 2*columnWidth - 5).Render(taskPanel)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, workspacePanel, " ", terminalPanel, " ", taskPanel)
+		columnWidth := (width - 5) / 2
+		remainder := width - 2*columnWidth - 5
+		workspacePanel = panelStyle.Width(columnWidth).Render(workspacePanel)
+		terminalPanel = panelStyle.Width(columnWidth + remainder).Render(terminalPanel)
+		taskPanel = panelStyle.Width(columnWidth).Render(taskPanel)
+		agentPanel = panelStyle.Width(columnWidth + remainder).Render(agentPanel)
+		topRow := lipgloss.JoinHorizontal(lipgloss.Top, workspacePanel, " ", terminalPanel)
+		bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, taskPanel, " ", agentPanel)
+		body = topRow + "\n" + bottomRow
 	} else {
 		workspacePanel = panelStyle.Width(width - 4).Render(workspacePanel)
 		terminalPanel = panelStyle.Width(width - 4).Render(terminalPanel)
 		taskPanel = panelStyle.Width(width - 4).Render(taskPanel)
-		body = workspacePanel + "\n" + terminalPanel + "\n" + taskPanel
+		agentPanel = panelStyle.Width(width - 4).Render(agentPanel)
+		body = workspacePanel + "\n" + terminalPanel + "\n" + taskPanel + "\n" + agentPanel
 	}
 
 	status := ""
@@ -222,7 +281,7 @@ func (m Model) render() string {
 	if m.err != nil {
 		status = errorStyle.Render(m.err.Error())
 	}
-	help := dimStyle.Render("n shell  c claude  o opencode  enter attach  tab focus  d diff  r refresh  q detach UI")
+	help := dimStyle.Render("n shell  c claude  o opencode  enter attach  tab focus  d diff  m mark done  y/x allow/deny  r refresh  q detach UI")
 	return header + "\n\n" + body + "\n\n" + status + "\n" + help
 }
 
@@ -242,6 +301,33 @@ func (m Model) renderTasks() string {
 		lines = append(lines, line)
 		if task.WorktreePath != "" {
 			lines = append(lines, dimStyle.Render("    branch "+task.WorktreeBranch))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderAgents() string {
+	lines := []string{accentStyle.Render("Agents")}
+	if len(m.snapshot.Agents) == 0 {
+		lines = append(lines, dimStyle.Render("No agent sessions."))
+	}
+	for index, agent := range m.snapshot.Agents {
+		line := fmt.Sprintf("%-9s  %-9s  %s", agent.Adapter, agent.State, agent.Mode)
+		if m.focus == focusAgents && index == m.agentSelected {
+			line = selectedStyle.Render(" " + line + " ")
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
+		if agent.AttentionReason != "" {
+			lines = append(lines, errorStyle.Render("    "+agent.AttentionReason))
+		}
+	}
+
+	if len(m.snapshot.Permissions) > 0 {
+		lines = append(lines, "", accentStyle.Render("Pending permissions"))
+		for _, permission := range m.snapshot.Permissions {
+			lines = append(lines, fmt.Sprintf("  %s: %s", permission.AgentID, permission.Reason))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -268,7 +354,26 @@ func (m Model) renderDiff(width int) string {
 	}
 	diffPanel := panelStyle.Width(width - 4).Render(diffText)
 
-	return header + "\n\n" + filesPanel + "\n" + diffPanel + "\n\n" + dimStyle.Render("esc/d/q back")
+	sections := header + "\n\n" + filesPanel + "\n" + diffPanel
+
+	if verdict := m.latestReviewVerdict(); verdict != "" {
+		reviewPanel := panelStyle.Width(width - 4).Render(accentStyle.Render("Latest reviewer verdict") + "\n\n" + verdict)
+		sections += "\n" + reviewPanel
+	}
+
+	return sections + "\n\n" + dimStyle.Render("esc/d/q back")
+}
+
+// latestReviewVerdict returns the most recent review artifact's content for
+// the task whose diff is currently shown, or "" if there is none.
+func (m Model) latestReviewVerdict() string {
+	var latest string
+	for _, artifact := range m.snapshot.Artifacts {
+		if artifact.TaskID == m.diffTaskID && artifact.Kind == workflow.ArtifactReview {
+			latest = artifact.Content
+		}
+	}
+	return latest
 }
 
 func (m Model) renderWorkspaces() string {
@@ -355,7 +460,51 @@ func (m Model) loadDiff() tea.Cmd {
 		defer cancel()
 		var diff daemon.TaskDiff
 		err := m.client.Call(ctx, "task.diff", map[string]string{"task_id": taskID}, &diff)
-		return diffMsg{diff: diff, err: err}
+		return diffMsg{diff: diff, err: err, taskID: taskID}
+	}
+}
+
+func (m Model) markSelectedTaskDone() tea.Cmd {
+	if m.focus != focusTasks || len(m.snapshot.Tasks) == 0 || m.taskSelected >= len(m.snapshot.Tasks) {
+		return nil
+	}
+	taskID := m.snapshot.Tasks[m.taskSelected].ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		var task workflow.Task
+		err := m.client.Call(ctx, "task.setStatus", map[string]string{
+			"task_id": taskID,
+			"status":  string(workflow.StatusDone),
+		}, &task)
+		return taskActionMsg{task: task, err: err}
+	}
+}
+
+func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
+	if m.focus != focusAgents || len(m.snapshot.Agents) == 0 || m.agentSelected >= len(m.snapshot.Agents) {
+		return nil
+	}
+	agentID := m.snapshot.Agents[m.agentSelected].ID
+	var permissionID string
+	for _, permission := range m.snapshot.Permissions {
+		if permission.AgentID == agentID {
+			permissionID = permission.ID
+			break
+		}
+	}
+	if permissionID == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var result map[string]string
+		err := m.client.Call(ctx, "permission.resolve", map[string]string{
+			"permission_id": permissionID,
+			"decision":      decision,
+		}, &result)
+		return permissionActionMsg{err: err}
 	}
 }
 
