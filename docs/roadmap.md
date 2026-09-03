@@ -44,7 +44,7 @@ each vertical slice before broadening the surface.
 
 ## M4: MCP gateway
 
-- [ ] Orkestar orchestration MCP server
+- [x] Orkestar orchestration MCP server
 - [ ] MCP client registry and health checks
 - [ ] Policy and audit middleware
 - [ ] Per-agent tool exposure

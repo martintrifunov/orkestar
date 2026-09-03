@@ -10,12 +10,15 @@ import (
 	"syscall"
 	"time"
 
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/martintrifunov/orkestar/internal/agent/claude"
 	"github.com/martintrifunov/orkestar/internal/agent/opencode"
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/daemonclient"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	orkestarmcp "github.com/martintrifunov/orkestar/internal/mcp"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
 	"github.com/martintrifunov/orkestar/internal/tui"
 )
@@ -58,6 +61,8 @@ func run(args []string) error {
 		return runTerminal(paths, args[1:])
 	case "task":
 		return runTask(paths, args[1:])
+	case "mcp":
+		return runMCP(paths, args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -123,6 +128,22 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 	default:
 		return fmt.Errorf("unknown terminal command %q", args[0])
 	}
+}
+
+func runMCP(paths runtimepath.Paths, args []string) error {
+	if len(args) != 1 || args[0] != "serve" {
+		return errors.New("usage: orkestar mcp serve")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := daemonclient.Ensure(ctx, paths); err != nil {
+		return err
+	}
+
+	server := orkestarmcp.NewServer(ipc.NewClient(paths.Socket))
+	runCtx, runCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer runCancel()
+	return server.Run(runCtx, &sdk.StdioTransport{})
 }
 
 func serveDaemon(paths runtimepath.Paths) error {
@@ -213,6 +234,7 @@ Usage:
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task diff <task-id>
+  orkestar mcp serve
   orkestar help
 
 Detach from an attached terminal with ctrl+b q.

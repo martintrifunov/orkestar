@@ -73,8 +73,8 @@ func runGit(ctx context.Context, args ...string) (string, error) {
 
 // ChangedFile is one entry from `git status --porcelain`.
 type ChangedFile struct {
-	Path   string
-	Status string
+	Path   string `json:"path"`
+	Status string `json:"status"`
 }
 
 // ChangedFiles lists files with uncommitted changes (staged, unstaged, or
