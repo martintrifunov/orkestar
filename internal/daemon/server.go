@@ -37,6 +37,7 @@ type Snapshot struct {
 	Permissions []PermissionRequest `json:"permissions"`
 	Tasks       []workflow.Task     `json:"tasks"`
 	Leases      []workflow.Lease    `json:"leases"`
+	Artifacts   []workflow.Artifact `json:"artifacts"`
 }
 
 type Server struct {
@@ -51,6 +52,7 @@ type Server struct {
 	permissions map[string]PermissionRequest
 	tasks       *workflow.Board
 	leases      *workflow.LeaseManager
+	artifacts   *workflow.ArtifactStore
 	stop        chan struct{}
 	stopOnce    sync.Once
 }
@@ -65,6 +67,7 @@ func NewServer(socketPath string) *Server {
 		permissions: make(map[string]PermissionRequest),
 		tasks:       workflow.NewBoard(),
 		leases:      workflow.NewLeaseManager(),
+		artifacts:   workflow.NewArtifactStore(),
 		stop:        make(chan struct{}),
 	}
 }
@@ -214,6 +217,8 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.acquireLease(request.Params)
 	case "resource.release":
 		result, err = s.releaseLease(request.Params)
+	case "artifact.create":
+		result, err = s.createArtifact(request.Params)
 	default:
 		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
 	}
@@ -267,6 +272,7 @@ func (s *Server) snapshot() Snapshot {
 		Permissions: permissions,
 		Tasks:       s.tasks.List(),
 		Leases:      s.leases.ListAll(),
+		Artifacts:   s.artifacts.List(),
 	}
 }
 
