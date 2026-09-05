@@ -358,11 +358,21 @@ func runReset(paths runtimepath.Paths, args []string) error {
 		return nil
 	}
 
-	var summary daemon.ResetSummary
-	if err := client.Call(ctx, "system.reset", map[string]any{"confirm": true}, &summary); err != nil {
+	// Always retire the running binary first. In particular, an older daemon
+	// need not understand system.reset; only the fresh binary receives it.
+	if err := daemonclient.Stop(ctx, paths.Socket); err != nil {
 		return err
 	}
-	fmt.Println("Reset complete. Cleared:")
+	if err := daemonclient.Ensure(ctx, paths); err != nil {
+		return err
+	}
+	var summary daemon.ResetSummary
+	resetErr := client.Call(ctx, "system.reset", map[string]any{"confirm": true}, &summary)
+	stopErr := daemonclient.Stop(ctx, paths.Socket)
+	if err := errors.Join(resetErr, stopErr); err != nil {
+		return err
+	}
+	fmt.Println("Reset complete. Daemon stopped. Cleared:")
 	for _, line := range []struct {
 		label string
 		count int

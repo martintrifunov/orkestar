@@ -18,6 +18,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("ORKESTAR_TEST_DAEMON") == "1" && len(os.Args) == 3 && os.Args[1] == "daemon" && os.Args[2] == "serve" {
+		if err := run(os.Args[1:]); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	// The fixture agent launches the same private bridge as a real CLI hook.
 	if len(os.Args) == 2 && os.Args[1] == "hook" {
 		if err := runHook(); err != nil {
