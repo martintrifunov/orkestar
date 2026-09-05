@@ -1,5 +1,3 @@
-//go:build !windows
-
 package attach
 
 import (
@@ -10,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/charmbracelet/x/term"
 
@@ -66,9 +62,8 @@ func Terminal(ctx context.Context, client *ipc.Client, terminalID string, input 
 		return err
 	}
 
-	resizeSignals := make(chan os.Signal, 1)
-	signal.Notify(resizeSignals, syscall.SIGWINCH)
-	defer signal.Stop(resizeSignals)
+	resizeSignals, stopResize := watchResize()
+	defer stopResize()
 
 	resultChannel := make(chan error, 2)
 	go receiveOutput(stream, output, resultChannel)
