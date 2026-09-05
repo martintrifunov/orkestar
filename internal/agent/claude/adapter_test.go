@@ -2,6 +2,7 @@ package claude_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,17 +97,21 @@ func waitForState(t *testing.T, session agent.Session, want agent.State) {
 	t.Helper()
 
 	deadline := time.After(5 * time.Second)
+	var seen []string
 	for {
 		select {
 		case event, ok := <-session.Events():
 			if !ok {
-				t.Fatalf("events channel closed before reaching state %q", want)
+				t.Fatalf("events channel closed before reaching state %q, saw %v", want, seen)
 			}
+			seen = append(seen, fmt.Sprintf("%v(%s)", event.State, event.Reason))
 			if event.State == want {
 				return
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for state %q", want)
+			// Report what did arrive: a wrong terminal state and no state at
+			// all need different fixes, and this only fails under CI load.
+			t.Fatalf("timed out waiting for state %q; saw %v, session reports %v", want, seen, session.State())
 		}
 	}
 }
