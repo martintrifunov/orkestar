@@ -1,5 +1,3 @@
-//go:build !windows
-
 package daemonclient
 
 import (
@@ -7,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/ipc"
@@ -35,12 +32,14 @@ func Ensure(ctx context.Context, paths runtimepath.Paths) error {
 	command.Stdin = nil
 	command.Stdout = logFile
 	command.Stderr = logFile
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	configureDaemon(command)
 	if err := command.Start(); err != nil {
 		logFile.Close()
 		return fmt.Errorf("start daemon: %w", err)
 	}
-	_ = command.Process.Release()
+	// Reap a daemon we started if this client remains alive through shutdown.
+	// Exiting the client still leaves the detached daemon running.
+	go func() { _ = command.Wait() }()
 	_ = logFile.Close()
 
 	deadline := time.Now().Add(4 * time.Second)
