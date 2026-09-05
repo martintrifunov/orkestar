@@ -96,17 +96,14 @@ func TestLaunchInteractiveAgentBridgesToAttachableTerminal(t *testing.T) {
 		t.Fatalf("expected bridged terminal %q in snapshot.Terminals: %#v", launched.TerminalID, snapshot.Terminals)
 	}
 
-	stream, err := client.OpenStream(callContext, "terminal.attach", map[string]string{
-		"terminal_id": launched.TerminalID,
-	}, new(struct {
-		Replay string `json:"replay"`
-	}))
-	if err != nil {
-		t.Fatalf("attach bridged terminal: %v", err)
-	}
+	// The fixture prints as soon as it starts, so that output can already be on
+	// the daemon's screen when the attach completes. Search the replay the
+	// attach returns as well as the events that follow it; watching only the
+	// events makes the test a race the launch usually wins on Linux.
+	stream, replay := openTerminal(t, callContext, client, launched.TerminalID)
 	defer stream.Close()
 
-	readUntil(t, stream, nil, []byte("ready"))
+	readUntil(t, stream, replay, []byte("ready"))
 
 	// Prompting the agent must produce output on the SAME terminal stream,
 	// proving prompt and terminal attach share one underlying PTY.

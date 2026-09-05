@@ -94,6 +94,12 @@ func startEmbeddedTestTerminal(t *testing.T, client *ipc.Client, command []strin
 func waitForEmbeddedEvent(t *testing.T, term *embeddedTerminal, want string) {
 	t.Helper()
 
+	// The attach response carries the current screen, so the content may be
+	// there before any event arrives. Check it first rather than waiting for an
+	// event that a fast-starting fixture never produces.
+	if strings.Contains(term.emulator.Render(), want) {
+		return
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		var msg tea.Msg
