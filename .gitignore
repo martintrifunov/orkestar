@@ -4,3 +4,4 @@
 *.test
 /orkestar
 __pycache__/
+/orkestar.exe

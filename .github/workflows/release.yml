@@ -1,0 +1,62 @@
+name: Release binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild
+        required: true
+        default: v0.1.0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Package all platforms
+        run: python3 scripts/package-release.py "$RELEASE_TAG"
+      - name: Generate Homebrew formula from the published tag
+        run: python3 scripts/package-release.py "$RELEASE_TAG" --formula-only
+      - name: Upload archives, checksums and formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/*.zip dist/*.tar.gz dist/SHA256SUMS dist/orkestar.rb --clobber
+      - name: Update personal Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN is unset. Copy the release's orkestar.rb into homebrew-tap/Formula/."
+            exit 0
+          fi
+          sha=$(gh api repos/martintrifunov/homebrew-tap/contents/Formula/orkestar.rb --jq .sha 2>/dev/null || true)
+          python3 - "$RELEASE_TAG" "$sha" <<'PY'
+          import base64, json, pathlib, sys
+          payload = {'message': 'Update Orkestar to ' + sys.argv[1],
+                     'content': base64.b64encode(pathlib.Path('dist/orkestar.rb').read_bytes()).decode()}
+          if sys.argv[2]:
+              payload['sha'] = sys.argv[2]
+          pathlib.Path('dist/tap-update.json').write_text(json.dumps(payload))
+          PY
+          gh api --method PUT repos/martintrifunov/homebrew-tap/contents/Formula/orkestar.rb --input dist/tap-update.json
