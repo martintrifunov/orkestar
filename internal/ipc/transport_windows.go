@@ -38,6 +38,18 @@ func Listen(path string) (net.Listener, error) {
 		SecurityDescriptor: "D:P(A;;GA;;;" + user.User.Sid.String() + ")",
 	})
 }
-func PrepareListener(path string) error  { return nil }
+
+// A live pipe means another daemon owns this runtime path. Unlike a Unix
+// socket, a pipe leaves nothing stale behind, so there is nothing to remove.
+func PrepareListener(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	conn, err := winio.DialPipeContext(ctx, pipeName(path))
+	if err != nil {
+		return nil
+	}
+	conn.Close()
+	return ErrAlreadyRunning
+}
 func RestrictListener(path string) error { return nil }
 func RemoveListener(path string) error   { return nil }
