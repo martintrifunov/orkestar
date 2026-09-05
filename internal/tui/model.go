@@ -159,9 +159,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			e := newTextEditor(message.doc)
+			e.syntax = m.settings.syntaxEnabled()
 			p := m.localPane(message.doc.Path, message.root, e)
 			p.editor = e
+			return m, e.highlight()
 		}
+	case highlightedMsg:
+		return m, message.editor.applyHighlight(message)
 	case reviewLoaded:
 		if m.findPane(message.pane.terminalID) == message.pane {
 			message.pane.review = message.review
@@ -169,10 +173,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.resizePanes()
 		}
 	case tea.ClipboardMsg:
+		var cmd tea.Cmd
 		if m.embedded != nil && m.embedded.editor == m.clipboardTarget && m.clipboardTarget != nil && !m.sidebarFocused && !m.filePrompt && !m.settingsOpen {
 			m.clipboardTarget.Paste(message.Content)
+			cmd = m.clipboardTarget.highlight()
 		}
 		m.clipboardTarget = nil
+		return m, cmd
 	case tea.MouseMotionMsg:
 		if m.embedded != nil && m.embedded.editor != nil && message.Mouse().Button != tea.MouseLeft {
 			m.embedded.editor.dragging = false
@@ -250,6 +257,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
 			m.embedded.emulator.Paste(message.Content)
+			if m.embedded.editor != nil {
+				return m, m.embedded.editor.highlight()
+			}
 		}
 	case tea.KeyPressMsg:
 		if m.filePrompt || m.settingsOpen {

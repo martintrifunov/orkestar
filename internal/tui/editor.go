@@ -6,9 +6,28 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/martintrifunov/orkestar/internal/files"
+	"github.com/martintrifunov/orkestar/internal/syntax"
 )
+
+// syntaxStyles is built once from the fixed palette so rendering a line does
+// not allocate a style per colored run.
+var syntaxStyles = func() map[string]lipgloss.Style {
+	styles := make(map[string]lipgloss.Style, len(syntax.Colors()))
+	for _, color := range syntax.Colors() {
+		styles[color] = lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	}
+	return styles
+}()
+
+// highlightedMsg carries a finished background lex back to the UI goroutine.
+type highlightedMsg struct {
+	editor  *textEditor
+	version int
+	result  syntax.Result
+}
 
 type editState struct {
 	text           []rune
@@ -23,10 +42,55 @@ type textEditor struct {
 	undo, redo                               []editState
 	status                                   string
 	dragging                                 bool
+
+	// version counts text mutations. spansVersion records which version the
+	// colors were lexed from, so a stale background result can be discarded
+	// and a superseded one can be relexed.
+	highlighting bool
+	syntax       bool
+	version      int
+	spansVersion int
+	language     string
+	spans        [][]syntax.Span
 }
 
 func newTextEditor(d *files.Document) *textEditor {
-	return &textEditor{doc: d, text: []rune(d.Text), anchor: -1, columns: 60, rows: 20}
+	return &textEditor{doc: d, text: []rune(d.Text), anchor: -1, columns: 60, rows: 20, syntax: true, spansVersion: -1}
+}
+
+// highlight lexes the document off the UI goroutine. Lexing costs roughly a
+// millisecond per kilobyte, far too much to run while rendering, so the view
+// keeps the previous colors until the new ones arrive: only the line being
+// edited can briefly show colors one keystroke old. One lex runs at a time.
+func (e *textEditor) highlight() tea.Cmd {
+	if !e.syntax || e.highlighting || e.spansVersion == e.version {
+		return nil
+	}
+	e.highlighting = true
+	editor, version, name, text := e, e.version, e.doc.Path, string(e.text)
+	return func() tea.Msg { return highlightedMsg{editor, version, syntax.Highlight(name, text)} }
+}
+
+// applyHighlight stores a background result unless a newer one already landed.
+func (e *textEditor) applyHighlight(msg highlightedMsg) tea.Cmd {
+	e.highlighting = false
+	if msg.version >= e.spansVersion {
+		e.spans = msg.result.Lines
+		e.language = msg.result.Language
+		e.spansVersion = msg.version
+	}
+	return e.highlight()
+}
+
+// setSyntax turns highlighting on or off for this open buffer.
+func (e *textEditor) setSyntax(on bool) tea.Cmd {
+	e.syntax = on
+	if !on {
+		e.spans, e.language, e.spansVersion = nil, "", e.version
+		return nil
+	}
+	e.spansVersion = -1
+	return e.highlight()
 }
 func (e *textEditor) dirty() bool { return string(e.text) != e.doc.Text }
 func (e *textEditor) title() string {
@@ -65,6 +129,7 @@ func (e *textEditor) replace(s string) {
 	e.cursor = a + len(r)
 	e.anchor = -1
 	e.status = ""
+	e.version++
 	e.reveal()
 }
 func (e *textEditor) rowCol() (int, int) {
@@ -118,23 +183,8 @@ func (e *textEditor) Render() string {
 	for row, line := range lines {
 		r := []rune(line)
 		if row >= e.top && len(out) < e.rows-1 {
-			var content strings.Builder
-			for col, c := range r {
-				if col >= e.left {
-					s := string(c)
-					if c == '\t' {
-						s = " "
-					}
-					if unicode.IsControl(c) {
-						s = "·"
-					}
-					if at+col >= a && at+col < b {
-						s = selectedStyle.Render(s)
-					}
-					content.WriteString(s)
-				}
-			}
-			out = append(out, fmt.Sprintf("%4d │", row+1)+ansi.Truncate(content.String(), max(1, e.columns-6), ""))
+			content := e.renderLine(row, r, a, b, at)
+			out = append(out, fmt.Sprintf("%4d │", row+1)+ansi.Truncate(content, max(1, e.columns-6), ""))
 		}
 		at += len(r) + 1
 	}
@@ -145,9 +195,65 @@ func (e *textEditor) Render() string {
 	status := e.status
 	if status == "" {
 		status = fmt.Sprintf("Ln %d, Col %d", row+1, col+1)
+		if e.language != "" {
+			status += " · " + e.language
+		}
 	}
 	out = append(out, dimStyle.Render(status))
 	return strings.Join(out, "\n")
+}
+
+// renderLine styles one line, grouping neighbouring runes that share a color
+// and selection state into a single escape sequence.
+func (e *textEditor) renderLine(row int, r []rune, selectionStart, selectionEnd, offset int) string {
+	colors := make([]string, len(r))
+	if row < len(e.spans) {
+		for _, s := range e.spans[row] {
+			// Colors can be one keystroke behind the text while a background
+			// lex is in flight, so clamp spans to the line instead of trusting
+			// their offsets.
+			for i := max(0, s.Start); i < min(s.End, len(r)); i++ {
+				colors[i] = s.Color
+			}
+		}
+	}
+	selected := func(col int) bool { return offset+col >= selectionStart && offset+col < selectionEnd }
+	var out strings.Builder
+	for start := max(0, e.left); start < len(r); {
+		end := start + 1
+		for end < len(r) && colors[end] == colors[start] && selected(end) == selected(start) {
+			end++
+		}
+		segment := displayRunes(r[start:end])
+		switch style, ok := syntaxStyles[colors[start]]; {
+		case selected(start):
+			out.WriteString(selectedStyle.Render(segment))
+		case ok:
+			out.WriteString(style.Render(segment))
+		default:
+			out.WriteString(segment)
+		}
+		start = end
+	}
+	return out.String()
+}
+
+// displayRunes substitutes runes the pane cannot show literally. A tab would
+// be expanded to the outer terminal's stop past the pane width and wrap the
+// row; control characters would move the cursor.
+func displayRunes(r []rune) string {
+	var b strings.Builder
+	for _, c := range r {
+		switch {
+		case c == '\t':
+			b.WriteRune(' ')
+		case unicode.IsControl(c):
+			b.WriteRune('·')
+		default:
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
 }
 func (e *textEditor) Cursor() (int, int, bool) {
 	row, col := e.rowCol()
@@ -242,6 +348,7 @@ func (e *textEditor) key(k tea.KeyPressMsg) tea.Cmd {
 			e.text = s.text
 			e.cursor = s.cursor
 			e.anchor = s.anchor
+			e.version++
 			e.reveal()
 		}
 		return nil

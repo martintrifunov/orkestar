@@ -14,7 +14,7 @@ continues to type into that agent.
 | Open agent picker | Ctrl+b, a |
 | Open workspace/task worktree review | Ctrl+b, d |
 | Find/open/create a file | Ctrl+b, e |
-| Choose editor mode | Ctrl+b, comma |
+| Editor settings, including syntax highlighting | Ctrl+b, comma |
 | Focus sidebar | Ctrl+b, Tab |
 | Close focused pane | Ctrl+b, q |
 | Explicitly discard a dirty standard editor | Ctrl+b, x |
@@ -60,6 +60,27 @@ again from the standard editor.
 - Ctrl+F searches; Enter finds the next match; Esc closes search.
 - Home/End, Page Up/Down and the wheel navigate the file.
 
+## Syntax highlighting
+
+Source and configuration files are colored as you edit them. The language is
+picked from the filename, or from the content when there is no useful extension,
+so a shebang script called `deploy` is still recognized. Around 300 languages are
+covered, including Go, Python, TypeScript, JavaScript, Rust, C, C++, Java, Ruby,
+PHP, SQL, HTML, CSS, YAML, TOML, JSON, Bash, Dockerfile, Makefile, Terraform and
+Markdown. The status line names the detected language next to the cursor
+position, which is the quickest way to confirm highlighting is working.
+
+The colors are Orkestar's own: the accent gold for keywords, and the same green,
+salmon and blue the review pane uses, plus teal for types, peach for numbers,
+violet for builtins and constants, and slate for operators. Comments use the
+interface gray. Plain identifiers keep the default foreground so code does not
+turn into a wall of color. Selected text always wins over syntax color.
+
+Press `h` in the editor settings (`Ctrl+b`, comma) to turn highlighting off or
+on, including for files that are already open, or set `"syntax": false` in
+`tui.json`. Files above 256 KiB are shown uncolored. Colouring runs in the
+background, so typing never waits for it.
+
 If an agent changes the file after it was opened, saving reports a conflict and
 keeps the agent's disk version. Keep or copy your buffer, discard/reopen, and
 reconcile the changes. Normal pane closing and quitting refuse unsaved standard
@@ -84,7 +105,8 @@ For another terminal editor:
 {
   "editor": "custom",
   "command": ["nvim", "-c", "set mouse=a"],
-  "max_panes": 16
+  "max_panes": 16,
+  "syntax": true
 }
 ```
 

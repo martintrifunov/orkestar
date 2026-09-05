@@ -51,6 +51,7 @@ each vertical slice before broadening the surface.
 - [x] Git worktree association
 - [x] Persistent PR-style review pane with file selection and line numbers
 - [x] Standard text editor with mouse, undo, search and conflict-checked saves
+- [x] Syntax highlighting in the standard editor, in the Orkestar palette
 - [x] Configurable native Vim/Nano/custom terminal editor panes
 - [x] Test/log/diff artifacts
 - [x] Reviewer-agent workflow

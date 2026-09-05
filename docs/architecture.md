@@ -164,7 +164,10 @@ screens are currently memory-only and are unavailable after daemon restart.
 ## Dependency boundaries
 
 Bubble Tea is confined to `internal/tui`. PTY and virtual-terminal libraries
-are confined to `internal/pty` and `internal/terminal`. Domain packages consume
+are confined to `internal/pty` and `internal/terminal`. Syntax lexing is
+confined to `internal/syntax`, which returns rune offsets and hex colors so no
+lexer type reaches the renderer. See
+[ADR 0006](decisions/0006-syntax-highlighting.md). Domain packages consume
 small Orkestar-owned interfaces so dependencies can be replaced without broad
 rewrites.
 
@@ -182,7 +185,9 @@ panes instead of replacing one. A window too small for every leaf shows only the
 focused pane; hidden attachments remain alive and cycle with F6. Mouse clicks and
 `Ctrl+b o` change focus. Picker, read-only scrollback and prompt overlays occupy
 the content area. Git review and standard file editing have their own persistent
-panes; native Vim/Nano use daemon-owned terminals. See
+panes; native Vim/Nano use daemon-owned terminals. The standard editor colors
+source and configuration files, lexing in the background so typing never waits
+for it. See
 [ADR 0004](decisions/0004-review-and-editor-panes.md) and
 [ADR 0005](decisions/0005-nested-split-panes.md).
 

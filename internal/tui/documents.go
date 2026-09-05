@@ -19,7 +19,12 @@ type editorSettings struct {
 	Editor   string   `json:"editor"`
 	Command  []string `json:"command,omitempty"`
 	MaxPanes int      `json:"max_panes,omitempty"`
+	// Syntax is a pointer so an absent key means on, and "syntax": false in
+	// tui.json is distinguishable from the zero value.
+	Syntax *bool `json:"syntax,omitempty"`
 }
+
+func (s editorSettings) syntaxEnabled() bool { return s.Syntax == nil || *s.Syntax }
 
 const (
 	defaultMaxPanes = 16
@@ -261,7 +266,7 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k.String() == "ctrl+v" {
 			m.clipboardTarget = p.editor
 		}
-		return m, p.editor.key(k)
+		return m, tea.Batch(p.editor.key(k), p.editor.highlight())
 	}
 	if p.review != nil {
 		r := p.review
@@ -291,7 +296,11 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 func (m Model) promptView() string {
 	if m.settingsOpen {
-		return "Editor settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nCurrent: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nChanges apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
+		syntax := "on"
+		if !m.settings.syntaxEnabled() {
+			syntax = "off"
+		}
+		return "Editor settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\n\nCurrent: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
 	}
 	matches := m.matches()
 	var lines []string
@@ -314,6 +323,25 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.settingsOpen {
+		if k.String() == "h" {
+			on := !m.settings.syntaxEnabled()
+			m.settings.Syntax = &on
+			if m.err = m.settings.save(); m.err != nil {
+				return m, nil
+			}
+			m.settingsOpen = false
+			m.notice = "Syntax highlighting: off"
+			if on {
+				m.notice = "Syntax highlighting: on"
+			}
+			var cmds []tea.Cmd
+			for _, p := range m.visiblePanes() {
+				if p.editor != nil {
+					cmds = append(cmds, p.editor.setSyntax(on))
+				}
+			}
+			return m, tea.Batch(cmds...)
+		}
 		modes := map[string]string{"1": "standard", "2": "vim", "3": "nano"}
 		if mode, ok := modes[k.String()]; ok {
 			m.settings.Editor = mode

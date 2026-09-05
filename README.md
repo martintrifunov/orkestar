@@ -49,6 +49,8 @@ go build -o ./orkestar ./cmd/orkestar
   Each action needs its own prefix.
 - `Ctrl+b`, then `d`: review changes; `e`: edit a file; comma: editor settings.
   Choose standard keyboard/mouse editing, native Vim, native Nano, or a custom command.
+  The standard editor highlights around 300 languages, including YAML, TOML,
+  JSON and shell, in Orkestar's own palette. Press `h` in settings to toggle it.
 - `Ctrl+b`, then `a`: another agent; `n`: another shell.
 - Click a pane to focus it. Up to 16 panes are open at once (`max_panes` in
   `tui.json`); beyond that, new panes are refused until one is closed. Nothing

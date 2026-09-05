@@ -137,7 +137,7 @@ while IFS= read -r line; do printf 'received:%s\r\n' "$line"; done
 
 func TestProgramEditsAndReviewsFileWithRealKeys(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "code.txt")
+	path := filepath.Join(dir, "code.go")
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -195,8 +195,11 @@ func TestProgramEditsAndReviewsFileWithRealKeys(t *testing.T) {
 	wait("Open a session")
 	send("e")
 	wait("Open or create")
-	send("code.txt\r")
+	send("code.go\r")
 	wait("Ctrl+S save")
+	// The status line naming the language proves the background lexer ran and
+	// delivered its result through the real program loop.
+	wait("· Go")
 	send("\x01edited λ\r\x13")
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -213,7 +216,7 @@ func TestProgramEditsAndReviewsFileWithRealKeys(t *testing.T) {
 	wait("File 1/1")
 	wait("edited λ")
 	send("\x02o")
-	wait("code.txt")
+	wait("code.go")
 	send("\x02\t")
 	send("q")
 	select {

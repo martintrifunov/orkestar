@@ -59,6 +59,26 @@ and checked against the release digest. It was not installed globally. Codex
 hook trust was not bypassed or approved automatically. No global agent settings
 were edited. Existing user daemon sessions were left running.
 
+## Syntax highlighting
+
+`internal/syntax` tests assert the expected color for keywords, comments,
+strings, numbers, constants, keys and variables in Go, YAML, TOML, JSON, Bash,
+Python, Rust and TypeScript; that spans stay inside their line, do not overlap
+and use rune rather than byte offsets across multi-byte characters; that a
+shebang is detected without an extension; and that plain text, unknown content
+and oversized input return nothing rather than an error.
+
+TUI tests cover the editor side: colors appear for each of those languages and
+the status line names the language, highlighting changes color without moving
+any text, cursor or click position, selection overrides syntax color, colors
+stay aligned under horizontal scroll, stale results are discarded while
+superseded ones schedule a fresh pass, spans from a longer version cannot
+overrun a shortened line, the settings toggle clears and restores colors in
+already-open buffers, and a highlighted pane still fits inside its box with no
+raw tabs. The real outer-PTY editor test now opens a Go file and waits for the
+language in the status line, so the background lexer is exercised through the
+actual program loop.
+
 ## Live authenticated matrix
 
 `scripts/live-agents.py` exercises what fixtures cannot: real model turns from a
