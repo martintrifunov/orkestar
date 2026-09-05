@@ -222,3 +222,131 @@ func TestProgramEditsAndReviewsFileWithRealKeys(t *testing.T) {
 		t.Fatal("document TUI did not quit")
 	}
 }
+
+// Drive real Ctrl+b v/s keystrokes through Bubble Tea's decoder in an outer
+// PTY and check that each split produces another visible shell pane, that a
+// stacked split followed by a side-by-side split nests rather than rearranges,
+// and that closing one pane leaves the others running.
+func TestProgramNestedSplitsWithRealKeys(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	_, socket := startEmbeddedTestDaemonWithSocket(t)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := pty.Start(pty.StartOptions{
+		Command: executable, Arguments: []string{"-test.run=^TestTUIProcess$"},
+		Columns: 170, Rows: 48,
+		Env: append(os.Environ(), "TERM=xterm-256color", "SHELL=/bin/sh", "ORKESTAR_TEST_TUI=1",
+			"ORKESTAR_TEST_SOCKET="+socket, "ORKESTAR_TEST_DIRECTORY="+dir,
+			"ORKESTAR_TUI_CONFIG="+filepath.Join(t.TempDir(), "tui.json"), "PS1=$ "),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := terminal.NewScreen(170, 48)
+	inputDone, outputDone := make(chan struct{}), make(chan struct{})
+	go func() { defer close(inputDone); _, _ = io.Copy(process, screen) }()
+	go func() { defer close(outputDone); _, _ = io.Copy(screen, process) }()
+	defer func() {
+		_ = screen.Close()
+		_ = process.Close()
+		for _, done := range []chan struct{}{inputDone, outputDone} {
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Error("TUI worker did not stop")
+			}
+		}
+	}()
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(screen.Render(), want) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("missing %q:\n%s", want, screen.Render())
+	}
+	send := func(text string) {
+		t.Helper()
+		if _, err := process.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// markPane writes a unique marker into the focused shell so each pane can
+	// be located in the rendered frame independently of the others. The marker
+	// is assembled by printf so the echoed command line does not contain it and
+	// each pane matches exactly one rendered row.
+	markPane := func(suffix string) {
+		t.Helper()
+		send("printf 'pane-%s\\n' " + suffix + "\r")
+		wait("pane-" + suffix)
+	}
+	// paneRows reports which rendered rows contain a marker, which is how the
+	// test distinguishes a side-by-side split from a stacked one.
+	paneRows := func(marker string) []int {
+		var rows []int
+		for i, line := range strings.Split(screen.Render(), "\n") {
+			if strings.Contains(line, marker) {
+				rows = append(rows, i)
+			}
+		}
+		return rows
+	}
+	wait("Open a session")
+	send("n")
+	wait("1 pane")
+	markPane("one")
+
+	send("\x02s") // stacked split: a new shell below
+	wait("2 panes")
+	markPane("two")
+	send("\x02v") // side-by-side split of the second pane only
+	wait("3 panes")
+	markPane("three")
+
+	first, second, third := paneRows("pane-one"), paneRows("pane-two"), paneRows("pane-three")
+	if len(first) != 1 || len(second) != 1 || len(third) != 1 {
+		t.Fatalf("expected three distinct panes, got rows %v %v %v:\n%s", first, second, third, screen.Render())
+	}
+	if second[0] != third[0] {
+		t.Fatalf("v did not place the third pane beside the second: rows %v %v", second, third)
+	}
+	if first[0] >= second[0] {
+		t.Fatalf("s did not place the second pane below the first: rows %v %v", first, second)
+	}
+	// Cycling focus does not disturb any pane's content.
+	for i := 0; i < 3; i++ {
+		send("\x02o")
+	}
+	wait("3 panes")
+	for _, marker := range []string{"pane-one", "pane-two", "pane-three"} {
+		if len(paneRows(marker)) != 1 {
+			t.Fatalf("cycling focus disturbed %s:\n%s", marker, screen.Render())
+		}
+	}
+	// Three cycles over three panes return focus to the third pane, so this
+	// closes that pane. Its split collapses and the other shells stay alive.
+	send("\x02q")
+	wait("2 panes")
+	for _, marker := range []string{"pane-one", "pane-two"} {
+		if len(paneRows(marker)) != 1 {
+			t.Fatalf("closing a pane disturbed %s:\n%s", marker, screen.Render())
+		}
+	}
+	if rows := paneRows("pane-three"); len(rows) != 0 {
+		t.Fatalf("closed pane is still rendered at %v:\n%s", rows, screen.Render())
+	}
+	send("\x02\t")
+	wait("esc terminal")
+	send("q")
+	select {
+	case <-process.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("split TUI did not quit")
+	}
+}
