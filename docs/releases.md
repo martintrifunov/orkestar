@@ -11,16 +11,18 @@ and reset over named pipes. Installed agent model-turn/hook validation remains i
 
 Commit and push the reviewed project changes, then tag that commit `v0.1.0` and
 publish a GitHub release. `.github/workflows/release.yml` checks out that exact tag,
-tests it, builds six archives, and uploads them with SHA256SUMS and `orkestar.rb`.
-The workflow can be rerun with an existing release tag. A tag push alone does not
-publish a release or trigger packaging.
+tests it, builds six archives, and uploads them with SHA256SUMS. The workflow can
+be rerun with an existing release tag. A tag push alone does not publish a release
+or trigger packaging.
 
 The formula follows [thisyou's formula](https://github.com/martintrifunov/homebrew-tap/blob/main/Formula/thisyou.rb)
-and builds from the tagged source. To update the tap automatically, set repository
-secret `HOMEBREW_TAP_TOKEN` to a token with Contents read/write access to
-`martintrifunov/homebrew-tap`. Without it, download `orkestar.rb` from the release,
-review it, and commit it as `Formula/orkestar.rb` in that repository. The source
-checksum can only be generated after the tag exists remotely.
+and builds from the tagged source. The tap owns its own updates: `update-orkestar.yml`
+in `martintrifunov/homebrew-tap` reads this repository's latest release, rewrites the
+formula's `url` and `sha256`, then runs `brew audit --strict`, a source build and
+`brew test` before committing. It runs on a schedule and on manual dispatch, so no
+cross-repository token is needed here. Dispatch it after publishing a release rather
+than waiting for the next scheduled run. The source checksum can only be computed
+after the tag exists remotely.
 
 Once the release and formula are published:
 
