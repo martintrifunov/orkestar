@@ -16,8 +16,24 @@ import (
 )
 
 type editorSettings struct {
-	Editor  string   `json:"editor"`
-	Command []string `json:"command,omitempty"`
+	Editor   string   `json:"editor"`
+	Command  []string `json:"command,omitempty"`
+	MaxPanes int      `json:"max_panes,omitempty"`
+}
+
+const (
+	defaultMaxPanes = 16
+	maxPaneLimit    = 64
+)
+
+// paneLimit is the configured open-pane bound. Zero or negative means the
+// default; values above the hard ceiling are clamped so a typo cannot ask the
+// layout for hundreds of unusable boxes.
+func (s editorSettings) paneLimit() int {
+	if s.MaxPanes <= 0 {
+		return defaultMaxPanes
+	}
+	return min(s.MaxPanes, maxPaneLimit)
 }
 
 func settingsPath() string {
@@ -154,8 +170,9 @@ func (m Model) openDocument(root, name string) tea.Cmd {
 	}
 }
 func (m *Model) roomForPane() bool {
-	if len(m.visiblePanes()) >= 4 {
-		m.notice = "Four panes are open. Close one with Ctrl+b q first."
+	limit := m.settings.paneLimit()
+	if len(m.visiblePanes()) >= limit {
+		m.notice = fmt.Sprintf("%d panes are open (max_panes in tui.json). Close one with Ctrl+b q first.", limit)
 		return false
 	}
 	return true
@@ -171,21 +188,27 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 	switch key {
 	case "o":
 		if len(m.visiblePanes()) < 2 {
-			m.notice = "Only one pane. Ctrl+b v/s opens a second pane."
+			m.notice = "Only one pane. Ctrl+b v/s splits it."
 		} else {
 			m.nextPane()
 			m.notice = ""
 		}
 		return nil, true
 	case "v", "s":
-		m.stacked = key == "s"
-		if len(m.visiblePanes()) < 2 && !m.opening {
-			m.opening = true
-			return m.startTerminal([]string{defaultShell()}), true
+		// Every split opens a new daemon-owned shell beside (v) or below (s)
+		// the focused pane. The target is captured now so a focus change while
+		// the shell starts cannot move the new pane elsewhere.
+		if m.opening {
+			m.notice = "Still opening the previous pane."
+			return nil, true
 		}
-		m.resizePanes()
+		if !m.roomForPane() {
+			return nil, true
+		}
+		m.pendingSplit = &splitRequest{target: m.embedded, stacked: key == "s"}
+		m.opening = true
 		m.notice = ""
-		return nil, true
+		return m.startTerminal([]string{defaultShell()}), true
 	case "d":
 		return m.openReview(), true
 	case "e":
@@ -268,7 +291,7 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 func (m Model) promptView() string {
 	if m.settingsOpen {
-		return "Editor settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nCurrent: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nChanges apply to files opened afterwards.\nEsc closes. Custom terminal command: edit tui.json."
+		return "Editor settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nCurrent: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nChanges apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
 	}
 	matches := m.matches()
 	var lines []string

@@ -7,8 +7,8 @@ continues to type into that agent.
 
 | Action | Shortcut |
 | --- | --- |
-| Side-by-side/grid layout; open a second shell if there is one pane | Ctrl+b, v |
-| Stacked layout; open a second shell if there is one pane | Ctrl+b, s |
+| Split: open a new shell beside the focused pane | Ctrl+b, v |
+| Split: open a new shell below the focused pane | Ctrl+b, s |
 | Focus the next open pane | F6 or Ctrl+b, o |
 | Open another shell | Ctrl+b, n |
 | Open agent picker | Ctrl+b, a |
@@ -19,8 +19,22 @@ continues to type into that agent.
 | Close focused pane | Ctrl+b, q |
 | Explicitly discard a dirty standard editor | Ctrl+b, x |
 
-There are at most four panes. A narrow window shows the focused pane and a hint
-to enlarge the terminal; F6 still cycles hidden panes. Click any pane to focus it.
+## Splits
+
+Splits nest. `Ctrl+b s` then `Ctrl+b v` gives three panes: the first pane on
+top, and the second and third side by side beneath it. Each split divides the
+focused pane in half and leaves every other pane where it was. New agents,
+review panes and editors opened without a split key divide the focused pane
+along its longer edge. Closing a pane hands its space to the pane it was split
+from. The new pane always lands beside the pane that was focused when you
+pressed the key, even if you focus something else while the shell starts.
+
+The default limit is 16 open panes; set `"max_panes"` in `tui.json` (1 to 64).
+Above the limit, opening or splitting is refused with a notice. Nothing is
+replaced silently. When the window is too small for every split, only the
+focused pane is shown with a hint to enlarge the terminal; hidden panes stay
+attached and F6 or `Ctrl+b o` still cycles through them. Click any pane to
+focus it.
 
 ## Review
 
@@ -69,7 +83,8 @@ For another terminal editor:
 ```json
 {
   "editor": "custom",
-  "command": ["nvim", "-c", "set mouse=a"]
+  "command": ["nvim", "-c", "set mouse=a"],
+  "max_panes": 16
 }
 ```
 

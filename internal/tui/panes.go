@@ -18,45 +18,39 @@ type paneRect struct {
 	x, y, width, height int
 }
 
-func (m Model) visiblePanes() []*embeddedTerminal {
-	if len(m.panes) > 0 {
-		return m.panes
+// tree returns the authoritative layout, or a single synthesized leaf when a
+// pane was attached without going through insertPane.
+func (m Model) tree() *splitNode {
+	if m.layout != nil {
+		return m.layout
 	}
 	if m.embedded != nil {
-		return []*embeddedTerminal{m.embedded}
+		return &splitNode{pane: m.embedded}
 	}
 	return nil
 }
+func (m Model) visiblePanes() []*embeddedTerminal {
+	return m.tree().leaves(nil)
+}
+func (m Model) contentArea() (x, y, width, height int) {
+	x = embeddedSidebarWidth(m.width) + 1
+	return x, 2, m.width - x, m.height - 3
+}
+
+// paneRects derives every pane box from the split tree. When any box would be
+// too small to use, only the focused pane is shown at full size; hidden panes
+// keep their attachments and F6 still cycles through them.
 func (m Model) paneRects() []paneRect {
-	panes := m.visiblePanes()
-	if len(panes) == 0 {
+	tree := m.tree()
+	if tree == nil {
 		return nil
 	}
-	x := embeddedSidebarWidth(m.width) + 1
-	w := m.width - x
-	h := m.height - 3
-	columns := len(panes)
-	rows := 1
-	if m.stacked {
-		columns = 1
-		rows = len(panes)
-	} else if len(panes) > 2 {
-		columns = 2
-		rows = (len(panes) + 1) / 2
-	}
-	if w/columns < 24 || h/rows < 7 {
-		panes = []*embeddedTerminal{m.embedded}
-		columns = 1
-		rows = 1
-	}
-	var rects []paneRect
-	for i, p := range panes {
-		col, row := i%columns, i/columns
-		left := x + col*w/columns
-		top := 2 + row*h/rows
-		right := x + (col+1)*w/columns
-		bottom := 2 + (row+1)*h/rows
-		rects = append(rects, paneRect{p, left, top, right - left, bottom - top})
+	x, y, w, h := m.contentArea()
+	rects := tree.rects(x, y, w, h, nil)
+	for _, r := range rects {
+		if r.width < minPaneWidth || r.height < minPaneHeight {
+			return []paneRect{{m.embedded, x, y, w, h}}
+		}
 	}
 	return rects
 }
@@ -65,34 +59,59 @@ func (m Model) resizePanes() {
 		sendEmbeddedResize(r.terminal, max(1, r.width-4), max(1, r.height-2))
 	}
 }
-func (m *Model) addPane(p *embeddedTerminal) {
-	if len(m.panes) == 0 && m.embedded != nil {
-		m.panes = []*embeddedTerminal{m.embedded}
-	}
-	if len(m.panes) >= 4 {
-		if !m.canClose(m.embedded) {
-			p.close()
-			return
+
+// autoStacked picks the orientation for a pane inserted without an explicit
+// split key: split the target along its longer visual edge, treating a cell
+// as roughly twice as tall as it is wide.
+func (m Model) autoStacked(target *embeddedTerminal) bool {
+	x, y, w, h := m.contentArea()
+	for _, r := range m.tree().rects(x, y, w, h, nil) {
+		if r.terminal == target {
+			return r.width < 2*r.height
 		}
-		m.removePane(m.embedded)
 	}
-	m.panes = append(m.panes, p)
+	return w < 2*h
+}
+
+// addPane inserts p beside the focused pane. Callers check roomForPane first;
+// a pane is never replaced silently.
+func (m *Model) addPane(p *embeddedTerminal) {
+	m.insertPane(p, m.embedded, m.autoStacked(m.embedded))
+}
+
+// insertPane places p beside or below target and focuses it. A target that is
+// no longer open falls back to the focused pane.
+func (m *Model) insertPane(p, target *embeddedTerminal, stacked bool) {
+	if m.layout == nil && m.embedded != nil {
+		m.layout = &splitNode{pane: m.embedded}
+	}
+	if leaf, _ := m.layout.find(target, nil); leaf == nil {
+		target = m.embedded
+	}
+	m.layout = m.layout.insert(target, p, stacked)
 	m.embedded = p
 	m.sidebarFocused = false
 	m.resizePanes()
 }
+
+// removePane closes p's attachment and collapses its split. Focus moves to the
+// pane that inherits its space unless another pane was focused.
 func (m *Model) removePane(p *embeddedTerminal) {
 	p.close()
-	var panes []*embeddedTerminal
-	for _, existing := range m.visiblePanes() {
-		if existing != p {
-			panes = append(panes, existing)
+	tree := m.tree()
+	next := m.embedded
+	if next == p {
+		next = nil
+		if heirs := tree.sibling(p); len(heirs) > 0 {
+			next = heirs[0]
 		}
 	}
-	m.panes = panes
-	m.embedded = nil
-	if len(panes) > 0 {
-		m.embedded = panes[len(panes)-1]
+	m.layout = tree.remove(p)
+	m.embedded = next
+	if m.embedded == nil {
+		if leaves := m.layout.leaves(nil); len(leaves) > 0 {
+			m.embedded = leaves[len(leaves)-1]
+		}
 	}
 	m.resizePanes()
 }
@@ -125,24 +144,19 @@ func (m Model) renderPanes() string {
 	if len(rects) == 0 {
 		return ""
 	}
-	var rows []string
-	var row []string
-	lastY := rects[0].y
+	boxes := map[*embeddedTerminal]string{}
 	for _, r := range rects {
-		if r.y != lastY {
-			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
-			row = nil
-			lastY = r.y
-		}
 		style := panelStyle
 		if r.terminal == m.embedded && !m.sidebarFocused {
 			style = style.BorderForeground(lipgloss.Color("#D7A84B"))
 		}
 		content := r.terminal.emulator.Render()
-		row = append(row, style.Width(r.width).Height(r.height).Render(fitPane(content, r.width-4, r.height-2)))
+		boxes[r.terminal] = style.Width(r.width).Height(r.height).Render(fitPane(content, r.width-4, r.height-2))
 	}
-	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
-	return strings.Join(rows, "\n")
+	if len(rects) == 1 {
+		return boxes[rects[0].terminal]
+	}
+	return m.tree().render(boxes)
 }
 func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if m.pickingAgent || m.viewingDiff || m.viewingHistory || m.filePrompt || m.settingsOpen {

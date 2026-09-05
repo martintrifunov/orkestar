@@ -29,7 +29,7 @@ each vertical slice before broadening the surface.
 - [x] Multiple-client input/resize arbitration and canonical replay
 - [x] Bounded scrollback with TUI history
 - [x] SQLite metadata and explicit daemon-restart recovery
-- [x] Four-pane grid/stacked layouts with mouse focus
+- [x] Nested split-tree layouts with a configurable pane limit and mouse focus
 - [x] Real-PTY TUI regression tests for Claude, Codex and OpenCode fixtures
 
 ## M2: Agent awareness
@@ -88,8 +88,8 @@ each vertical slice before broadening the surface.
 All five requested implementation priorities now have working slices, including
 Codex. The daemon owns terminal state and replies, multiple clients share a
 screen with one controller, metadata survives restart, interactive hook/plugin
-approval bridges use native replies, and the TUI supports four panes with mouse
-focus. No runtime language or GUI rewrite was needed.
+approval bridges use native replies, and the TUI supports nested split panes
+with mouse focus and a configurable limit. No runtime language or GUI rewrite was needed.
 
 Validation distinguishes fixtures from installed agents. Deterministic tests
 exercise all three adapters through prompt, permission allow/deny, completion
@@ -112,6 +112,7 @@ Next priorities:
    review for each CLI; add these results to the versioned validation matrix.
 2. Add macOS/Linux CI, including race and real-PTY regression checks.
 3. Profile full-frame rendering under sustained output and refine layout controls
-   if needed (arbitrary split trees, pane titles, mouse selection).
+   if needed (split ratios and drag resizing, pane titles, mouse selection).
+   Arbitrary split trees shipped in ADR 0005.
 4. Implement the MCP client registry, health checks, policy/audit and serialized
    mutation routing before introducing engine integrations.

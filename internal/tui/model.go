@@ -105,8 +105,8 @@ type Model struct {
 
 	// The sidebar stays usable while a terminal attachment is visible.
 	embedded       *embeddedTerminal
-	panes          []*embeddedTerminal
-	stacked        bool
+	layout         *splitNode
+	pendingSplit   *splitRequest
 	sidebarFocused bool
 	opening        bool
 	ctx            context.Context
@@ -312,7 +312,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				m.pickingAgent = false
-				if m.opening || len(m.snapshot.Adapters) == 0 {
+				if m.opening || len(m.snapshot.Adapters) == 0 || !m.roomForPane() {
 					return m, nil
 				}
 				m.opening = true
@@ -379,6 +379,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			cmd, _ := m.paneAction("e")
 			return m, cmd
 		case "u":
+			if !m.roomForPane() {
+				return m, nil
+			}
 			if cmd := m.resumeSelected(); cmd != nil {
 				m.opening = true
 				return m, cmd
@@ -387,7 +390,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, m.loadSnapshot()
 		case "n":
-			if m.opening {
+			if m.opening || !m.roomForPane() {
 				return m, nil
 			}
 			m.opening = true
@@ -410,6 +413,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.embedded = pane
 				m.resizePanes()
 				m.sidebarFocused = false
+				return m, nil
+			}
+			if !m.roomForPane() {
 				return m, nil
 			}
 			m.opening = true
@@ -442,6 +448,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.opening = false
 		m.loading = false
 		m.err = message.err
+		if message.err != nil {
+			m.pendingSplit = nil
+		}
 		if message.err == nil {
 			m.snapshot.Terminals = append(m.snapshot.Terminals, message.terminal)
 			m.selected = max(0, len(m.snapshot.Terminals)-1)
@@ -450,12 +459,23 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case embeddedReadyMsg:
 		m.opening = false
+		split := m.pendingSplit
+		m.pendingSplit = nil
 		debugf("embeddedReadyMsg: err=%v terminal=%v", message.err, message.terminal != nil)
 		m.err = message.err
 		if message.err != nil {
 			return m, nil
 		}
-		m.addPane(message.terminal)
+		if !m.roomForPane() {
+			// The process keeps running in the daemon; only this attachment ends.
+			message.terminal.close()
+			return m, nil
+		}
+		if split != nil {
+			m.insertPane(message.terminal, split.target, split.stacked)
+		} else {
+			m.addPane(message.terminal)
+		}
 		return m, waitEmbeddedEvent(message.terminal)
 	case embeddedEventMsg:
 		if m.findPane(message.terminalID) != message.terminal {
@@ -877,11 +897,6 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "o" {
 			m.nextPane()
-			return m, nil
-		}
-		if msg.String() == "v" || msg.String() == "s" {
-			m.stacked = msg.String() == "s"
-			m.resizePanes()
 			return m, nil
 		}
 		if msg.String() == "t" {

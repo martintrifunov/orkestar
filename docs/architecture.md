@@ -171,13 +171,20 @@ rewrites.
 ## Embedded terminal rendering
 
 The dashboard keeps Workspaces, Sessions, Tasks, Agents and permissions in the
-left sidebar. Up to four attached terminals appear beside it: two columns (a
-2×2 grid for three/four panes), or vertically stacked. A narrow window shows the
-focused pane; hidden attachments remain alive. Opening a fifth pane replaces the
-focused client attachment. Mouse clicks and `Ctrl+b o` change focus. Picker,
-read-only scrollback and picker overlays occupy the content area. Git review and
-standard file editing have their own persistent panes; native Vim/Nano use
-daemon-owned terminals. See [ADR 0004](decisions/0004-review-and-editor-panes.md).
+left sidebar. Attached terminals appear beside it in a binary split tree: each
+leaf is a pane, each internal node halves its rectangle side by side or stacked.
+`Ctrl+b v`/`s` split the focused leaf and open a new daemon-owned shell there;
+other new panes split the focused leaf along its longer edge. Closing a leaf
+collapses its parent onto the sibling. The tree is the single source for pane
+rectangles, rendering joins, cursor placement, mouse hit testing and PTY sizes.
+A configurable limit (default 16, `max_panes` in `tui.json`) refuses further
+panes instead of replacing one. A window too small for every leaf shows only the
+focused pane; hidden attachments remain alive and cycle with F6. Mouse clicks and
+`Ctrl+b o` change focus. Picker, read-only scrollback and prompt overlays occupy
+the content area. Git review and standard file editing have their own persistent
+panes; native Vim/Nano use daemon-owned terminals. See
+[ADR 0004](decisions/0004-review-and-editor-panes.md) and
+[ADR 0005](decisions/0005-nested-split-panes.md).
 
 The daemon owns one `internal/terminal.Screen` per PTY and starts its reply pump
 before consuming any output. This screen preserves terminal modes, handles

@@ -5,14 +5,16 @@
 
 ## Decision
 
-Keep the TUI and daemon architecture. The same four-pane layout can display
-PTY terminals, a local Git review, and a local standard text editor. Diff and
+Keep the TUI and daemon architecture. The same pane layout (now a split tree,
+see ADR 0005) can display PTY terminals, a local Git review, and a local
+standard text editor. Diff and
 standard editor buffers belong to the disposable client; agent processes and
 native Vim/Nano editors remain daemon-owned PTYs.
 
-Global `Ctrl+b` actions work from both terminal and sidebar focus. `v` selects
-side-by-side/grid layout and `s` selects stacking. If only one pane is open,
-these actions create a second daemon-owned shell. `o` and `F6` cycle open panes.
+Global `Ctrl+b` actions work from both terminal and sidebar focus. `v` and `s`
+originally selected a flat grid or stacked layout and only created a shell when
+one pane was open; ADR 0005 changed them to always split the focused pane and
+open a new shell. `o` and `F6` cycle open panes.
 The UI explicitly reports when there is only one pane or too little space for
 splits. Ordinary letters still reach an active terminal.
 

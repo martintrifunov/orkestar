@@ -83,8 +83,8 @@ func TestSplitKeysCreateAndCyclePanes(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	client := startEmbeddedTestDaemon(t)
 	m := New(client, t.TempDir())
-	m.width = 140
-	m.height = 40
+	m.width = 160
+	m.height = 44
 	first := startEmbeddedTestTerminal(t, client, []string{"/bin/sh", "-c", "printf ready; cat"})
 	ready := openEmbeddedTerminal(client, first.ID, 80, 24)().(embeddedReadyMsg)
 	if ready.err != nil {
@@ -93,40 +93,74 @@ func TestSplitKeysCreateAndCyclePanes(t *testing.T) {
 	m.addPane(ready.terminal)
 	defer func() { m.closePanes() }()
 	key := func(k tea.KeyPressMsg) tea.Cmd { updated, cmd := m.Update(k); m = updated.(Model); return cmd }
-	key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	cmd := key(tea.KeyPressMsg{Code: 'v'})
-	if cmd == nil {
-		t.Fatal("split with one pane did not open another")
+	rectOf := func(p *embeddedTerminal) paneRect {
+		for _, r := range m.paneRects() {
+			if r.terminal == p {
+				return r
+			}
+		}
+		t.Fatalf("pane %s has no rect", p.terminalID)
+		return paneRect{}
 	}
-	updated, open := m.Update(cmd())
-	m = updated.(Model)
-	updated, _ = m.Update(open())
-	m = updated.(Model)
-	if len(m.visiblePanes()) != 2 || len(m.paneRects()) != 2 {
-		t.Fatal("second pane not visible")
+	// split runs the whole launch: Ctrl+b, the key, the daemon start reply and
+	// the attach reply. Every split must yield a new pane.
+	split := func(k rune) *embeddedTerminal {
+		t.Helper()
+		before := len(m.visiblePanes())
+		key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+		cmd := key(tea.KeyPressMsg{Code: k})
+		if cmd == nil {
+			t.Fatalf("%c did not start a shell", k)
+		}
+		updated, open := m.Update(cmd())
+		m = updated.(Model)
+		updated, _ = m.Update(open())
+		m = updated.(Model)
+		if len(m.visiblePanes()) != before+1 || len(m.paneRects()) != before+1 {
+			t.Fatalf("%c: %d panes, want %d", k, len(m.visiblePanes()), before+1)
+		}
+		return m.embedded
+	}
+	one := m.embedded
+	two := split('v')
+	if a, b := rectOf(one), rectOf(two); a.y != b.y || a.x >= b.x {
+		t.Fatalf("v did not put the new pane beside the focused one: %+v %+v", a, b)
+	}
+	untouched := rectOf(one)
+	three := split('s')
+	if a, b := rectOf(two), rectOf(three); a.x != b.x || a.y >= b.y {
+		t.Fatalf("s did not put the new pane below the focused one: %+v %+v", a, b)
+	}
+	if rectOf(one) != untouched {
+		t.Fatalf("stacking the second pane moved the first: %+v -> %+v", untouched, rectOf(one))
+	}
+	four := split('v')
+	if a, b := rectOf(three), rectOf(four); a.y != b.y || a.x >= b.x || rectOf(one) != untouched {
+		t.Fatal("mixed split did not create a fourth pane beside the third")
+	}
+	if len(m.visiblePanes()) != 4 {
+		t.Fatal("expected four distinct panes")
 	}
 	focused := m.embedded
 	key(tea.KeyPressMsg{Code: tea.KeyF6})
 	if m.embedded == focused {
 		t.Fatal("F6 did not cycle")
 	}
-	key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	key(tea.KeyPressMsg{Code: 's'})
-	rects := m.paneRects()
-	if rects[0].y == rects[1].y {
-		t.Fatal("s did not stack panes")
-	}
-	key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	key(tea.KeyPressMsg{Code: 'v'})
-	rects = m.paneRects()
-	if rects[0].x == rects[1].x {
-		t.Fatal("v did not put panes side by side")
-	}
 	m.sidebarFocused = true
 	focused = m.embedded
 	key(tea.KeyPressMsg{Code: 'o'})
 	if m.embedded == focused || m.sidebarFocused {
 		t.Fatal("sidebar next did not focus next pane")
+	}
+	// Closing a middle pane collapses its split; the sibling inherits the space.
+	m.embedded = two
+	key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	key(tea.KeyPressMsg{Code: 'q'})
+	if len(m.visiblePanes()) != 3 || m.embedded != three {
+		t.Fatalf("close did not collapse onto the sibling: %d panes, focus %v", len(m.visiblePanes()), m.embedded)
+	}
+	if r := rectOf(three); r.y != untouched.y || r.height+rectOf(four).height < untouched.height {
+		t.Fatalf("sibling did not take over the closed pane's space: %+v", r)
 	}
 }
 

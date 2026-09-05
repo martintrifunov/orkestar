@@ -10,7 +10,7 @@ targets; game-engine workflows will integrate through MCP.
 
 ## Status
 
-Orkestar has a Go daemon/TUI with up to four embedded terminal panes beside a
+Orkestar has a Go daemon/TUI with nested split panes (16 by default) beside a
 persistent left sidebar. Processes and terminal state survive closing the UI.
 SQLite preserves workspaces, tasks, artifacts and session metadata across daemon
 restart; native agent resume is explicit. Claude Code, Codex and OpenCode support
@@ -44,13 +44,15 @@ go build -o ./orkestar ./cmd/orkestar
 - `a`: choose and launch an installed agent; `n`: launch a shell.
 - `Tab`: switch sidebar section; arrows select; `Enter`: open a session/agent.
 - In a pane, `Ctrl+b`, then `Tab`: focus the sidebar; `Esc`: return to the pane.
-- `Ctrl+b`, then `o` (or `F6`): next pane; `v`: grid; `s`: stacked.
-  With one pane, `v`/`s` opens a second shell. Each action needs its own prefix.
+- `Ctrl+b`, then `v`: open a shell beside the focused pane; `s`: open one below
+  it. Every split creates a new pane; splits nest. `o` (or `F6`): next pane.
+  Each action needs its own prefix.
 - `Ctrl+b`, then `d`: review changes; `e`: edit a file; comma: editor settings.
   Choose standard keyboard/mouse editing, native Vim, native Nano, or a custom command.
 - `Ctrl+b`, then `a`: another agent; `n`: another shell.
-- Click a pane to focus it. Up to four panes are visible; a fifth replaces the
-  focused attachment, leaving its process running.
+- Click a pane to focus it. Up to 16 panes are open at once (`max_panes` in
+  `tui.json`); beyond that, new panes are refused until one is closed. Nothing
+  is ever replaced silently.
 - `Ctrl+b`, then `[`: scrollback; wheel or Page Up/Down scrolls; `Esc` returns.
 - `Ctrl+b`, then `t`: claim input if another client's controller has disconnected.
 - `Ctrl+b`, then `q`: close the pane without stopping its process.
@@ -59,7 +61,7 @@ go build -o ./orkestar ./cmd/orkestar
   an available native permission request. `u` explicitly resumes an inactive agent.
 
 The UI needs at least 50 × 16 terminal cells. Narrow windows show the focused
-pane; wider windows show the selected split layout. Direct full-screen attachment is also available with
+pane; wider windows show the split layout. Direct full-screen attachment is also available with
 `orkestar terminal attach <terminal-id>`.
 
 Codex may ask you to review Orkestar's five command hooks at first launch. Hooks

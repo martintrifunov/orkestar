@@ -14,9 +14,15 @@ The standard suite does not require installed agents, authentication or engines.
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
   isolation, close/reattach one pane, and keep history overlays read-only.
+- Split-tree tests cover mixed orientation splits through real daemon shells
+  (`s` then `v` gives three distinct panes with the first unchanged), nine panes
+  tiling the content area exactly with no overlap after resize, collapse onto the
+  sibling on close, split targets surviving focus changes and launch failures,
+  the configurable pane limit refusing rather than replacing, and narrow windows
+  falling back to the focused pane while F6 still cycles hidden panes.
 - Terminal/PTY tests cover negotiated paste/navigation, bounded history, final
-  output/EOF and bounded input/shutdown. Layout tests cover four panes and narrow
-  windows. Store/recovery tests preserve metadata and expire live process state.
+  output/EOF and bounded input/shutdown. Store/recovery tests preserve metadata
+  and expire live process state.
 - OpenCode plugin tests run with Node when available. Fake SDKs check both native
   permission API shapes, ordered lifecycle events and child-session filtering.
   They do not depend on OpenCode or a provider account.
@@ -69,8 +75,8 @@ has no automatic migration into the new SQLite store.
 
 ## Review/editor follow-up
 
-The split/cycle regression tests cover `Ctrl+b v/s`, `Ctrl+b o`, sidebar actions
-and F6. A real outer-PTY test opens a file through the picker, edits Unicode text,
+The split/cycle regression tests cover `Ctrl+b v/s` creating nested panes,
+`Ctrl+b q` collapsing them, `Ctrl+b o`, sidebar actions and F6. A real outer-PTY test opens a file through the picker, edits Unicode text,
 saves with Ctrl+S, opens its resulting Git diff, cycles panes and quits. Tests
 also cover selection, undo/redo, search paste, conflict detection, file bounds,
 configuration round trips and negotiated mouse reports.
