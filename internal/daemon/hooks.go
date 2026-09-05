@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,7 +156,12 @@ func (s *Server) hookOptions(id, token, adapter string) (string, []string, error
 			}
 		}
 		plugins, _ := config["plugin"].([]any)
-		config["plugin"] = append(plugins, "file://"+path)
+		urlPath := filepath.ToSlash(path)
+		if !strings.HasPrefix(urlPath, "/") {
+			urlPath = "/" + urlPath
+		}
+		pluginURL := (&url.URL{Scheme: "file", Path: urlPath}).String()
+		config["plugin"] = append(plugins, pluginURL)
 		b, _ := json.Marshal(config)
 		env = append(env, "OPENCODE_CONFIG_CONTENT="+string(b))
 	}
