@@ -31,6 +31,7 @@ func TestEncodeKeyControlCombos(t *testing.T) {
 		{"ctrl+a", tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}, "\x01"},
 		{"ctrl+space", tea.KeyPressMsg{Code: ' ', Mod: tea.ModCtrl}, "\x00"},
 		{"enter", tea.KeyPressMsg{Code: tea.KeyEnter}, "\r"},
+		{"shift enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}, "\x1b[13;2u"},
 		{"tab", tea.KeyPressMsg{Code: tea.KeyTab}, "\t"},
 		{"shift+tab", tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, "\x1b[Z"},
 		{"backspace", tea.KeyPressMsg{Code: tea.KeyBackspace}, "\x7f"},

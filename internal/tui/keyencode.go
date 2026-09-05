@@ -13,9 +13,9 @@ import (
 // the byte sequences an interactive CLI expects. It covers what driving an
 // interactive coding-agent CLI needs — plain text, Enter/Tab/Backspace/Esc,
 // Ctrl+letter, arrows, navigation keys, and Alt-prefixing — not the full
-// terminal input surface (no function keys, no Kitty keyboard protocol
-// extended keys). An unrecognized key returns nil, which callers should
-// treat as "nothing to send" rather than an error.
+// terminal input surface (no function keys; CSI-u carries Shift+Enter).
+// An unrecognized key returns nil, which callers should treat as "nothing to
+// send" rather than an error.
 func encodeKey(msg tea.KeyPressMsg) []byte {
 	mod := msg.Mod
 	if mod&tea.ModAlt != 0 {
@@ -34,6 +34,9 @@ func encodeKey(msg tea.KeyPressMsg) []byte {
 
 	switch msg.Code {
 	case tea.KeyEnter:
+		if mod&tea.ModShift != 0 {
+			return []byte("\x1b[13;2u")
+		}
 		return []byte{'\r'}
 	case tea.KeyTab:
 		if mod&tea.ModShift != 0 {

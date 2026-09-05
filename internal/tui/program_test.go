@@ -42,6 +42,8 @@ stty -echo -icanon
 printf '\033[H\033[6n'
 dd bs=1 count=6 >/dev/null 2>&1
 printf 'fixture-ready\r\n'
+dd bs=1 count=7 2>/dev/null | od -An -tx1 | tr -d ' \n'
+printf '\r\n'
 while IFS= read -r line; do printf 'received:%s\r\n' "$line"; done
 `
 	if err := os.WriteFile(fixture, []byte(script), 0o755); err != nil {
@@ -104,6 +106,10 @@ while IFS= read -r line; do printf 'received:%s\r\n' "$line"; done
 	wait(screen, "New agent")
 	_, _ = process.Write([]byte("\r"))
 	wait(screen, "fixture-ready")
+	// Drive the outer terminal decoder and both IPC/PTY boundaries. Modified
+	// Enter must reach every adapter intact, without becoming a submit byte.
+	_, _ = process.Write([]byte("\x1b[13;2u"))
+	wait(screen, "1b5b31333b3275")
 	_, _ = process.Write([]byte("hello123\r"))
 	wait(screen, "received:hello123")
 	for _, heading := range []string{"Workspaces", "Sessions", "Tasks", "Agents"} {
