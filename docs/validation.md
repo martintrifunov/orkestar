@@ -23,6 +23,11 @@ The standard suite does not require installed agents, authentication or engines.
   hundred presses in each direction without falling below the minimum, and mouse
   dragging a divider including clamping at the edge and offering none while
   zoomed.
+- Reset tests confirm the daemon refuses to clear anything without explicit
+  confirmation and leaves state untouched when it does, then that a confirmed
+  reset empties sessions, agents, tasks, artifacts, workspaces and permissions,
+  reports the task worktrees it left behind, does not delete them from disk,
+  keeps registered adapters, and leaves the daemon usable for a second reset.
 - Lifecycle tests stop a real daemon session from the sidebar and confirm the
   first press only asks, the second stops it, a finished session is then cleared
   along with its pane, and the daemon refuses to remove a running one with a

@@ -232,6 +232,8 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result = map[string]string{"status": "ok"}
 	case "system.snapshot":
 		result = s.snapshot()
+	case "system.reset":
+		result, err = s.resetState(request.Params)
 	case "system.shutdown":
 		result = map[string]string{"status": "stopping"}
 		s.stopOnce.Do(func() { close(s.stop) })

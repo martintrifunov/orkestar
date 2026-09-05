@@ -58,6 +58,8 @@ func run(args []string) error {
 		default:
 			return errors.New("usage: orkestar daemon serve|stop")
 		}
+	case "reset":
+		return runReset(paths, args[1:])
 	case "status":
 		return printStatus(paths)
 	case "workspace":
@@ -239,6 +241,7 @@ Usage:
   orkestar daemon serve
   orkestar daemon stop
   orkestar status
+  orkestar reset [--yes]
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>
@@ -262,4 +265,114 @@ Usage:
 
 Detach from an attached terminal with ctrl+b q.
 `)
+}
+
+// runReset clears everything the daemon holds. It previews by default: a full
+// reset is easy to ask for by accident and impossible to undo, so the state is
+// only discarded once the caller has seen what will go and passed --yes.
+func runReset(paths runtimepath.Paths, args []string) error {
+	confirmed := false
+	for _, argument := range args {
+		switch argument {
+		case "--yes", "-y":
+			confirmed = true
+		default:
+			return fmt.Errorf("usage: orkestar reset [--yes]")
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := daemonclient.Ensure(ctx, paths); err != nil {
+		return err
+	}
+	client := ipc.NewClient(paths.Socket)
+
+	if !confirmed {
+		var state daemon.Snapshot
+		if err := client.Call(ctx, "system.snapshot", nil, &state); err != nil {
+			return err
+		}
+		running := 0
+		for _, terminal := range state.Terminals {
+			if terminal.State == "running" {
+				running++
+			}
+		}
+		active := 0
+		var worktrees []string
+		for _, agent := range state.Agents {
+			switch agent.State {
+			case "stopped", "crashed", "interrupted":
+			default:
+				active++
+			}
+		}
+		for _, task := range state.Tasks {
+			if task.WorktreePath != "" {
+				worktrees = append(worktrees, task.WorktreePath)
+			}
+		}
+		if len(state.Terminals)+len(state.Agents)+len(state.Tasks)+len(state.Workspaces) == 0 {
+			fmt.Println("Nothing to reset; the daemon is already empty.")
+			return nil
+		}
+		fmt.Println("A reset stops and clears everything the daemon is holding:")
+		fmt.Printf("  %-11s %d", "sessions", len(state.Terminals))
+		if running > 0 {
+			fmt.Printf("  (%d still running)", running)
+		}
+		fmt.Println()
+		fmt.Printf("  %-11s %d", "agents", len(state.Agents))
+		if active > 0 {
+			fmt.Printf("  (%d still running)", active)
+		}
+		fmt.Println()
+		for _, line := range []struct {
+			label string
+			count int
+		}{
+			{"tasks", len(state.Tasks)},
+			{"artifacts", len(state.Artifacts)},
+			{"workspaces", len(state.Workspaces)},
+			{"leases", len(state.Leases)},
+		} {
+			fmt.Printf("  %-11s %d\n", line.label, line.count)
+		}
+		if len(worktrees) > 0 {
+			fmt.Println("\nTask worktrees stay on disk and are not deleted:")
+			for _, path := range worktrees {
+				fmt.Println("  " + path)
+			}
+		}
+		fmt.Println("\nNothing has changed. Run 'orkestar reset --yes' to go ahead.")
+		return nil
+	}
+
+	var summary daemon.ResetSummary
+	if err := client.Call(ctx, "system.reset", map[string]any{"confirm": true}, &summary); err != nil {
+		return err
+	}
+	fmt.Println("Reset complete. Cleared:")
+	for _, line := range []struct {
+		label string
+		count int
+	}{
+		{"sessions", summary.Terminals},
+		{"agents", summary.Agents},
+		{"tasks", summary.Tasks},
+		{"artifacts", summary.Artifacts},
+		{"workspaces", summary.Workspaces},
+		{"leases", summary.Leases},
+	} {
+		fmt.Printf("  %-11s %d\n", line.label, line.count)
+	}
+	if len(summary.Worktrees) > 0 {
+		fmt.Println("\nThese task worktrees were left on disk:")
+		for _, path := range summary.Worktrees {
+			fmt.Println("  " + path)
+		}
+		fmt.Println("Remove one with 'git worktree remove <path>' if you no longer need it.")
+	}
+	return nil
 }

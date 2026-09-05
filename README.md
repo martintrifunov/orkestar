@@ -200,6 +200,7 @@ For the boundaries and the reasoning behind them, see
 ```
 orkestar                                          start the UI
 orkestar status                                   show daemon state
+orkestar reset [--yes]                            clear all daemon state
 orkestar daemon serve | stop
 orkestar workspace create [directory]
 orkestar terminal start <workspace-id> -- <cmd>   run a command in a PTY
@@ -209,6 +210,32 @@ orkestar agent resume | stop | remove | interrupt <agent-id>
 orkestar task create | list | status | assign | worktree | diff
 orkestar mcp serve                                orchestration MCP server
 ```
+
+### Starting over
+
+`orkestar reset` clears everything the daemon holds: every session and agent,
+stopped or running, along with tasks, artifacts, workspaces and leases. It is
+the way to empty a sidebar that has filled up with finished sessions, which
+`daemon stop` does not do, because that ends the processes but keeps the records
+so they can be resumed.
+
+It previews by default and changes nothing until you pass `--yes`:
+
+```console
+$ orkestar reset
+A reset stops and clears everything the daemon is holding:
+  sessions    3  (2 still running)
+  agents      1  (1 still running)
+  tasks       1
+  ...
+Nothing has changed. Run 'orkestar reset --yes' to go ahead.
+```
+
+Nothing on disk is deleted. Task worktrees are left where they are and listed
+so you can remove any you no longer want with `git worktree remove`. Registered
+agent adapters survive, since they are configuration rather than state. To clear
+a single session instead, use `orkestar terminal remove` or press `X` in the
+sidebar.
 
 Rebuilding the binary does not upgrade a daemon that is already running. Stop it
 with `orkestar daemon stop` once its work can end, then start Orkestar again.

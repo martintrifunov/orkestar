@@ -3,7 +3,10 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
+
+	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
 // stopTimeout bounds how long a stop request waits for a process to finish
@@ -143,4 +146,95 @@ func (s *Server) removeAgent(rawParams json.RawMessage) (map[string]string, erro
 		_ = orphan.close()
 	}
 	return map[string]string{"status": "removed"}, nil
+}
+
+// ResetSummary reports what a reset cleared.
+type ResetSummary struct {
+	Terminals  int `json:"terminals"`
+	Agents     int `json:"agents"`
+	Tasks      int `json:"tasks"`
+	Artifacts  int `json:"artifacts"`
+	Workspaces int `json:"workspaces"`
+	Leases     int `json:"leases"`
+	// Worktrees are task checkouts left on disk. A reset never deletes files.
+	Worktrees []string `json:"worktrees,omitempty"`
+}
+
+// resetState stops every managed process and clears every record, leaving the
+// daemon running and empty. It deliberately touches nothing on disk: task
+// worktrees stay where they are and are reported back so they can be removed
+// deliberately. Registered adapters survive, since they are configuration
+// rather than state.
+func (s *Server) resetState(rawParams json.RawMessage) (ResetSummary, error) {
+	var params struct {
+		Confirm bool `json:"confirm"`
+	}
+	if len(rawParams) > 0 {
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return ResetSummary{}, fmt.Errorf("decode reset params: %w", err)
+		}
+	}
+	if !params.Confirm {
+		return ResetSummary{}, fmt.Errorf("reset discards every session, agent and task; call it with confirm")
+	}
+
+	// Collect the live handles first, then close them without holding the
+	// lock, since closing a session can call back into the server.
+	s.mu.RLock()
+	terminals := make([]*terminalSession, 0, len(s.terminals))
+	for _, session := range s.terminals {
+		terminals = append(terminals, session)
+	}
+	agents := make([]*agentSession, 0, len(s.agents))
+	for _, entry := range s.agents {
+		agents = append(agents, entry)
+	}
+	summary := ResetSummary{
+		Terminals:  len(s.terminals),
+		Agents:     len(s.agents),
+		Workspaces: len(s.workspaces),
+	}
+	s.mu.RUnlock()
+
+	for _, entry := range agents {
+		if session := entry.liveSession(); session != nil {
+			_ = session.Close()
+		}
+	}
+	for _, session := range terminals {
+		_ = session.close()
+	}
+
+	tasks := s.tasks.List()
+	summary.Tasks = len(tasks)
+	summary.Artifacts = len(s.artifacts.List())
+	summary.Leases = len(s.leases.ListAll())
+	for _, task := range tasks {
+		if task.WorktreePath != "" {
+			summary.Worktrees = append(summary.Worktrees, task.WorktreePath)
+		}
+	}
+	sort.Strings(summary.Worktrees)
+
+	s.mu.Lock()
+	// Release any hook still waiting on an approval, so the agent falls back to
+	// its own prompt instead of blocking on a channel nobody will answer.
+	for id, pending := range s.pendingHooks {
+		select {
+		case pending.decision <- "":
+		default:
+		}
+		delete(s.pendingHooks, id)
+	}
+	s.workspaces = map[string]Workspace{}
+	s.terminals = map[string]*terminalSession{}
+	s.agents = map[string]*agentSession{}
+	s.hookTokens = map[string]string{}
+	s.permissions = map[string]PermissionRequest{}
+	s.tasks = workflow.NewBoard()
+	s.leases = workflow.NewLeaseManager()
+	s.artifacts = workflow.NewArtifactStore()
+	s.mu.Unlock()
+
+	return summary, nil
 }
