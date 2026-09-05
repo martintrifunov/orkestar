@@ -34,7 +34,7 @@ func (m Model) visiblePanes() []*embeddedTerminal {
 }
 func (m Model) contentArea() (x, y, width, height int) {
 	x = embeddedSidebarWidth(m.width) + 1
-	return x, 2, m.width - x, m.height - 3
+	return x, 2, m.width - x - m.filesWidth(), m.height - 3
 }
 
 // paneRects derives every pane box from the split tree. When any box would be
@@ -163,6 +163,9 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	mouse := msg.Mouse()
+	if cmd, inViewer := m.filesClick(mouse.X, mouse.Y); inViewer {
+		return m, cmd
+	}
 	for _, r := range m.paneRects() {
 		if mouse.X >= r.x && mouse.X < r.x+r.width && mouse.Y >= r.y && mouse.Y < r.y+r.height {
 			m.embedded = r.terminal

@@ -71,6 +71,16 @@ type Model struct {
 	taskPrompt, taskReview, taskBusy bool
 	taskTitle                        string
 
+	// The file viewer mirrors the sidebar on the right edge. It is closed by
+	// default and reads the workspace only while open.
+	filesOpen, filesFocused, filesLoading bool
+	filesRoot, filesCursor                string
+	filesTree                             *fileNode
+	filesExpanded                         map[string]bool
+	filesTop                              int
+	filesErr                              error
+	filesLoadedAt                         time.Time
+
 	viewingHistory bool
 	history        []string
 	historyOffset  int
@@ -165,6 +175,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case highlightedMsg:
 		return m, message.editor.applyHighlight(message)
+	case filesLoadedMsg:
+		m.applyFiles(message)
 	case reviewLoaded:
 		if m.findPane(message.pane.terminalID) == message.pane {
 			message.pane.review = message.review
@@ -227,6 +239,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.prompting() || m.viewingDiff || m.pickingAgent {
 			return m, nil
 		}
+		if m.filesScroll(mouse.X, mouse.Y, step) {
+			return m, nil
+		}
 		// The wheel scrolls a document pane under the pointer and does nothing
 		// over a terminal pane. Scrollback replaces the whole view, so it is an
 		// explicit Ctrl+b [ action rather than something a stray wheel movement
@@ -283,6 +298,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingHistory && !m.viewingDiff && (m.embedded.editor != nil || m.embedded.review != nil) {
 			return m.updateDocumentKey(message)
+		}
+		if m.filesFocused {
+			return m.updateFiles(message)
 		}
 		if m.viewingHistory {
 			switch message.String() {
@@ -427,6 +445,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.opening = true
 			return m, m.openTerminal(id)
+		case "f":
+			return m, m.toggleFiles()
 		case "c":
 			if m.focus == focusTasks || len(m.snapshot.Tasks) == 0 {
 				m.startTaskPrompt()
@@ -543,7 +563,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitEmbeddedEvent(message.terminal)
 	case tickMsg:
-		return m, tea.Batch(m.loadSnapshot(), tick())
+		commands := []tea.Cmd{m.loadSnapshot(), tick()}
+		if m.filesOpen && !m.filesLoading && time.Since(m.filesLoadedAt) >= filesRefresh {
+			commands = append(commands, m.loadFiles())
+		}
+		return m, tea.Batch(commands...)
 	case diffMsg:
 		m.err = message.err
 		m.diffErr = message.err
@@ -595,7 +619,7 @@ func (m Model) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "Orkestar"
 	view.MouseMode = tea.MouseModeCellMotion
-	if m.embedded != nil && !m.sidebarFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
+	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
 		x, y, visible := m.embedded.emulator.Cursor()
 		if visible {
 			for _, r := range m.paneRects() {

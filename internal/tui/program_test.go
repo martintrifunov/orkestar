@@ -434,3 +434,99 @@ func TestProgramCreatesATaskWithRealKeys(t *testing.T) {
 		t.Fatal("TUI did not quit")
 	}
 }
+
+// Open the file viewer with its shortcut in a real terminal and watch it pick
+// up a file an agent creates while it is open.
+func TestProgramFileViewerOpensAndFollowsTheWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init"}, {"config", "user.name", "F"}, {"config", "user.email", "f@example.invalid"}} {
+		if b, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, b)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "internal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main.go", "internal/first.go"} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, socket := startEmbeddedTestDaemonWithSocket(t)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := pty.Start(pty.StartOptions{
+		Command: executable, Arguments: []string{"-test.run=^TestTUIProcess$"},
+		Columns: 150, Rows: 40,
+		Env: append(os.Environ(), "TERM=xterm-256color", "ORKESTAR_TEST_TUI=1",
+			"ORKESTAR_TEST_SOCKET="+socket, "ORKESTAR_TEST_DIRECTORY="+dir),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := terminal.NewScreen(150, 40)
+	inputDone, outputDone := make(chan struct{}), make(chan struct{})
+	go func() { defer close(inputDone); _, _ = io.Copy(process, screen) }()
+	go func() { defer close(outputDone); _, _ = io.Copy(screen, process) }()
+	defer func() {
+		_ = screen.Close()
+		_ = process.Close()
+		for _, done := range []chan struct{}{inputDone, outputDone} {
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Error("TUI worker did not stop")
+			}
+		}
+	}()
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(screen.Render(), want) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("missing %q:\n%s", want, screen.Render())
+	}
+	send := func(text string) {
+		t.Helper()
+		if _, err := process.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait("Open a session")
+	if strings.Contains(screen.Render(), "Files") {
+		t.Fatalf("the viewer is not collapsed by default:\n%s", screen.Render())
+	}
+	send("\x02f")
+	wait("Files")
+	wait("main.go")
+	wait("internal")
+	// The tree is collapsed, so a nested file only shows once expanded.
+	if strings.Contains(screen.Render(), "first.go") {
+		t.Fatal("directories are not collapsed on open")
+	}
+	// A file appearing on disk shows up without any keystroke.
+	if err := os.WriteFile(filepath.Join(dir, "written-by-agent.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wait("written-by-agent.go")
+	send("\x02f")
+	deadline := time.Now().Add(3 * time.Second)
+	for strings.Contains(screen.Render(), "written-by-agent.go") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the viewer did not close:\n%s", screen.Render())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	send("q")
+	select {
+	case <-process.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("TUI did not quit")
+	}
+}

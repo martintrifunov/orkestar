@@ -16,6 +16,15 @@ The standard suite does not require installed agents, authentication or engines.
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
   isolation, close/reattach one pane, and keep history overlays read-only.
+- File viewer tests cover tree construction and ordering, that a closed viewer
+  reads nothing and does not refresh on the tick, that opening takes exactly the
+  sidebar's width from the panes and gives it back on close, that its box matches
+  the sidebar's width and height while the frame stays inside the window, keyboard
+  navigation including expand, collapse and stepping out to a parent, opening a
+  file into an editor pane, mouse clicks and wheel bounds, and refusal in a window
+  with no room. A refresh test adds and removes files and asserts the expansion set
+  and cursor survive. A real outer-PTY test opens the viewer with its shortcut,
+  sees a file created on disk appear without a keystroke, and closes it again.
 - Task tests drive the sidebar against a real daemon and Git repository:
   creating a task from the prompt including the auto-review opt-out, listing
   it, creating its worktree, opening its diff, completing it and cancelling a

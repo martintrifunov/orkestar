@@ -105,14 +105,25 @@ prefix, so ordinary letters still reach the agent you are typing to.
 | `d` | Review changes |
 | `e` | Open or create a file |
 | `,` | Editor settings |
+| `f` | Show or hide the file viewer |
 | `[` | Scrollback (2,000 lines) |
 | `t` | Claim input after another client disconnected |
 | `Tab` | Focus the sidebar |
 | `q` | Close the pane, leaving its process running |
 | `x` | Discard an editor with unsaved changes |
 
-The mouse wheel scrolls the review and editor panes, and the scrollback view
-once it is open. It never opens scrollback by itself.
+### File viewer
+
+`Ctrl+b f` shows a file tree of the workspace on the right edge, mirroring the
+sidebar. It is hidden by default and only reads the workspace while open, so it
+costs nothing when you are not using it. While open it follows the workspace,
+picking up files an agent creates or deletes without any keystroke. Arrow keys
+move, `Enter` opens a file in an editor pane or expands a directory, and `Esc`
+returns to the panes. Clicking works too. Ignored files are left out, the same
+way the file picker leaves them out.
+
+The mouse wheel scrolls the review and editor panes, the file viewer, and the
+scrollback view once it is open. It never opens scrollback by itself.
 
 Splits nest: `Ctrl+b s` then `Ctrl+b v` gives three panes, not a rearranged
 two. Click any pane to focus it. When the window is too small for every split,

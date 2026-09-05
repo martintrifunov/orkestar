@@ -180,7 +180,10 @@ leaf is a pane, each internal node halves its rectangle side by side or stacked.
 other new panes split the focused leaf along its longer edge. Closing a leaf
 collapses its parent onto the sibling. The tree is the single source for pane
 rectangles, rendering joins, cursor placement, mouse hit testing and PTY sizes.
-A configurable limit (default 16, `max_panes` in `tui.json`) refuses further
+An optional file viewer mirrors the sidebar on the right edge, taking its width
+from the same content area calculation so pane rectangles, mouse hit testing and
+PTY sizes all follow. It is closed by default and polls the workspace only while
+open. A configurable limit (default 16, `max_panes` in `tui.json`) refuses further
 panes instead of replacing one. A window too small for every leaf shows only the
 focused pane; hidden attachments remain alive and cycle with F6. Mouse clicks and
 `Ctrl+b o` change focus. Picker, read-only scrollback and prompt overlays occupy

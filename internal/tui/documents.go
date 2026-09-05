@@ -214,6 +214,8 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 		m.opening = true
 		m.notice = ""
 		return m.startTerminal([]string{defaultShell()}), true
+	case "f":
+		return m.toggleFiles(), true
 	case "d":
 		return m.openReview(), true
 	case "e":

@@ -15,10 +15,32 @@ continues to type into that agent.
 | Open workspace/task worktree review | Ctrl+b, d |
 | Find/open/create a file | Ctrl+b, e |
 | Editor settings, including syntax highlighting | Ctrl+b, comma |
+| Show or hide the file viewer | Ctrl+b, f |
 | Scrollback for the focused terminal | Ctrl+b, [ |
 | Focus sidebar | Ctrl+b, Tab |
 | Close focused pane | Ctrl+b, q |
 | Explicitly discard a dirty standard editor | Ctrl+b, x |
+
+## File viewer
+
+`Ctrl+b f` opens a file tree on the right edge of the window, the same width and
+height as the sidebar on the left. It is collapsed by default and reads nothing
+until you open it, so it has no cost while hidden.
+
+While it is open it follows the workspace, re-reading every couple of seconds so
+files an agent writes or removes appear on their own. Expanded directories and
+the selected entry are tracked by path, so a refresh never collapses the tree or
+moves your selection. Ignored files are excluded through Git, with a bounded
+directory walk outside a repository.
+
+Arrow keys or `k`/`j` move. `Enter` or `→` expands a directory or opens a file in
+an editor pane. `←` collapses a directory, or steps out to its parent. `r`
+re-reads immediately, `Esc` hands focus back to the panes, and `Tab` goes to the
+sidebar. Clicking an entry selects it and opens or expands it, and the wheel
+scrolls the tree.
+
+The viewer shows the workspace Orkestar was started in. In a window too narrow to
+keep a usable pane beside it, it stays hidden rather than squeezing the panes.
 
 ## Scrolling and scrollback
 

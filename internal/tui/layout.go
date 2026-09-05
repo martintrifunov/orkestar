@@ -25,7 +25,8 @@ func (m Model) renderEmbedded(width, height int) string {
 	if width < 50 || height < 16 {
 		return fitPane("Orkestar\nEnlarge terminal to at least 50 × 16.\nWork continues in the daemon.", width, height)
 	}
-	columns, rows := embeddedPaneSize(width, height)
+	_, _, contentWidth, contentHeight := m.contentArea()
+	columns, rows := contentWidth-4, contentHeight-2
 	sidebarWidth := embeddedSidebarWidth(width)
 	sidebar := panelStyle.Width(sidebarWidth).Height(rows + 2).
 		Render(m.renderSidebar(sidebarWidth-4, rows))
@@ -46,7 +47,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		content = m.renderAgentPicker(columns)
 	}
 	paneStyle := panelStyle
-	if m.embedded != nil && !m.sidebarFocused {
+	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused {
 		paneStyle = paneStyle.BorderForeground(lipgloss.Color("#D7A84B"))
 	}
 	pane := paneStyle.Width(columns + 4).Height(rows + 2).Render(fitPane(content, columns, rows))
@@ -69,7 +70,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
 	help := "a agent  n shell  tab section  enter open  q quit"
 	if m.embedded != nil && !m.sidebarFocused {
-		help = "Ctrl+b then: v/s split · o next · d diff · e edit · [ scrollback · , settings · q close"
+		help = "Ctrl+b then: v/s split · o next · d diff · e edit · f files · [ scrollback · q close"
 	}
 	if m.embedded != nil && m.sidebarFocused {
 		help = "tab section  enter open  esc terminal  a agent  n shell  q quit"
@@ -90,7 +91,10 @@ func (m Model) renderEmbedded(width, height int) string {
 		help = "Enlarge window for splits · F6 cycles hidden panes"
 	}
 	if m.prefix {
-		help = "Prefix: v/s split · o next · d diff · e edit · [ scrollback · , settings · q close"
+		help = "Prefix: v/s split · o next · d diff · e edit · f files · [ scrollback · , settings · q close"
+	}
+	if m.filesFocused {
+		help = "↑/↓ select · enter open · ←/→ collapse/expand · r refresh · esc back"
 	}
 	if m.prompting() {
 		help = "Enter confirm · Esc cancel"
@@ -98,7 +102,11 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.viewingDiff {
 		help = "esc close diff"
 	}
-	return header + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", pane) + "\n" + ansi.Truncate(dimStyle.Render(help), width, "…")
+	body := []string{sidebar, " ", pane}
+	if files := m.renderFiles(); files != "" {
+		body = append(body, " ", files)
+	}
+	return header + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, body...) + "\n" + ansi.Truncate(dimStyle.Render(help), width, "…")
 }
 
 func (m Model) renderSidebar(columns, rows int) string {
