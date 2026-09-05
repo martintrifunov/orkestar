@@ -19,8 +19,7 @@ type Stream struct {
 }
 
 func (c *Client) OpenStream(ctx context.Context, method string, params, result any) (*Stream, error) {
-	dialer := net.Dialer{Timeout: c.timeout}
-	connection, err := dialer.DialContext(ctx, "unix", c.socketPath)
+	connection, err := Dial(ctx, c.socketPath, c.timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)
 	}

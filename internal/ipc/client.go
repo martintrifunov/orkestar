@@ -32,8 +32,7 @@ func NewClient(socketPath string) *Client {
 }
 
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
-	dialer := net.Dialer{Timeout: c.timeout}
-	conn, err := dialer.DialContext(ctx, "unix", c.socketPath)
+	conn, err := Dial(ctx, c.socketPath, c.timeout)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}

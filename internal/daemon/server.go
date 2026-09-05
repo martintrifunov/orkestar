@@ -22,7 +22,7 @@ import (
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
-var ErrAlreadyRunning = errors.New("orkestar daemon is already running")
+var ErrAlreadyRunning = ipc.ErrAlreadyRunning
 
 type Workspace struct {
 	ID        string    `json:"id"`
@@ -89,15 +89,15 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("create socket directory: %w", err)
 	}
 
-	if err := s.removeStaleSocket(); err != nil {
+	if err := ipc.PrepareListener(s.socketPath); err != nil {
 		return err
 	}
 
-	listener, err := net.Listen("unix", s.socketPath)
+	listener, err := ipc.Listen(s.socketPath)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", s.socketPath, err)
 	}
-	if err := os.Chmod(s.socketPath, 0o600); err != nil {
+	if err := ipc.RestrictListener(s.socketPath); err != nil {
 		listener.Close()
 		return fmt.Errorf("restrict socket permissions: %w", err)
 	}
@@ -146,7 +146,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.mu.Lock()
 		s.listener = nil
 		s.mu.Unlock()
-		_ = os.Remove(s.socketPath)
+		_ = ipc.RemoveListener(s.socketPath)
 	}()
 
 	for {
@@ -167,24 +167,6 @@ func (s *Server) Serve(ctx context.Context) error {
 			s.handleConnection(connection)
 		}()
 	}
-}
-
-func (s *Server) removeStaleSocket() error {
-	connection, err := net.DialTimeout("unix", s.socketPath, 150*time.Millisecond)
-	if err == nil {
-		connection.Close()
-		return ErrAlreadyRunning
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		var operationError *net.OpError
-		if !errors.As(err, &operationError) {
-			return fmt.Errorf("probe daemon socket: %w", err)
-		}
-	}
-	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove stale daemon socket: %w", err)
-	}
-	return nil
 }
 
 func (s *Server) handleConnection(connection net.Conn) {
