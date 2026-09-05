@@ -39,7 +39,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.viewingHistory {
 		content = m.renderHistory(rows)
 	}
-	if m.filePrompt || m.settingsOpen {
+	if m.prompting() {
 		content = m.promptView()
 	}
 	if m.pickingAgent {
@@ -50,7 +50,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		paneStyle = paneStyle.BorderForeground(lipgloss.Color("#D7A84B"))
 	}
 	pane := paneStyle.Width(columns + 4).Height(rows + 2).Render(fitPane(content, columns, rows))
-	if m.embedded != nil && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.filePrompt && !m.settingsOpen {
+	if m.embedded != nil && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() {
 		pane = m.renderPanes()
 	}
 	title := "  persistent agent runtime"
@@ -75,7 +75,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		help = "tab section  enter open  esc terminal  a agent  n shell  q quit"
 	}
 	if m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused) {
-		help = "tab section  d diff  m mark done  a agent  q quit"
+		help = "c new  d diff  m done  x cancel  w worktree  t assign  tab section"
 	}
 	if m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused) {
 		help = "tab section  enter open  u resume  y/x allow/deny  a agent  q quit"
@@ -92,7 +92,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.prefix {
 		help = "Prefix: v/s split · o next · d diff · e edit · [ scrollback · , settings · q close"
 	}
-	if m.filePrompt || m.settingsOpen {
+	if m.prompting() {
 		help = "Enter confirm · Esc cancel"
 	}
 	if m.viewingDiff {

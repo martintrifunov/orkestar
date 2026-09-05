@@ -16,6 +16,15 @@ The standard suite does not require installed agents, authentication or engines.
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
   isolation, close/reattach one pane, and keep history overlays read-only.
+- Task tests drive the sidebar against a real daemon and Git repository:
+  creating a task from the prompt including the auto-review opt-out, listing
+  it, creating its worktree, opening its diff, completing it and cancelling a
+  second one. Others confirm the reviewer run is announced and cannot be
+  started twice, that a rejection clears the busy state, that the detail line
+  reports blocking dependencies, review, assignee and a missing worktree only
+  for the selected task, that `x` still denies a permission when Agents is
+  focused, and that the create prompt cancels and ignores an empty title. A
+  real outer-PTY test creates a task with actual keystrokes and sees it appear.
 - Scrollback tests confirm the wheel never opens the overlay over a terminal
   pane or the sidebar, that `Ctrl+b [` does open it against a real daemon
   terminal, and that the wheel then scrolls it within bounds until `Esc`.

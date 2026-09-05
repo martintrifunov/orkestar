@@ -353,3 +353,84 @@ func TestProgramNestedSplitsWithRealKeys(t *testing.T) {
 		t.Fatal("split TUI did not quit")
 	}
 }
+
+// Create a task with real keystrokes and see it appear in the sidebar. The
+// panel was previously unreachable from the UI, so this covers the path a user
+// actually takes rather than only Model.Update.
+func TestProgramCreatesATaskWithRealKeys(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init"}, {"config", "user.name", "F"}, {"config", "user.email", "f@example.invalid"}} {
+		if b, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, b)
+		}
+	}
+	_, socket := startEmbeddedTestDaemonWithSocket(t)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := pty.Start(pty.StartOptions{
+		Command: executable, Arguments: []string{"-test.run=^TestTUIProcess$"},
+		Columns: 150, Rows: 40,
+		Env: append(os.Environ(), "TERM=xterm-256color", "ORKESTAR_TEST_TUI=1",
+			"ORKESTAR_TEST_SOCKET="+socket, "ORKESTAR_TEST_DIRECTORY="+dir),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := terminal.NewScreen(150, 40)
+	inputDone, outputDone := make(chan struct{}), make(chan struct{})
+	go func() { defer close(inputDone); _, _ = io.Copy(process, screen) }()
+	go func() { defer close(outputDone); _, _ = io.Copy(screen, process) }()
+	defer func() {
+		_ = screen.Close()
+		_ = process.Close()
+		for _, done := range []chan struct{}{inputDone, outputDone} {
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Error("TUI worker did not stop")
+			}
+		}
+	}()
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(screen.Render(), want) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("missing %q:\n%s", want, screen.Render())
+	}
+	send := func(text string) {
+		t.Helper()
+		if _, err := process.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait("Open a session")
+	wait("No tasks yet.")
+	wait("Press c to create one.")
+	send("\t")
+	send("c")
+	wait("New task")
+	wait("Auto-review: on")
+	// Tab inside the prompt toggles the reviewer gate rather than changing
+	// the sidebar section.
+	send("\t")
+	wait("Auto-review: off")
+	send("Ship it\r")
+	wait("Task created")
+	wait("Ship it")
+	wait("pending")
+	// The detail line explains what still has to happen for this task.
+	wait("no worktree")
+	send("q")
+	select {
+	case <-process.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("TUI did not quit")
+	}
+}

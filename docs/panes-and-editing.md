@@ -49,6 +49,37 @@ focused pane is shown with a hint to enlarge the terminal; hidden panes stay
 attached and F6 or `Ctrl+b o` still cycles through them. Click any pane to
 focus it.
 
+## Tasks
+
+The Tasks section of the sidebar is a board, not just a list. Select it with
+`Tab`, then:
+
+| Action | Shortcut |
+| --- | --- |
+| Create a task | c |
+| Its diff and the latest reviewer verdict | d |
+| Mark it done | m |
+| Cancel it | x |
+| Create or remove its Git worktree | w |
+| Assign it to the highlighted agent | t |
+
+The create prompt takes a title and one choice. Automatic review is on by
+default, matching the command line: the daemon runs a reviewer agent when you
+complete the task and refuses to finish it unless the reviewer approves. `Tab`
+turns that off for the task you are creating. Completing a reviewed task can
+take a while, and the header says a reviewer is running while it does.
+
+`w` gives the task its own worktree and branch beside your checkout, which is
+where an agent should make its changes. The task diff (`d`) reads from that
+worktree, so it reports the missing step rather than an error if there is not
+one yet. `t` assigns the task to whichever agent is highlighted in the Agents
+section, which stays visible while you choose.
+
+The selected task shows one extra line with whatever still applies to it: how
+many unfinished dependencies block it, whether completing it needs a review,
+which agent owns it, and whether it has a worktree. Dependencies come from
+`orkestar task create --depends-on`.
+
 ## Review
 
 The review pane lists changed files, colored additions/deletions and old/new

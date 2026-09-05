@@ -295,6 +295,9 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m Model) promptView() string {
+	if m.taskPrompt {
+		return m.taskPromptView()
+	}
 	if m.settingsOpen {
 		syntax := "on"
 		if !m.settings.syntaxEnabled() {
@@ -317,6 +320,9 @@ func (m Model) promptView() string {
 
 }
 func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.taskPrompt {
+		return m.updateTaskPrompt(k)
+	}
 	if k.String() == "esc" {
 		m.filePrompt = false
 		m.settingsOpen = false

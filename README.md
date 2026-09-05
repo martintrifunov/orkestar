@@ -70,8 +70,26 @@ permission requests. The rest of the window is a tree of panes.
 | `r` | Refresh |
 | `u` | Resume an inactive agent |
 | `y` / `x` | Allow or deny a pending permission request |
-| `d` / `m` | Task diff / mark a task done |
 | `q` | Quit the UI |
+
+With **Tasks** selected:
+
+| Key | Action |
+| --- | --- |
+| `c` | Create a task |
+| `d` | Its diff and the latest reviewer verdict |
+| `m` | Mark it done |
+| `x` | Cancel it |
+| `w` | Create or remove its Git worktree |
+| `t` | Assign it to the highlighted agent |
+
+A task is a unit of work with a status, optional dependencies, an optional
+assignee and its own Git worktree, so an agent can change files without
+disturbing your checkout. Tasks are created with automatic review on: the
+daemon runs a reviewer agent and requires approval before the task can move to
+done. Press `Tab` in the create prompt to opt out. The selected task shows a
+line summarizing what still applies to it, such as being blocked by an
+unfinished dependency or having no worktree yet.
 
 ### Panes
 

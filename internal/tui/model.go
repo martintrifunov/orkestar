@@ -34,17 +34,6 @@ type terminalStartedMsg struct {
 	err      error
 }
 
-type diffMsg struct {
-	diff   daemon.TaskDiff
-	err    error
-	taskID string
-}
-
-type taskActionMsg struct {
-	task workflow.Task
-	err  error
-}
-
 type permissionActionMsg struct {
 	err error
 }
@@ -75,6 +64,12 @@ type Model struct {
 	settings                 editorSettings
 	filePrompt, settingsOpen bool
 	fileName, fileRoot       string
+
+	// taskPrompt collects a new task's title. taskBusy blocks a second
+	// mutation while one is in flight, because completing a task can run a
+	// reviewer agent and take a while.
+	taskPrompt, taskReview, taskBusy bool
+	taskTitle                        string
 
 	viewingHistory bool
 	history        []string
@@ -131,6 +126,10 @@ func Run(client *ipc.Client, directory string) error {
 	return err
 }
 
+// prompting reports whether a modal prompt owns the keyboard and the content
+// area.
+func (m Model) prompting() bool { return m.filePrompt || m.settingsOpen || m.taskPrompt }
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.loadSnapshot(), tick())
 }
@@ -174,7 +173,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.ClipboardMsg:
 		var cmd tea.Cmd
-		if m.embedded != nil && m.embedded.editor == m.clipboardTarget && m.clipboardTarget != nil && !m.sidebarFocused && !m.filePrompt && !m.settingsOpen {
+		if m.embedded != nil && m.embedded.editor == m.clipboardTarget && m.clipboardTarget != nil && !m.sidebarFocused && !m.prompting() {
 			m.clipboardTarget.Paste(message.Content)
 			cmd = m.clipboardTarget.highlight()
 		}
@@ -225,7 +224,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyOffset = max(0, min(max(0, len(m.history)-1), m.historyOffset-step))
 			return m, nil
 		}
-		if m.filePrompt || m.settingsOpen || m.viewingDiff || m.pickingAgent {
+		if m.prompting() || m.viewingDiff || m.pickingAgent {
 			return m, nil
 		}
 		// The wheel scrolls a document pane under the pointer and does nothing
@@ -260,7 +259,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyPressMsg:
-		if m.filePrompt || m.settingsOpen {
+		if m.prompting() {
 			return m.updatePrompt(message)
 		}
 		if message.String() == "f6" {
@@ -428,13 +427,54 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.opening = true
 			return m, m.openTerminal(id)
+		case "c":
+			if m.focus == focusTasks || len(m.snapshot.Tasks) == 0 {
+				m.startTaskPrompt()
+			}
+			return m, nil
 		case "d":
+			// On a task this is the task's own diff and reviewer verdict.
+			// Elsewhere it is the workspace review pane.
+			if m.focus == focusTasks {
+				return m, m.loadDiff()
+			}
 			return m, m.openReview()
 		case "m":
-			return m, m.markSelectedTaskDone()
+			if task, ok := m.selectedTask(); ok && !m.taskBusy {
+				m.taskBusy = true
+				m.notice = "Marking done…"
+				if task.AutoReview {
+					m.notice = "Reviewing before done… a reviewer agent is running"
+				}
+				return m, m.markSelectedTaskDone()
+			}
+			return m, nil
+		case "w":
+			if !m.taskBusy {
+				if cmd := m.toggleSelectedWorktree(); cmd != nil {
+					m.taskBusy = true
+					m.notice = "Updating worktree…"
+					return m, cmd
+				}
+			}
+			return m, nil
+		case "t":
+			if !m.taskBusy {
+				return m, m.assignSelectedTask()
+			}
+			return m, nil
 		case "y":
 			return m, m.resolveSelectedPermission("allow")
 		case "x":
+			// Deny is for a permission request; with Tasks focused the same
+			// key cancels the selected task.
+			if m.focus == focusTasks {
+				if cmd := m.cancelSelectedTask(); cmd != nil && !m.taskBusy {
+					m.taskBusy = true
+					return m, cmd
+				}
+				return m, nil
+			}
 			return m, m.resolveSelectedPermission("deny")
 		}
 	case snapshotMsg:
@@ -513,11 +553,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewingDiff = true
 		}
 	case taskActionMsg:
+		m.taskBusy = false
 		m.err = message.err
-		if message.err == nil {
-			m.loading = true
-			return m, m.loadSnapshot()
+		m.notice = ""
+		if message.err != nil {
+			return m, nil
 		}
+		m.notice = message.notice
+		m.focus = focusTasks
+		m.loading = true
+		return m, m.loadSnapshot()
 	case permissionActionMsg:
 		m.err = message.err
 		if message.err == nil {
@@ -550,7 +595,7 @@ func (m Model) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "Orkestar"
 	view.MouseMode = tea.MouseModeCellMotion
-	if m.embedded != nil && !m.sidebarFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.filePrompt && !m.settingsOpen && m.width >= 50 && m.height >= 16 {
+	if m.embedded != nil && !m.sidebarFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
 		x, y, visible := m.embedded.emulator.Cursor()
 		if visible {
 			for _, r := range m.paneRects() {
@@ -592,27 +637,6 @@ func (m Model) renderAgentPicker(width int) string {
 	return header + "\n\n" + panel + "\n\n" + dimStyle.Render("up/down select  enter launch  esc cancel")
 }
 
-func (m Model) renderTasks() string {
-	lines := []string{accentStyle.Render("Tasks")}
-	if len(m.snapshot.Tasks) == 0 {
-		lines = append(lines, dimStyle.Render("No tasks yet."))
-		return strings.Join(lines, "\n")
-	}
-	for index, task := range m.snapshot.Tasks {
-		line := fmt.Sprintf("%-11s  %s", task.Status, task.Title)
-		if m.focus == focusTasks && index == m.taskSelected {
-			line = selectedStyle.Render(" " + line + " ")
-		} else {
-			line = "  " + line
-		}
-		lines = append(lines, line)
-		if task.WorktreePath != "" {
-			lines = append(lines, dimStyle.Render("    branch "+task.WorktreeBranch))
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m Model) renderAgents() string {
 	lines := []string{accentStyle.Render("Agents")}
 	if len(m.snapshot.Agents) == 0 {
@@ -642,6 +666,14 @@ func (m Model) renderAgents() string {
 
 func (m Model) renderDiff(width int) string {
 	header := accentStyle.Render("Diff")
+	for _, task := range m.snapshot.Tasks {
+		if task.ID == m.diffTaskID {
+			header = accentStyle.Render("Diff · "+task.Title) + dimStyle.Render("  "+string(task.Status))
+			if task.AutoReview {
+				header += dimStyle.Render(" · review required")
+			}
+		}
+	}
 	if m.diffErr != nil {
 		return header + "\n\n" + errorStyle.Render(m.diffErr.Error()) + "\n\n" + dimStyle.Render("esc/d/q back")
 	}
@@ -795,37 +827,6 @@ func (m Model) launchPickedAgent() tea.Cmd {
 			"rows":         max(m.height, 24),
 		}, &launched)
 		return agentLaunchedMsg{agent: launched, err: err}
-	}
-}
-
-func (m Model) loadDiff() tea.Cmd {
-	if m.focus != focusTasks || len(m.snapshot.Tasks) == 0 || m.taskSelected >= len(m.snapshot.Tasks) {
-		return nil
-	}
-	taskID := m.snapshot.Tasks[m.taskSelected].ID
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		var diff daemon.TaskDiff
-		err := m.client.Call(ctx, "task.diff", map[string]string{"task_id": taskID}, &diff)
-		return diffMsg{diff: diff, err: err, taskID: taskID}
-	}
-}
-
-func (m Model) markSelectedTaskDone() tea.Cmd {
-	if m.focus != focusTasks || len(m.snapshot.Tasks) == 0 || m.taskSelected >= len(m.snapshot.Tasks) {
-		return nil
-	}
-	taskID := m.snapshot.Tasks[m.taskSelected].ID
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		var task workflow.Task
-		err := m.client.Call(ctx, "task.setStatus", map[string]string{
-			"task_id": taskID,
-			"status":  string(workflow.StatusDone),
-		}, &task)
-		return taskActionMsg{task: task, err: err}
 	}
 }
 
