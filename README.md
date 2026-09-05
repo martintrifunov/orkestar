@@ -1,23 +1,23 @@
-<div align="center">
-
-```
+<pre align="center">
  ██████╗ ██████╗ ██╗  ██╗███████╗███████╗████████╗ █████╗ ██████╗ 
 ██╔═══██╗██╔══██╗██║ ██╔╝██╔════╝██╔════╝╚══██╔══╝██╔══██╗██╔══██╗
 ██║   ██║██████╔╝█████╔╝ █████╗  ███████╗   ██║   ███████║██████╔╝
 ██║   ██║██╔══██╗██╔═██╗ ██╔══╝  ╚════██║   ██║   ██╔══██║██╔══██╗
 ╚██████╔╝██║  ██║██║  ██╗███████╗███████║   ██║   ██║  ██║██║  ██║
  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝
-```
+</pre>
 
-Run your coding agents from one terminal, and keep them running when you close it.
+<p align="center">
+  <strong>Run your coding agents from one terminal, and keep them running when you close it.</strong>
+</p>
 
-<a href="https://github.com/martintrifunov/orkestar/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/martintrifunov/orkestar/ci.yml?style=flat-square&label=build&color=D7A84B" alt="Build status"></a>
-<a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.27"></a>
-<img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-D7A84B?style=flat-square" alt="macOS and Linux">
-<img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-D7A84B?style=flat-square" alt="Supported agents">
-<a href="LICENSE"><img src="https://img.shields.io/github/license/martintrifunov/orkestar?style=flat-square&color=D7A84B" alt="MIT license"></a>
-
-</div>
+<p align="center">
+  <a href="https://github.com/martintrifunov/orkestar/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/martintrifunov/orkestar/ci.yml?style=flat-square&label=build&color=D7A84B" alt="Build status"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.27"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-D7A84B?style=flat-square" alt="macOS and Linux">
+  <img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-D7A84B?style=flat-square" alt="Supported agents">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/martintrifunov/orkestar?style=flat-square&color=D7A84B" alt="MIT license"></a>
+</p>
 
 Orkestar is a background daemon that owns your agent sessions, and a terminal UI
 that attaches to it. Because the daemon owns the processes, closing the UI,
