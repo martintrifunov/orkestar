@@ -21,7 +21,7 @@ func TestAdapterCapabilities(t *testing.T) {
 	if !capabilities.SupportsInteractive || !capabilities.SupportsPrompt || !capabilities.SupportsInterrupt {
 		t.Fatalf("unexpected capabilities: %#v", capabilities)
 	}
-	if capabilities.SupportsManaged || capabilities.SupportsResume {
+	if capabilities.SupportsManaged || !capabilities.SupportsResume {
 		t.Fatalf("unexpected capabilities: %#v", capabilities)
 	}
 }
@@ -37,18 +37,21 @@ func TestAdapterRejectsManagedMode(t *testing.T) {
 	}
 }
 
-func TestAdapterRejectsResume(t *testing.T) {
+func TestAdapterAcceptsResume(t *testing.T) {
 	t.Parallel()
 
 	adapter := claude.New(fixtureExecutable(t))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := adapter.Launch(ctx, agent.LaunchOptions{
-		Mode:            agent.ModeInteractive,
-		ResumeSessionID: "prior",
-	}); err == nil {
-		t.Fatal("expected resume to be rejected")
+	session, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: agent.ModeInteractive, ResumeSessionID: "prior"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer session.Close()
+	if session.NativeSessionID() != "prior" {
+		t.Fatal("resume identity not retained")
+	}
+
 }
 
 func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {

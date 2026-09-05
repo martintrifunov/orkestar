@@ -161,23 +161,13 @@ func TestAgentLifecycleAndPermissionInbox(t *testing.T) {
 	}
 
 	var resolved map[string]string
-	if err := client.Call(callContext, "permission.resolve", map[string]string{
-		"permission_id": listed.Permissions[0].ID,
-		"decision":      "allow",
-	}, &resolved); err != nil {
-		t.Fatalf("resolve permission: %v", err)
+	if err := client.Call(callContext, "permission.resolve", map[string]string{"permission_id": listed.Permissions[0].ID, "decision": "allow"}, &resolved); err == nil {
+		t.Fatal("adapter without an approval channel must reject resolution")
 	}
-	if resolved["status"] != "resolved" {
-		t.Fatalf("unexpected resolve status: %q", resolved["status"])
-	}
-
 	select {
-	case decision := <-session.prompts:
-		if decision != "allow" {
-			t.Fatalf("unexpected forwarded decision: %q", decision)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("permission decision was not forwarded to the agent session")
+	case <-session.prompts:
+		t.Fatal("permission decision was incorrectly sent as prompt text")
+	default:
 	}
 
 	session.emit(agent.StateReady, "resumed")

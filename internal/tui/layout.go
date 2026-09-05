@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -35,6 +34,12 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.viewingDiff {
 		content = m.renderDiff(columns)
 	}
+	if m.viewingHistory {
+		content = m.renderHistory(rows)
+	}
+	if m.filePrompt || m.settingsOpen {
+		content = m.promptView()
+	}
 	if m.pickingAgent {
 		content = m.renderAgentPicker(columns)
 	}
@@ -43,9 +48,15 @@ func (m Model) renderEmbedded(width, height int) string {
 		paneStyle = paneStyle.BorderForeground(lipgloss.Color("#D7A84B"))
 	}
 	pane := paneStyle.Width(columns + 4).Height(rows + 2).Render(fitPane(content, columns, rows))
+	if m.embedded != nil && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.filePrompt && !m.settingsOpen {
+		pane = m.renderPanes()
+	}
 	title := "  persistent agent runtime"
 	if m.embedded != nil {
-		title = fmt.Sprintf("  terminal %s", m.embedded.terminalID)
+		title = m.paneTitle()
+	}
+	if m.notice != "" {
+		title = "  " + m.notice
 	}
 	if m.opening {
 		title += "  opening…"
@@ -56,7 +67,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
 	help := "a agent  n shell  tab section  enter open  q quit"
 	if m.embedded != nil && !m.sidebarFocused {
-		help = "ctrl+b tab sidebar  ctrl+b q close pane  ctrl+b ctrl+b send prefix"
+		help = "Ctrl+b then: v/s split · o next · d diff · e edit · , settings · q close"
 	}
 	if m.embedded != nil && m.sidebarFocused {
 		help = "tab section  enter open  esc terminal  a agent  n shell  q quit"
@@ -65,10 +76,22 @@ func (m Model) renderEmbedded(width, height int) string {
 		help = "tab section  d diff  m mark done  a agent  q quit"
 	}
 	if m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused) {
-		help = "tab section  enter open  y/x allow/deny  a agent  q quit"
+		help = "tab section  enter open  u resume  y/x allow/deny  a agent  q quit"
 	}
 	if m.pickingAgent {
 		help = "up/down select  enter launch  esc cancel"
+	}
+	if m.viewingHistory {
+		help = "Scrollback · pgup/pgdown or wheel · esc return"
+	}
+	if len(m.paneRects()) < len(m.visiblePanes()) {
+		help = "Enlarge window for splits · F6 cycles hidden panes"
+	}
+	if m.prefix {
+		help = "Prefix: v/s split · o next · d diff · e edit · , settings · q close"
+	}
+	if m.filePrompt || m.settingsOpen {
+		help = "Enter confirm · Esc cancel"
 	}
 	if m.viewingDiff {
 		help = "esc close diff"

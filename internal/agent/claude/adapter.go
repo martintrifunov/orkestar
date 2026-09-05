@@ -5,10 +5,10 @@ package claude
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
+	"github.com/martintrifunov/orkestar/internal/agent/hooks"
 	"github.com/martintrifunov/orkestar/internal/agent/ptysession"
 )
 
@@ -36,7 +36,7 @@ func (a *Adapter) Capabilities() agent.Capabilities {
 		SupportsManaged:     false,
 		SupportsPrompt:      true,
 		SupportsInterrupt:   true,
-		SupportsResume:      false,
+		SupportsResume:      true,
 	}
 }
 
@@ -45,7 +45,10 @@ func (a *Adapter) Launch(ctx context.Context, options agent.LaunchOptions) (agen
 		return nil, fmt.Errorf("claude adapter: mode %q is not supported", options.Mode)
 	}
 	if options.ResumeSessionID != "" {
-		return nil, errors.New("claude adapter: resume is not supported yet")
+		options.Arguments = append(options.Arguments, "--resume", options.ResumeSessionID)
+	}
+	if options.HookCommand != "" {
+		options.Arguments = append(options.Arguments, "--settings", hooks.Claude(options.HookCommand))
 	}
 	session, err := ptysession.Launch("claude", a.executable, options)
 	if err != nil {

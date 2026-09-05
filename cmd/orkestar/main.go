@@ -13,6 +13,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/martintrifunov/orkestar/internal/agent/claude"
+	"github.com/martintrifunov/orkestar/internal/agent/codex"
 	"github.com/martintrifunov/orkestar/internal/agent/opencode"
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -41,6 +42,10 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "hook":
+		return runHook()
+	case "agent":
+		return runAgent(paths, args[1:])
 	case "daemon":
 		if len(args) != 2 {
 			return errors.New("usage: orkestar daemon serve|stop")
@@ -150,6 +155,7 @@ func serveDaemon(paths runtimepath.Paths) error {
 	defer cancel()
 	server := daemon.NewServer(paths.Socket)
 	server.RegisterAdapter(claude.New(""))
+	server.RegisterAdapter(codex.New(""))
 	server.RegisterAdapter(opencode.New("", "", nil))
 	// OpenCode is the reviewer adapter because its managed mode returns a
 	// structured reply; Claude Code's interactive PTY adapter has no
@@ -223,6 +229,9 @@ Usage:
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>
+  orkestar agent list
+  orkestar agent launch <workspace-id> <claude-code|codex|opencode>
+  orkestar agent resume <agent-id>
   orkestar task create <workspace-id> <title> [--depends-on id1,id2] [--no-review]
   orkestar task list [workspace-id]
   orkestar task status <task-id> <pending|in_progress|done|cancelled>

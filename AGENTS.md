@@ -11,7 +11,7 @@ agents. A background daemon owns interactive processes, sessions, scrollback,
 tasks, approvals, and integrations. The TUI and CLI are disposable clients:
 closing every client must not stop managed work.
 
-The initial integrations are Claude Code and OpenCode. Game-engine integration
+The initial integrations are Claude Code, Codex and OpenCode. Game-engine integration
 will be built around MCP, beginning with Unreal Engine and later Unity and
 Godot. Orkestar must remain useful for ordinary software projects without a
 game engine.

@@ -74,6 +74,9 @@ type LaunchOptions struct {
 	// session instead of starting a new one. Adapters that do not support
 	// resume must return an error.
 	ResumeSessionID string
+	Arguments       []string
+	Environment     []string
+	HookCommand     string
 }
 
 // LifecycleEvent is a structured signal an adapter emits as the agent moves

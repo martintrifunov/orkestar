@@ -35,6 +35,7 @@ func Launch(idPrefix, executable string, options agent.LaunchOptions) (*Session,
 
 	process, err := pty.Start(pty.StartOptions{
 		Command:   executable,
+		Arguments: options.Arguments, Env: options.Environment,
 		Directory: options.Directory,
 		Columns:   options.Columns,
 		Rows:      options.Rows,
@@ -44,10 +45,11 @@ func Launch(idPrefix, executable string, options agent.LaunchOptions) (*Session,
 	}
 
 	session := &Session{
-		id:      id,
-		process: process,
-		state:   agent.StateReady,
-		events:  make(chan agent.LifecycleEvent, 16),
+		id:       id,
+		process:  process,
+		state:    agent.StateReady,
+		nativeID: options.ResumeSessionID,
+		events:   make(chan agent.LifecycleEvent, 16),
 	}
 	session.emit(agent.StateReady, "launched")
 	go session.watchExit()
@@ -56,8 +58,9 @@ func Launch(idPrefix, executable string, options agent.LaunchOptions) (*Session,
 
 // Session is an interactive agent session backed by a PTY.
 type Session struct {
-	id      string
-	process *pty.Process
+	id       string
+	nativeID string
+	process  *pty.Process
 
 	mu     sync.Mutex
 	state  agent.State
@@ -71,7 +74,7 @@ var (
 )
 
 func (s *Session) ID() string              { return s.id }
-func (s *Session) NativeSessionID() string { return "" }
+func (s *Session) NativeSessionID() string { s.mu.Lock(); defer s.mu.Unlock(); return s.nativeID }
 
 func (s *Session) State() agent.State {
 	s.mu.Lock()
@@ -108,8 +111,8 @@ func (s *Session) Events() <-chan agent.LifecycleEvent {
 	return s.events
 }
 
-// Close releases the session's event channel. It does not stop the
-// underlying PTY process; interactive sessions outlive client detachment.
+// Close stops the daemon-owned process and releases lifecycle events.
+// Client detachment never calls this method.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,6 +121,7 @@ func (s *Session) Close() error {
 	}
 	s.closed = true
 	close(s.events)
+	_ = s.process.Close()
 	return nil
 }
 
@@ -137,7 +141,7 @@ func (s *Session) emit(state agent.State, reason string) {
 		return
 	}
 	s.state = state
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
 	event := agent.LifecycleEvent{State: state, Reason: reason, Timestamp: time.Now().UTC()}
 	select {

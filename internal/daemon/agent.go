@@ -21,6 +21,7 @@ type Agent struct {
 	Mode            string `json:"mode"`
 	NativeSessionID string `json:"native_session_id,omitempty"`
 	State           string `json:"state"`
+	SignalSource    string `json:"signal_source,omitempty"`
 	AttentionReason string `json:"attention_reason,omitempty"`
 	// TerminalID is set for interactive, PTY-backed agent sessions
 	// (agent.Session implementing agent.ProcessSession): the daemon bridges
@@ -97,8 +98,31 @@ func isAttentionState(state agent.State) bool {
 	}
 }
 
-func (a *agentSession) applyLifecycleEvent(event agent.LifecycleEvent) (Agent, bool) {
+func (a *agentSession) liveSession() agent.Session {
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.session
+}
+func (a *agentSession) applyLifecycleEvent(event agent.LifecycleEvent) (Agent, bool) {
+	return a.applyLifecycle(event, false)
+}
+func (a *agentSession) applyLifecycle(event agent.LifecycleEvent, hook bool) (Agent, bool) {
+	return a.applyLifecycleIf(event, hook, "")
+}
+func (a *agentSession) applyLifecycleIf(event agent.LifecycleEvent, hook bool, expected agent.State) (Agent, bool) {
+	a.mu.Lock()
+	if expected != "" && a.metadata.State != string(expected) {
+		metadata := a.metadata
+		a.mu.Unlock()
+		return metadata, false
+	}
+	// Process-ready is a launch acknowledgement; hooks own turn state once seen.
+	if (a.metadata.State == "stopped" || a.metadata.State == "crashed") && event.State != agent.StateStopped && event.State != agent.StateCrashed ||
+		(!hook && a.metadata.SignalSource == "hooks" && event.State == agent.StateReady) {
+		metadata := a.metadata
+		a.mu.Unlock()
+		return metadata, false
+	}
 	a.metadata.State = string(event.State)
 	if isAttentionState(event.State) {
 		a.metadata.AttentionReason = event.Reason
@@ -181,20 +205,30 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		mode = agent.ModeInteractive
 	}
 
-	session, err := adapter.Launch(ctx, agent.LaunchOptions{
-		Mode:            mode,
-		Directory:       workspace.Directory,
-		Columns:         params.Columns,
-		Rows:            params.Rows,
-		ResumeSessionID: params.ResumeSessionID,
-	})
-	if err != nil {
-		return Agent{}, fmt.Errorf("launch agent: %w", err)
-	}
-
 	id, err := newID("agent")
 	if err != nil {
 		return Agent{}, err
+	}
+	token, err := newID("hook")
+	if err != nil {
+		return Agent{}, err
+	}
+	hookCommand, env, err := s.hookOptions(id, token, params.Adapter)
+	if err != nil {
+		return Agent{}, err
+	}
+	starting := newAgentSession(Agent{ID: id, WorkspaceID: params.WorkspaceID, Adapter: params.Adapter, Mode: string(mode), State: "starting", CreatedAt: time.Now().UTC()}, nil)
+	s.mu.Lock()
+	s.agents[id] = starting
+	s.hookTokens[id] = token
+	s.mu.Unlock()
+	session, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: mode, Directory: workspace.Directory, Columns: params.Columns, Rows: params.Rows, ResumeSessionID: params.ResumeSessionID, HookCommand: hookCommand, Environment: env})
+	if err != nil {
+		s.mu.Lock()
+		delete(s.agents, id)
+		delete(s.hookTokens, id)
+		s.mu.Unlock()
+		return Agent{}, fmt.Errorf("launch agent: %w", err)
 	}
 	metadata := Agent{
 		ID:              id,
@@ -219,6 +253,7 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 			Directory:   workspace.Directory,
 			State:       "running",
 			CreatedAt:   metadata.CreatedAt,
+			Columns:     params.Columns, Rows: params.Rows,
 		}
 		terminal := newTerminalSession(terminalMetadata, processSession.Process())
 		metadata.TerminalID = terminalID
@@ -228,18 +263,29 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		s.mu.Unlock()
 	}
 
-	entry := newAgentSession(metadata, session)
+	entry := starting
+	entry.mu.Lock()
+	if entry.metadata.NativeSessionID != "" {
+		metadata.NativeSessionID = entry.metadata.NativeSessionID
+		metadata.State = entry.metadata.State
+		metadata.SignalSource = entry.metadata.SignalSource
+		metadata.AttentionReason = entry.metadata.AttentionReason
+	}
+	entry.metadata = metadata
+	entry.session = session
+	entry.mu.Unlock()
 
 	s.mu.Lock()
 	s.agents[id] = entry
 	s.mu.Unlock()
 
-	go s.watchAgent(id, entry)
+	s.agentWorkers.Add(1)
+	go func() { defer s.agentWorkers.Done(); s.watchAgent(id, entry) }()
 	return metadata, nil
 }
 
 func (s *Server) watchAgent(id string, entry *agentSession) {
-	for event := range entry.session.Events() {
+	for event := range entry.liveSession().Events() {
 		metadata, permissionCleared := entry.applyLifecycleEvent(event)
 
 		s.mu.Lock()
@@ -262,7 +308,10 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 			}
 		}
 		s.mu.Unlock()
-		_ = metadata
+		if metadata.State == "stopped" || metadata.State == "crashed" {
+			s.cancelHookPermissions(id, "")
+		}
+		_ = s.persist()
 	}
 }
 
@@ -288,7 +337,11 @@ func (s *Server) promptAgent(ctx context.Context, rawParams json.RawMessage) (ma
 	if err != nil {
 		return nil, err
 	}
-	if err := entry.session.Prompt(ctx, params.Text); err != nil {
+	session := entry.liveSession()
+	if session == nil {
+		return nil, fmt.Errorf("agent is interrupted; resume it first")
+	}
+	if err := session.Prompt(ctx, params.Text); err != nil {
 		return nil, fmt.Errorf("prompt agent: %w", err)
 	}
 	return map[string]string{"status": "ok"}, nil
@@ -305,7 +358,11 @@ func (s *Server) interruptAgent(ctx context.Context, rawParams json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
-	if err := entry.session.Interrupt(ctx); err != nil {
+	session := entry.liveSession()
+	if session == nil {
+		return nil, fmt.Errorf("agent is interrupted; resume it first")
+	}
+	if err := session.Interrupt(ctx); err != nil {
 		return nil, fmt.Errorf("interrupt agent: %w", err)
 	}
 	return map[string]string{"status": "ok"}, nil
@@ -321,38 +378,36 @@ func (s *Server) listPermissions() []PermissionRequest {
 	return permissions
 }
 
-// resolvePermission removes a pending permission request from the inbox
-// and, best-effort, forwards the decision to the agent as a prompt so
-// adapters without a dedicated permission-response channel still receive
-// it. Adapters that gain a structured permission API can special-case this
-// later without changing the IPC surface.
-func (s *Server) resolvePermission(ctx context.Context, rawParams json.RawMessage) (map[string]string, error) {
-	var params struct {
+// resolvePermission only sends decisions through a real approval channel.
+func (s *Server) resolvePermission(ctx context.Context, raw json.RawMessage) (map[string]string, error) {
+	var p struct {
 		PermissionID string `json:"permission_id"`
 		Decision     string `json:"decision"`
 	}
-	if err := json.Unmarshal(rawParams, &params); err != nil {
-		return nil, fmt.Errorf("decode permission resolve params: %w", err)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
 	}
-
+	if p.Decision != "allow" && p.Decision != "deny" {
+		return nil, fmt.Errorf("decision must be allow or deny")
+	}
 	s.mu.Lock()
-	request, ok := s.permissions[params.PermissionID]
-	if ok {
-		delete(s.permissions, params.PermissionID)
+	defer s.mu.Unlock()
+	pending := s.pendingHooks[p.PermissionID]
+	if pending == nil {
+		return nil, fmt.Errorf("permission has no live reply channel; use the agent's native prompt")
 	}
-	s.mu.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("permission %q does not exist", params.PermissionID)
-	}
-
-	entry, err := s.findAgent(request.AgentID)
-	if err == nil {
-		_ = entry.session.Prompt(ctx, params.Decision)
+	select {
+	case pending.decision <- p.Decision:
+		delete(s.permissions, p.PermissionID)
+		delete(s.pendingHooks, p.PermissionID)
+	default:
+		return nil, fmt.Errorf("permission already resolved")
 	}
 	return map[string]string{"status": "resolved"}, nil
 }
 
 func (s *Server) closeAgents() {
+	defer s.agentWorkers.Wait()
 	s.mu.RLock()
 	entries := make([]*agentSession, 0, len(s.agents))
 	for _, entry := range s.agents {
@@ -360,7 +415,9 @@ func (s *Server) closeAgents() {
 	}
 	s.mu.RUnlock()
 	for _, entry := range entries {
-		_ = entry.session.Close()
+		if session := entry.liveSession(); session != nil {
+			_ = session.Close()
+		}
 	}
 }
 

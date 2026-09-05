@@ -1,6 +1,7 @@
 # ADR 0002: Embedded terminal panes
 
 - Status: accepted; supersedes the interim agent rollback
+- Screen ownership, replay and single-pane limits superseded by [ADR 0003](0003-daemon-screens-recovery-and-hooks.md)
 - Original date: 2026-09-03
 - Reassessed: 2026-09-05
 

@@ -5,16 +5,16 @@ agents and the tools they operate.
 
 The background daemon owns interactive sessions so work continues when the UI
 disconnects. The TUI provides one place to see agents, tasks, approvals, logs,
-and development-tool integrations. Claude Code and OpenCode are the first agent
+and development-tool integrations. Claude Code, Codex and OpenCode are supported agent
 targets; game-engine workflows will integrate through MCP.
 
 ## Status
 
-Orkestar has a working Go daemon/TUI slice with interactive agent panes and
-client reattachment. Workspaces, sessions, tasks and agents stay in a left
-sidebar; a selected shell or agent runs in the adjacent terminal pane.
-Processes survive closing the UI while the daemon remains alive. Metadata is
-currently in memory; daemon-restart recovery is not implemented.
+Orkestar has a Go daemon/TUI with up to four embedded terminal panes beside a
+persistent left sidebar. Processes and terminal state survive closing the UI.
+SQLite preserves workspaces, tasks, artifacts and session metadata across daemon
+restart; native agent resume is explicit. Claude Code, Codex and OpenCode support
+interactive launch, lifecycle hooks/plugins and native permission replies.
 
 See:
 
@@ -37,28 +37,58 @@ See:
 Build and run from a project directory:
 
 ```bash
-go build -o /tmp/orkestar ./cmd/orkestar
-/tmp/orkestar
+go build -o ./orkestar ./cmd/orkestar
+./orkestar
 ```
 
 - `a`: choose and launch an installed agent; `n`: launch a shell.
 - `Tab`: switch sidebar section; arrows select; `Enter`: open a session/agent.
 - In a pane, `Ctrl+b`, then `Tab`: focus the sidebar; `Esc`: return to the pane.
+- `Ctrl+b`, then `o` (or `F6`): next pane; `v`: grid; `s`: stacked.
+  With one pane, `v`/`s` opens a second shell. Each action needs its own prefix.
+- `Ctrl+b`, then `d`: review changes; `e`: edit a file; comma: editor settings.
+  Choose standard keyboard/mouse editing, native Vim, native Nano, or a custom command.
+- `Ctrl+b`, then `a`: another agent; `n`: another shell.
+- Click a pane to focus it. Up to four panes are visible; a fifth replaces the
+  focused attachment, leaving its process running.
+- `Ctrl+b`, then `[`: scrollback; wheel or Page Up/Down scrolls; `Esc` returns.
+- `Ctrl+b`, then `t`: claim input if another client's controller has disconnected.
 - `Ctrl+b`, then `q`: close the pane without stopping its process.
 - `q` in the sidebar: quit the UI. Reopen and select the session to reattach.
 - In Tasks, `d` opens the diff and `m` marks done; in Agents, `y`/`x` resolves
-  an available permission request.
+  an available native permission request. `u` explicitly resumes an inactive agent.
 
-The UI currently shows one terminal pane at a time and needs at least 50 × 16
-terminal cells. Direct full-screen attachment is also available with
+The UI needs at least 50 × 16 terminal cells. Narrow windows show the focused
+pane; wider windows show the selected split layout. Direct full-screen attachment is also available with
 `orkestar terminal attach <terminal-id>`.
+
+Codex may ask you to review Orkestar's five command hooks at first launch. Hooks
+are configured for that invocation and do not bypass native trust or approvals.
+If hooks are disabled or untrusted, the PTY still works but structured lifecycle
+and native resume identity may be unavailable.
+
+`./orkestar agent list`, `agent launch <workspace-id> <adapter>` and
+`agent resume <agent-id>` also expose agent management from the CLI.
+
+After rebuilding, an already running daemon continues using its old code. Stop
+it with `./orkestar daemon stop` when its running work can end, then reopen
+`./orkestar`. The previous in-memory daemon cannot migrate its live sessions into
+the new store. From this version onward metadata persists; screens and scrollback
+remain in memory and do not survive daemon restart.
 
 Standard checks:
 
 ```bash
 go test ./...
 go vet ./...
+go test -race ./...
 ```
+
+Installed-agent smoke checks: `python3 scripts/smoke-agents.py` (isolated daemon,
+no submitted model prompts). See [validation](docs/validation.md) for coverage.
 
 The repository may contain local commits during development. Nothing is pushed
 to `origin` without explicit user permission.
+
+See [panes and editing](docs/panes-and-editing.md) for review, save, selection,
+mouse and editor configuration shortcuts.

@@ -15,8 +15,6 @@ import (
 	"github.com/martintrifunov/orkestar/internal/terminal"
 )
 
-const scrollbackCapacity = 2 * 1024 * 1024
-
 type Terminal struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspace_id"`
@@ -25,101 +23,160 @@ type Terminal struct {
 	State       string    `json:"state"`
 	ExitError   string    `json:"exit_error,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	Columns     int       `json:"columns"`
+	Rows        int       `json:"rows"`
 }
-
 type terminalEvent struct {
 	Name string
 	Data []byte
 }
-
+type terminalSubscriber struct {
+	events chan terminalEvent
+	screen bool
+}
 type terminalSession struct {
-	process *pty.Process
-	buffer  *terminal.Buffer
-
+	process     *pty.Process
+	screen      *terminal.Screen
 	mu          sync.Mutex
 	metadata    Terminal
-	subscribers map[chan terminalEvent]struct{}
-	controller  bool
+	subscribers map[*terminalSubscriber]struct{}
+	controller  *terminalSubscriber
+	revision    uint64
+	done        chan struct{}
+	inputDone   chan struct{}
+	closeOnce   sync.Once
 }
 
 func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSession {
-	session := &terminalSession{
-		process:     process,
-		buffer:      terminal.NewBuffer(scrollbackCapacity),
-		metadata:    metadata,
-		subscribers: make(map[chan terminalEvent]struct{}),
+	if metadata.Columns <= 0 {
+		metadata.Columns = 80
 	}
-	go session.captureOutput()
-	return session
+	if metadata.Rows <= 0 {
+		metadata.Rows = 24
+	}
+	s := &terminalSession{metadata: metadata, process: process, screen: terminal.NewScreen(metadata.Columns, metadata.Rows), subscribers: make(map[*terminalSubscriber]struct{}), done: make(chan struct{}), inputDone: make(chan struct{})}
+	if process != nil {
+		go func() {
+			defer close(s.inputDone)
+			b := make([]byte, 4096)
+			for {
+				n, err := s.screen.Read(b)
+				if n > 0 {
+					if _, e := process.Write(b[:n]); e != nil {
+						_ = s.screen.Close()
+						return
+					}
+				}
+				if err != nil {
+					return
+				}
+			}
+		}()
+		go s.captureOutput()
+	} else {
+		_ = s.screen.Close()
+		close(s.inputDone)
+		close(s.done)
+	}
+	return s
 }
-
-func (s *terminalSession) snapshot() Terminal {
+func (s *terminalSession) snapshot() Terminal { s.mu.Lock(); defer s.mu.Unlock(); return s.metadata }
+func (s *terminalSession) frame() terminal.Frame {
+	f := s.screen.Frame()
+	f.Revision = s.revision
+	return f
+}
+func (s *terminalSession) subscribe(screen, observe bool) (terminal.Frame, *terminalSubscriber, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.metadata
-}
-
-func (s *terminalSession) attach() ([]byte, <-chan terminalEvent, func(), error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.controller {
-		return nil, nil, nil, errors.New("terminal already has an attached controller")
+	if !observe && s.controller != nil && !screen {
+		return terminal.Frame{}, nil, nil, errors.New("terminal already has an attached controller")
 	}
-
-	s.controller = true
-	events := make(chan terminalEvent, 256)
-	s.subscribers[events] = struct{}{}
-	replay := s.buffer.Bytes()
+	sub := &terminalSubscriber{events: make(chan terminalEvent, 1), screen: screen}
+	s.subscribers[sub] = struct{}{}
+	if !observe && s.controller == nil {
+		s.controller = sub
+	}
+	frame := s.frame()
 	if s.metadata.State != "running" {
-		if payload, err := json.Marshal(s.metadata); err == nil {
-			events <- terminalEvent{Name: "terminal.exit", Data: payload}
-		}
+		b, _ := json.Marshal(s.metadata)
+		sub.events <- terminalEvent{Name: "terminal.exit", Data: b}
 	}
 	detach := func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if _, ok := s.subscribers[events]; ok {
-			delete(s.subscribers, events)
-			close(events)
+		delete(s.subscribers, sub)
+		if s.controller == sub {
+			s.controller = nil
 		}
-		s.controller = false
+		close(sub.events)
 	}
-	return replay, events, detach, nil
+	return frame, sub, detach, nil
 }
-
+func (s *terminalSession) publish() {
+	s.revision++
+	f := s.frame()
+	for sub := range s.subscribers {
+		var e terminalEvent
+		if sub.screen {
+			b, _ := json.Marshal(f)
+			e = terminalEvent{Name: "terminal.screen", Data: b}
+		} else {
+			e = terminalEvent{Name: "terminal.output", Data: []byte(f.ANSI())}
+		}
+		select {
+		case <-sub.events:
+		default:
+		}
+		sub.events <- e
+	}
+}
 func (s *terminalSession) input(encoded string) error {
 	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return fmt.Errorf("decode terminal input: %w", err)
 	}
-	if _, err := s.process.Write(data); err != nil {
-		return fmt.Errorf("write terminal input: %w", err)
-	}
+	s.screen.Input(data)
 	return nil
 }
-
 func (s *terminalSession) resize(columns, rows int) error {
-	return s.process.Resize(columns, rows)
+	if columns < 1 || rows < 1 || columns > 500 || rows > 200 {
+		return errors.New("terminal size must be within 1..500 columns and 1..200 rows")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.process == nil {
+		return errors.New("terminal is no longer running")
+	}
+	if err := s.process.Resize(columns, rows); err != nil {
+		return err
+	}
+	s.screen.Resize(columns, rows)
+	s.metadata.Columns = columns
+	s.metadata.Rows = rows
+	s.publish()
+	return nil
 }
-
 func (s *terminalSession) close() error {
-	return s.process.Close()
+	s.closeOnce.Do(func() {
+		_ = s.screen.Close()
+		if s.process != nil {
+			_ = s.process.Close()
+		}
+	})
+	return nil
 }
-
 func (s *terminalSession) captureOutput() {
-	data := make([]byte, 32*1024)
+	defer close(s.done)
+	defer s.process.Close()
+	defer func() { _ = s.screen.Close(); <-s.inputDone }()
+	b := make([]byte, 32*1024)
 	for {
-		count, err := s.process.Read(data)
-		if count > 0 {
-			chunk := append([]byte(nil), data[:count]...)
+		n, err := s.process.Read(b)
+		if n > 0 {
 			s.mu.Lock()
-			s.buffer.Write(chunk)
-			for subscriber := range s.subscribers {
-				select {
-				case subscriber <- terminalEvent{Name: "terminal.output", Data: chunk}:
-				default:
-				}
-			}
+			_, _ = s.screen.Write(b[:n])
+			s.publish()
 			s.mu.Unlock()
 		}
 		if err != nil {
@@ -128,169 +185,209 @@ func (s *terminalSession) captureOutput() {
 		}
 	}
 }
-
-func (s *terminalSession) finish(waitError error) {
+func (s *terminalSession) finish(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if waitError != nil {
+	s.metadata.State = "stopped"
+	if err != nil {
 		s.metadata.State = "crashed"
-		s.metadata.ExitError = waitError.Error()
-	} else {
-		s.metadata.State = "stopped"
+		s.metadata.ExitError = err.Error()
 	}
-	payload, _ := json.Marshal(s.metadata)
-	for subscriber := range s.subscribers {
+	b, _ := json.Marshal(s.metadata)
+	// The receiver obtains the final frame before the exit event.
+	for sub := range s.subscribers {
 		select {
-		case subscriber <- terminalEvent{Name: "terminal.exit", Data: payload}:
+		case <-sub.events:
 		default:
 		}
+		sub.events <- terminalEvent{Name: "terminal.exit", Data: b}
 	}
 }
 
-func (s *Server) startTerminal(rawParams json.RawMessage) (Terminal, error) {
-	var params struct {
+func (s *Server) startTerminal(raw json.RawMessage) (Terminal, error) {
+	var p struct {
 		WorkspaceID string   `json:"workspace_id"`
 		Command     []string `json:"command"`
 		Directory   string   `json:"directory"`
 		Columns     int      `json:"columns"`
 		Rows        int      `json:"rows"`
 	}
-	if err := json.Unmarshal(rawParams, &params); err != nil {
-		return Terminal{}, fmt.Errorf("decode terminal params: %w", err)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Terminal{}, err
 	}
-	if len(params.Command) == 0 || params.Command[0] == "" {
+	if len(p.Command) == 0 || p.Command[0] == "" {
 		return Terminal{}, errors.New("terminal command is required")
 	}
-
 	s.mu.RLock()
-	workspace, ok := s.workspaces[params.WorkspaceID]
+	w, ok := s.workspaces[p.WorkspaceID]
 	s.mu.RUnlock()
 	if !ok {
-		return Terminal{}, fmt.Errorf("workspace %q does not exist", params.WorkspaceID)
+		return Terminal{}, fmt.Errorf("workspace %q does not exist", p.WorkspaceID)
 	}
-	if params.Directory == "" {
-		params.Directory = workspace.Directory
+	if p.Directory == "" {
+		p.Directory = w.Directory
 	}
-
 	id, err := newID("term")
 	if err != nil {
 		return Terminal{}, err
 	}
-	process, err := pty.Start(pty.StartOptions{
-		Command:   params.Command[0],
-		Arguments: params.Command[1:],
-		Directory: params.Directory,
-		Columns:   params.Columns,
-		Rows:      params.Rows,
-	})
+	process, err := pty.Start(pty.StartOptions{Command: p.Command[0], Arguments: p.Command[1:], Directory: p.Directory, Columns: p.Columns, Rows: p.Rows})
 	if err != nil {
 		return Terminal{}, err
 	}
-
-	metadata := Terminal{
-		ID:          id,
-		WorkspaceID: params.WorkspaceID,
-		Command:     append([]string(nil), params.Command...),
-		Directory:   params.Directory,
-		State:       "running",
-		CreatedAt:   time.Now().UTC(),
-	}
+	metadata := Terminal{ID: id, WorkspaceID: p.WorkspaceID, Command: p.Command, Directory: p.Directory, State: "running", CreatedAt: time.Now().UTC(), Columns: p.Columns, Rows: p.Rows}
 	session := newTerminalSession(metadata, process)
 	s.mu.Lock()
 	s.terminals[id] = session
 	s.mu.Unlock()
-	return metadata, nil
+	return session.snapshot(), nil
 }
-
-func (s *Server) handleTerminalAttach(connection net.Conn, scanner *bufio.Scanner, encoder *json.Encoder, request ipc.Request) {
+func (s *Server) handleTerminalAttach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Encoder, request ipc.Request) {
 	if request.Version != ipc.Version {
 		_ = encoder.Encode(ipc.NewErrorResponse(request.ID, "unsupported_version", "unsupported protocol version"))
 		return
 	}
-	var params struct {
+	var p struct {
 		TerminalID string `json:"terminal_id"`
+		Screen     bool   `json:"screen"`
+		Observe    bool   `json:"observe"`
 	}
-	if err := json.Unmarshal(request.Params, &params); err != nil {
+	if json.Unmarshal(request.Params, &p) != nil {
 		_ = encoder.Encode(ipc.NewErrorResponse(request.ID, "invalid_params", "invalid terminal attach params"))
 		return
 	}
-
 	s.mu.RLock()
-	session, ok := s.terminals[params.TerminalID]
+	session, ok := s.terminals[p.TerminalID]
 	s.mu.RUnlock()
 	if !ok {
-		_ = encoder.Encode(ipc.NewErrorResponse(request.ID, "not_found", fmt.Sprintf("terminal %q does not exist", params.TerminalID)))
+		_ = encoder.Encode(ipc.NewErrorResponse(request.ID, "not_found", "terminal does not exist"))
 		return
 	}
-
-	replay, events, detach, err := session.attach()
+	frame, sub, detach, err := session.subscribe(p.Screen, p.Observe)
 	if err != nil {
 		_ = encoder.Encode(ipc.NewErrorResponse(request.ID, "terminal_busy", err.Error()))
 		return
 	}
 	defer detach()
-
-	response, err := ipc.NewResponse(request.ID, map[string]any{
-		"terminal": session.snapshot(),
-		"replay":   base64.StdEncoding.EncodeToString(replay),
-	})
-	if err != nil || encoder.Encode(response) != nil {
+	if s.controlReply(conn, encoder, request, session, sub, frame) != nil {
 		return
 	}
-
 	readerDone := make(chan struct{})
+	commands := make(chan json.RawMessage)
 	go func() {
 		defer close(readerDone)
 		for scanner.Scan() {
-			var command struct {
-				Version int    `json:"version"`
-				Command string `json:"command"`
-				Data    string `json:"data,omitempty"`
-				Columns int    `json:"columns,omitempty"`
-				Rows    int    `json:"rows,omitempty"`
-			}
-			if json.Unmarshal(scanner.Bytes(), &command) != nil || command.Version != ipc.Version {
-				continue
-			}
-			switch command.Command {
-			case "input":
-				_ = session.input(command.Data)
-			case "resize":
-				_ = session.resize(command.Columns, command.Rows)
-			case "detach":
+			b := append(json.RawMessage(nil), scanner.Bytes()...)
+			select {
+			case commands <- b:
+			case <-s.stop:
 				return
 			}
 		}
 	}()
-
+	// Closing the connection releases a blocked scanner on every exit path.
+	defer func() {
+		_ = conn.Close()
+		for {
+			select {
+			case <-readerDone:
+				return
+			case <-commands:
+			}
+		}
+	}()
 	for {
 		select {
 		case <-readerDone:
 			return
-		case event, ok := <-events:
-			if !ok {
+		case <-s.stop:
+			return
+		case raw := <-commands:
+			var c struct {
+				X         int    `json:"x"`
+				Y         int    `json:"y"`
+				Button    int    `json:"button"`
+				Kind      string `json:"kind"`
+				Version   int    `json:"version"`
+				Command   string `json:"command"`
+				Data      string `json:"data"`
+				Text      string `json:"text"`
+				Code      rune   `json:"code"`
+				Modifiers int    `json:"modifiers"`
+				Columns   int    `json:"columns"`
+				Rows      int    `json:"rows"`
+			}
+			if json.Unmarshal(raw, &c) != nil || c.Version != ipc.Version {
+				continue
+			}
+			if c.Command == "detach" {
 				return
 			}
-			var payload any
-			if event.Name == "terminal.output" {
-				payload = map[string]string{
-					"terminal_id": params.TerminalID,
-					"data":        base64.StdEncoding.EncodeToString(event.Data),
-				}
-			} else {
-				var terminal Terminal
-				if json.Unmarshal(event.Data, &terminal) != nil {
-					continue
-				}
-				payload = terminal
+			session.mu.Lock()
+			if c.Command == "claim" && session.controller == nil {
+				session.controller = sub
 			}
-			data, err := json.Marshal(payload)
+			control := session.controller == sub
+			session.mu.Unlock()
+			if c.Command == "claim" {
+				b, _ := json.Marshal(map[string]bool{"controller": control})
+				_ = encoder.Encode(ipc.Event{Version: ipc.Version, Event: "terminal.control", Data: b})
+				continue
+			}
+			if !control {
+				continue
+			}
+			switch c.Command {
+			case "input":
+				err = session.input(c.Data)
+			case "mouse":
+				session.screen.Mouse(c.Kind, c.X, c.Y, c.Button, c.Modifiers)
+			case "paste":
+				session.screen.Paste(c.Text)
+			case "key":
+				session.screen.Navigation(c.Code, c.Modifiers)
+			case "resize":
+				err = session.resize(c.Columns, c.Rows)
+			}
 			if err != nil {
-				return
+				b, _ := json.Marshal(map[string]string{"message": err.Error()})
+				_ = encoder.Encode(ipc.Event{Version: ipc.Version, Event: "terminal.error", Data: b})
+				err = nil
 			}
-			if err := encoder.Encode(ipc.Event{Version: ipc.Version, Event: event.Name, Data: data}); err != nil {
+		case e := <-sub.events:
+			var data []byte
+			if e.Name == "terminal.output" {
+				data, _ = json.Marshal(map[string]string{"terminal_id": p.TerminalID, "data": base64.StdEncoding.EncodeToString(e.Data)})
+			} else {
+				data = e.Data
+			}
+			if e.Name == "terminal.exit" {
+				session.mu.Lock()
+				f := session.frame()
+				session.mu.Unlock()
+				name := "terminal.screen"
+				b, _ := json.Marshal(f)
+				if !p.Screen {
+					name = "terminal.output"
+					b, _ = json.Marshal(map[string]string{"terminal_id": p.TerminalID, "data": base64.StdEncoding.EncodeToString([]byte(f.ANSI()))})
+				}
+				_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+				if encoder.Encode(ipc.Event{Version: ipc.Version, Event: name, Data: b}) != nil {
+					return
+				}
+			}
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			if encoder.Encode(ipc.Event{Version: ipc.Version, Event: e.Name, Data: data}) != nil {
 				return
 			}
 		}
 	}
+}
+func (s *Server) controlReply(conn net.Conn, encoder *json.Encoder, request ipc.Request, session *terminalSession, sub *terminalSubscriber, frame terminal.Frame) error {
+	session.mu.Lock()
+	control := session.controller == sub
+	session.mu.Unlock()
+	response, _ := ipc.NewResponse(request.ID, map[string]any{"terminal": session.snapshot(), "replay": base64.StdEncoding.EncodeToString([]byte(frame.ANSI())), "screen": frame, "controller": control})
+	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	return encoder.Encode(response)
 }

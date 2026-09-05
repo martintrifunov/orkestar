@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/charmbracelet/x/xpty"
 )
@@ -20,10 +22,14 @@ type StartOptions struct {
 }
 
 type Process struct {
-	pty    xpty.Pty
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	done   chan struct{}
+	io        *os.File
+	writeMu   sync.Mutex
+	pty       xpty.Pty
+	cmd       *exec.Cmd
+	cancel    context.CancelFunc
+	done      chan struct{}
+	closeOnce sync.Once
+	stopping  atomic.Bool
 
 	waitMu  sync.RWMutex
 	waitErr error
@@ -39,6 +45,9 @@ func Start(options StartOptions) (*Process, error) {
 	if options.Rows <= 0 {
 		options.Rows = 24
 	}
+	if options.Columns > 500 || options.Rows > 200 {
+		return nil, fmt.Errorf("start PTY: size exceeds 500 columns or 200 rows")
+	}
 
 	pseudoterminal, err := xpty.NewPty(options.Columns, options.Rows)
 	if err != nil {
@@ -47,6 +56,7 @@ func Start(options StartOptions) (*Process, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	command := exec.Command(options.Command, options.Arguments...)
+	configureCommand(command)
 	command.Dir = options.Directory
 	if options.Env == nil {
 		command.Env = os.Environ()
@@ -59,8 +69,18 @@ func Start(options StartOptions) (*Process, error) {
 		return nil, fmt.Errorf("start %q in PTY: %w", options.Command, err)
 	}
 
+	ioFile, err := prepareIO(pseudoterminal)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		_ = pseudoterminal.Close()
+		cancel()
+		return nil, fmt.Errorf("configure PTY I/O: %w", err)
+	}
+
 	process := &Process{
 		pty:    pseudoterminal,
+		io:     ioFile,
 		cmd:    command,
 		cancel: cancel,
 		done:   make(chan struct{}),
@@ -70,11 +90,14 @@ func Start(options StartOptions) (*Process, error) {
 }
 
 func (p *Process) Read(data []byte) (int, error) {
-	return p.pty.Read(data)
+	return p.io.Read(data)
 }
 
 func (p *Process) Write(data []byte) (int, error) {
-	return p.pty.Write(data)
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	_ = p.io.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	return p.io.Write(data)
 }
 
 func (p *Process) Resize(columns, rows int) error {
@@ -99,18 +122,38 @@ func (p *Process) WaitError() error {
 }
 
 func (p *Process) Close() error {
-	p.cancel()
-	if err := p.pty.Close(); err != nil {
-		return fmt.Errorf("close PTY: %w", err)
-	}
+	p.closeOnce.Do(func() {
+		defer p.cancel()
+		defer p.pty.Close()
+		defer p.io.Close()
+		p.stopping.Store(true)
+		select {
+		case <-p.done:
+			return
+		default:
+		}
+		// The PTY child is a session leader. Signal its group so subprocesses also
+		// stop on an explicit daemon shutdown, then bound the grace period.
+		stopProcessGroup(p.cmd.Process, false)
+		select {
+		case <-p.done:
+		case <-time.After(time.Second):
+			stopProcessGroup(p.cmd.Process, true)
+			_ = p.cmd.Process.Kill()
+		}
+		_ = p.pty.Close()
+		p.cancel()
+	})
 	return nil
 }
 
 func (p *Process) wait(ctx context.Context) {
 	err := xpty.WaitProcess(ctx, p.cmd)
 	p.waitMu.Lock()
+	if p.stopping.Load() {
+		err = nil
+	}
 	p.waitErr = err
 	p.waitMu.Unlock()
 	close(p.done)
-	_ = p.pty.Close()
 }

@@ -163,18 +163,21 @@ func TestAdapterInteractiveLaunchPromptAndInterrupt(t *testing.T) {
 	waitForState(t, session, agent.StateStopped)
 }
 
-func TestAdapterInteractiveRejectsResume(t *testing.T) {
+func TestAdapterInteractiveAcceptsResume(t *testing.T) {
 	t.Parallel()
 
 	adapter := opencode.New(fixtureExecutable(t), "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := adapter.Launch(ctx, agent.LaunchOptions{
-		Mode:            agent.ModeInteractive,
-		ResumeSessionID: "prior",
-	}); err == nil {
-		t.Fatal("expected resume to be rejected in interactive mode")
+	session, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: agent.ModeInteractive, ResumeSessionID: "prior"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer session.Close()
+	if session.NativeSessionID() != "prior" {
+		t.Fatal("resume identity not retained")
+	}
+
 }
 
 func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {

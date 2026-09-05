@@ -4,33 +4,43 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/martintrifunov/orkestar/internal/terminal"
 
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/terminal"
 )
 
 // embeddedTerminal owns one client attachment, never the underlying process.
 // Output notifications are coalesced; a hidden or slow UI cannot block the PTY.
 type embeddedTerminal struct {
+	title, root   string
+	editor        *textEditor
+	review        *reviewPane
 	terminalID    string
 	stream        *ipc.Stream
-	emulator      *terminal.Screen
+	emulator      paneScreen
+	view          *remoteScreen
 	events        chan tea.Msg
 	done          chan struct{}
 	readDone      chan struct{}
 	writeDone     chan struct{}
 	closeOnce     sync.Once
 	detachPending bool
+	exited        bool
 }
 
 func (t *embeddedTerminal) close() {
 	t.closeOnce.Do(func() {
-		close(t.done)
-		_ = t.stream.Close()
+		if t.done != nil {
+			close(t.done)
+		}
+		if t.stream != nil {
+			_ = t.stream.Close()
+		}
 		_ = t.emulator.Close()
 	})
 }
@@ -52,10 +62,8 @@ type embeddedEventMsg struct {
 	err        error
 }
 
-// openEmbeddedTerminal attaches to terminalID's stream, seeds a new
-// terminal emulator sized columns x rows with the replay, and starts a
-// background goroutine that keeps the emulator (and the daemon's PTY, via
-// an initial resize) in sync with it.
+// openEmbeddedTerminal attaches to the daemon screen stream and requests
+// initial dimensions when this client owns input.
 func openEmbeddedTerminal(client *ipc.Client, terminalID string, columns, rows int) tea.Cmd {
 	return openEmbeddedTerminalContext(context.Background(), client, terminalID, columns, rows)
 }
@@ -73,28 +81,16 @@ func openEmbeddedTerminalContext(ctx context.Context, client *ipc.Client, termin
 		defer cancel()
 
 		var result struct {
-			Replay string `json:"replay"`
+			Screen     terminal.Frame `json:"screen"`
+			Controller bool           `json:"controller"`
 		}
-		stream, err := client.OpenStream(dialCtx, "terminal.attach", map[string]string{
-			"terminal_id": terminalID,
-		}, &result)
+		stream, err := client.OpenStream(dialCtx, "terminal.attach", map[string]any{"terminal_id": terminalID, "screen": true}, &result)
 		if err != nil {
 			return embeddedReadyMsg{err: err}
 		}
-
-		replay, err := base64.StdEncoding.DecodeString(result.Replay)
-		if err != nil {
-			stream.Close()
-			return embeddedReadyMsg{err: err}
-		}
-
-		term := &embeddedTerminal{
-			terminalID: terminalID, stream: stream,
-			emulator: terminal.NewScreen(columns, rows), events: make(chan tea.Msg, 1),
-			done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{}),
-		}
-		// Start draining replies before replay: replay can itself contain queries.
-		go embeddedWriteLoop(term)
+		view := &remoteScreen{stream: stream, frame: result.Screen, controller: result.Controller}
+		term := &embeddedTerminal{terminalID: terminalID, stream: stream, emulator: view, view: view, events: make(chan tea.Msg, 1), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{})}
+		close(term.writeDone)
 		go func() {
 			select {
 			case <-ctx.Done():
@@ -102,19 +98,19 @@ func openEmbeddedTerminalContext(ctx context.Context, client *ipc.Client, termin
 			case <-term.done:
 			}
 		}()
-		_, _ = term.emulator.Write(replay)
-		if err := stream.Send(resizeCommand(columns, rows)); err != nil {
-			term.close()
-			return embeddedReadyMsg{err: err}
+		if result.Controller {
+			if err := stream.Send(resizeCommand(columns, rows)); err != nil {
+				term.close()
+				return embeddedReadyMsg{err: err}
+			}
 		}
 		go embeddedReadLoop(term)
 		return embeddedReadyMsg{terminal: term}
 	}
 }
 
-// embeddedReadLoop applies incoming terminal.output events to the
-// emulator and reports every event (or the terminal's end) on
-// term.events, until the stream errors or the process exits.
+// embeddedReadLoop applies complete daemon frames and control changes until
+// the stream fails or the process exits.
 func embeddedReadLoop(term *embeddedTerminal) {
 	defer close(term.readDone)
 	defer func() { term.close(); <-term.writeDone }()
@@ -125,42 +121,33 @@ func embeddedReadLoop(term *embeddedTerminal) {
 			return
 		}
 		switch event.Event {
-		case "terminal.output":
-			var payload struct {
-				Data string `json:"data"`
-			}
-			if err := json.Unmarshal(event.Data, &payload); err != nil {
+		case "terminal.screen":
+			var frame terminal.Frame
+			if err := json.Unmarshal(event.Data, &frame); err != nil {
 				term.notify(true, err)
 				return
 			}
-			data, err := base64.StdEncoding.DecodeString(payload.Data)
-			if err != nil {
-				term.notify(true, err)
-				return
-			}
-			_, _ = term.emulator.Write(data)
+			term.view.apply(frame)
 			term.notify(false, nil)
+		case "terminal.control":
+			var status struct {
+				Controller bool `json:"controller"`
+			}
+			_ = json.Unmarshal(event.Data, &status)
+			term.view.mu.Lock()
+			term.view.controller = status.Controller
+			term.view.mu.Unlock()
+			term.notify(false, nil)
+
+		case "terminal.error":
+			var result struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(event.Data, &result) == nil {
+				term.notify(false, errors.New(result.Message))
+			}
 		case "terminal.exit":
 			term.notify(true, nil)
-			return
-		}
-	}
-}
-
-// All user input and terminal replies share this writer, preserving order.
-func embeddedWriteLoop(term *embeddedTerminal) {
-	defer close(term.writeDone)
-	buffer := make([]byte, 4096)
-	for {
-		n, err := term.emulator.Read(buffer)
-		if n > 0 {
-			if err := sendEmbeddedInput(term.stream, buffer[:n]); err != nil {
-				term.notify(true, err)
-				term.close()
-				return
-			}
-		}
-		if err != nil {
 			return
 		}
 	}
@@ -197,7 +184,7 @@ func waitEmbeddedEvent(term *embeddedTerminal) tea.Cmd {
 	}
 }
 
-// sendEmbeddedInput forwards bytes from the single emulator-input pump.
+// sendEmbeddedInput forwards user bytes to the daemon input owner.
 func sendEmbeddedInput(stream *ipc.Stream, data []byte) error {
 	err := stream.Send(map[string]any{
 		"version": ipc.Version,
@@ -208,11 +195,18 @@ func sendEmbeddedInput(stream *ipc.Stream, data []byte) error {
 	return err
 }
 
-// sendEmbeddedResize resizes the local emulator and tells the daemon to
-// resize the underlying PTY to match. Also called synchronously, for the
-// same reason as sendEmbeddedInput: a resize racing a keystroke's Cmd
-// could reach the daemon in the wrong order.
+// sendEmbeddedResize requests a daemon screen and PTY resize in input order.
 func sendEmbeddedResize(term *embeddedTerminal, columns, rows int) {
+	if term.stream == nil {
+		term.emulator.Resize(columns, rows)
+		return
+	}
+	if term.exited {
+		return
+	}
+	if term.view != nil && !term.view.controls() {
+		return
+	}
 	term.emulator.Resize(columns, rows)
 	if err := term.stream.Send(resizeCommand(columns, rows)); err != nil {
 		term.notify(true, err)

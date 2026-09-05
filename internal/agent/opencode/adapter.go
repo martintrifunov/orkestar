@@ -66,7 +66,7 @@ func (a *Adapter) Capabilities() agent.Capabilities {
 func (a *Adapter) Launch(ctx context.Context, options agent.LaunchOptions) (agent.Session, error) {
 	if options.Mode == agent.ModeInteractive {
 		if options.ResumeSessionID != "" {
-			return nil, errors.New("opencode adapter: resume is not supported in interactive mode")
+			options.Arguments = append(options.Arguments, "--session", options.ResumeSessionID)
 		}
 		session, err := ptysession.Launch("opencode", a.executable, options)
 		if err != nil {

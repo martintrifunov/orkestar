@@ -66,17 +66,30 @@ const (
 )
 
 type Model struct {
-	client        *ipc.Client
-	directory     string
-	snapshot      daemon.Snapshot
-	selected      int
-	taskSelected  int
-	agentSelected int
-	focus         focusPanel
-	width         int
-	height        int
-	loading       bool
-	err           error
+	clipboardTarget          *textEditor
+	filePaths                []string
+	fileAt                   int
+	prefix                   bool
+	notice                   string
+	localSequence            int
+	settings                 editorSettings
+	filePrompt, settingsOpen bool
+	fileName, fileRoot       string
+
+	viewingHistory bool
+	history        []string
+	historyOffset  int
+	client         *ipc.Client
+	directory      string
+	snapshot       daemon.Snapshot
+	selected       int
+	taskSelected   int
+	agentSelected  int
+	focus          focusPanel
+	width          int
+	height         int
+	loading        bool
+	err            error
 
 	viewingDiff bool
 	diffTaskID  string
@@ -92,6 +105,8 @@ type Model struct {
 
 	// The sidebar stays usable while a terminal attachment is visible.
 	embedded       *embeddedTerminal
+	panes          []*embeddedTerminal
+	stacked        bool
 	sidebarFocused bool
 	opening        bool
 	ctx            context.Context
@@ -99,6 +114,7 @@ type Model struct {
 
 func New(client *ipc.Client, directory string) Model {
 	return Model{
+		settings:  readSettings(),
 		client:    client,
 		directory: directory,
 		loading:   true,
@@ -124,16 +140,149 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = message.Width
 		m.height = message.Height
-		if m.embedded != nil {
-			columns, rows := embeddedPaneSize(m.width, m.height)
-			sendEmbeddedResize(m.embedded, columns, rows)
+		m.resizePanes()
+	case fileListMsg:
+		if m.filePrompt && m.fileRoot == message.root {
+			m.filePaths = message.paths
 		}
+	case documentLoaded:
+		m.err = message.err
+		if message.err == nil {
+			for _, p := range m.visiblePanes() {
+				if p.editor != nil && p.editor.doc.Path == message.doc.Path {
+					m.embedded = p
+					m.sidebarFocused = false
+					return m, nil
+				}
+			}
+			if !m.roomForPane() {
+				return m, nil
+			}
+			e := newTextEditor(message.doc)
+			p := m.localPane(message.doc.Path, message.root, e)
+			p.editor = e
+		}
+	case reviewLoaded:
+		if m.findPane(message.pane.terminalID) == message.pane {
+			message.pane.review = message.review
+			message.pane.emulator = message.review
+			m.resizePanes()
+		}
+	case tea.ClipboardMsg:
+		if m.embedded != nil && m.embedded.editor == m.clipboardTarget && m.clipboardTarget != nil && !m.sidebarFocused && !m.filePrompt && !m.settingsOpen {
+			m.clipboardTarget.Paste(message.Content)
+		}
+		m.clipboardTarget = nil
+	case tea.MouseMotionMsg:
+		if m.forwardMouse("motion", message.Mouse()) {
+			return m, nil
+		}
+		if m.embedded != nil && m.embedded.editor != nil && m.embedded.editor.dragging {
+			for _, r := range m.paneRects() {
+				if r.terminal == m.embedded {
+					m.embedded.editor.click(message.Mouse().X-r.x-2, message.Mouse().Y-r.y-1, true)
+				}
+			}
+		}
+	case tea.MouseReleaseMsg:
+		if m.forwardMouse("release", message.Mouse()) {
+			return m, nil
+		}
+		if m.embedded != nil && m.embedded.editor != nil {
+			m.embedded.editor.dragging = false
+		}
+	case historyMsg:
+		m.err = message.err
+		if message.err == nil {
+			m.viewingHistory = true
+			m.history = message.lines
+			m.historyOffset = 0
+		}
+	case tea.MouseWheelMsg:
+		if m.forwardMouse("wheel", message.Mouse()) {
+			return m, nil
+		}
+		if !m.filePrompt && !m.settingsOpen && !m.viewingHistory && !m.viewingDiff {
+			mouse := message.Mouse()
+			step := 3
+			if mouse.Button == tea.MouseWheelUp {
+				step = -3
+			}
+			for _, rect := range m.paneRects() {
+				if mouse.X >= rect.x && mouse.X < rect.x+rect.width && mouse.Y >= rect.y && mouse.Y < rect.y+rect.height {
+					if e := rect.terminal.editor; e != nil {
+						e.top = max(0, min(len(strings.Split(string(e.text), "\n"))-1, e.top+step))
+						return m, nil
+					}
+					if r := rect.terminal.review; r != nil {
+						r.top = max(0, r.top+step)
+						return m, nil
+					}
+				}
+			}
+		}
+		if m.viewingDiff || m.pickingAgent || message.Mouse().X < embeddedSidebarWidth(m.width) {
+			return m, nil
+		}
+		if !m.viewingHistory {
+			return m, m.loadHistory()
+		}
+		if message.Mouse().Button == tea.MouseWheelUp {
+			m.historyOffset = min(max(0, len(m.history)-1), m.historyOffset+3)
+		} else {
+			m.historyOffset = max(0, m.historyOffset-3)
+		}
+	case tea.MouseClickMsg:
+		return m.mouseClick(message)
 	case tea.PasteMsg:
-		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent {
+		if m.filePrompt {
+			m.fileName += strings.ReplaceAll(message.Content, "\n", "")
+			return m, nil
+		}
+		if m.settingsOpen {
+			return m, nil
+		}
+		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
 			m.embedded.emulator.Paste(message.Content)
 		}
 	case tea.KeyPressMsg:
-		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent {
+		if m.filePrompt || m.settingsOpen {
+			return m.updatePrompt(message)
+		}
+		if message.String() == "f6" {
+			cmd, _ := m.paneAction("o")
+			return m, cmd
+		}
+		if m.prefix {
+			m.prefix = false
+			if cmd, handled := m.paneAction(message.String()); handled {
+				return m, cmd
+			}
+			if m.embedded != nil && !m.sidebarFocused {
+				m.embedded.detachPending = true
+				return m.updateEmbedded(message)
+			}
+			return m, nil
+		}
+		if message.String() == "ctrl+b" && !m.viewingHistory && !m.viewingDiff {
+			m.prefix = true
+			return m, nil
+		}
+		if m.embedded != nil && !m.sidebarFocused && !m.viewingHistory && !m.viewingDiff && (m.embedded.editor != nil || m.embedded.review != nil) {
+			return m.updateDocumentKey(message)
+		}
+		if m.viewingHistory {
+			switch message.String() {
+			case "esc", "q":
+				m.viewingHistory = false
+			case "up", "pgup":
+				m.historyOffset = min(max(0, len(m.history)-1), m.historyOffset+max(1, m.height-6))
+			case "down", "pgdown":
+				m.historyOffset = max(0, m.historyOffset-max(1, m.height-6))
+			}
+			return m, nil
+		}
+		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
 			return m.updateEmbedded(message)
 		}
 		if m.viewingDiff {
@@ -167,9 +316,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch message.String() {
 		case "q", "ctrl+c":
-			if m.embedded != nil {
-				m.embedded.close()
+			for _, p := range m.visiblePanes() {
+				if !m.canClose(p) {
+					return m, nil
+				}
 			}
+			m.closePanes()
 			return m, tea.Quit
 		case "esc":
 			if m.embedded != nil {
@@ -214,6 +366,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.selected++
 				}
 			}
+		case "v", "s", "o":
+			cmd, _ := m.paneAction(message.String())
+			return m, cmd
+		case "e":
+			cmd, _ := m.paneAction("e")
+			return m, cmd
+		case "u":
+			if cmd := m.resumeSelected(); cmd != nil {
+				m.opening = true
+				return m, cmd
+			}
 		case "r":
 			m.loading = true
 			return m, m.loadSnapshot()
@@ -237,14 +400,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if id == "" {
 				return m, nil
 			}
-			if m.embedded != nil && m.embedded.terminalID == id {
+			if pane := m.findPane(id); pane != nil {
+				m.embedded = pane
+				m.resizePanes()
 				m.sidebarFocused = false
 				return m, nil
 			}
 			m.opening = true
 			return m, m.openTerminal(id)
 		case "d":
-			return m, m.loadDiff()
+			return m, m.openReview()
 		case "m":
 			return m, m.markSelectedTaskDone()
 		case "y":
@@ -284,28 +449,25 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err != nil {
 			return m, nil
 		}
-		if m.embedded != nil {
-			m.embedded.close()
-		}
-		m.embedded = message.terminal
-		m.sidebarFocused = false
-		columns, rows := embeddedPaneSize(m.width, m.height)
-		sendEmbeddedResize(m.embedded, columns, rows)
+		m.addPane(message.terminal)
 		return m, waitEmbeddedEvent(message.terminal)
 	case embeddedEventMsg:
-		if m.embedded == nil || m.embedded != message.terminal {
+		if m.findPane(message.terminalID) != message.terminal {
 			debugf("embeddedEventMsg: stale/mismatched, dropping (embedded=%v msgID=%s)", m.embedded != nil, message.terminalID)
 			return m, nil
 		}
 		if message.exited {
 			debugf("embeddedEventMsg: exited err=%v", message.err)
-			m.embedded.close()
-			m.embedded = nil
+			message.terminal.close()
+			message.terminal.exited = true
 			m.loading = true
 			m.err = message.err
 			return m, m.loadSnapshot()
 		}
-		return m, waitEmbeddedEvent(m.embedded)
+		if message.err != nil {
+			m.err = message.err
+		}
+		return m, waitEmbeddedEvent(message.terminal)
 	case tickMsg:
 		return m, tea.Batch(m.loadSnapshot(), tick())
 	case diffMsg:
@@ -353,10 +515,15 @@ func (m Model) View() tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "Orkestar"
-	if m.embedded != nil && !m.sidebarFocused && !m.pickingAgent && !m.viewingDiff && m.width >= 50 && m.height >= 16 {
+	view.MouseMode = tea.MouseModeCellMotion
+	if m.embedded != nil && !m.sidebarFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.filePrompt && !m.settingsOpen && m.width >= 50 && m.height >= 16 {
 		x, y, visible := m.embedded.emulator.Cursor()
 		if visible {
-			view.Cursor = tea.NewCursor(embeddedSidebarWidth(m.width)+3+x, 3+y)
+			for _, r := range m.paneRects() {
+				if r.terminal == m.embedded && x >= 0 && y >= 0 && x < r.width-4 && y < r.height-2 {
+					view.Cursor = tea.NewCursor(r.x+2+x, r.y+1+y)
+				}
+			}
 		}
 	}
 	return view
@@ -686,9 +853,8 @@ func (m Model) openTerminal(id string) tea.Cmd {
 }
 
 // updateEmbedded handles a key press while an embedded terminal pane is
-// open. Every key is forwarded to the pane's process as raw input except
-// the ctrl+b q detach combo (matching `orkestar terminal attach`'s own
-// detach shortcut, so the muscle memory is the same either way).
+// open. Global pane actions are handled by Update; remaining prefix commands
+// and ordinary keys are routed here for terminal input.
 func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	term := m.embedded
 
@@ -696,10 +862,30 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		term.detachPending = false
 		if msg.String() == "q" {
 			debugf("updateEmbedded: detaching terminalID=%s", term.terminalID)
-			term.close()
-			m.embedded = nil
+			m.removePane(term)
 			m.loading = true
 			return m, m.loadSnapshot()
+		}
+		if msg.String() == "[" {
+			return m, m.loadHistory()
+		}
+		if msg.String() == "o" {
+			m.nextPane()
+			return m, nil
+		}
+		if msg.String() == "v" || msg.String() == "s" {
+			m.stacked = msg.String() == "s"
+			m.resizePanes()
+			return m, nil
+		}
+		if msg.String() == "t" {
+			m.claimPane()
+			return m, nil
+		}
+		if msg.String() == "a" {
+			m.sidebarFocused = true
+			m.pickingAgent = true
+			return m, nil
 		}
 		if msg.String() == "tab" {
 			m.sidebarFocused = true

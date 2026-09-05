@@ -12,7 +12,7 @@ TUI / CLI  <-------------------->  Orkestar daemon
                  |                       |                       |
            PTY sessions             agent adapters          MCP gateway
                  |                       |                       |
-          arbitrary commands       Claude / OpenCode      engine MCP servers
+          arbitrary commands       Claude / Codex / OpenCode      engine MCP servers
 ```
 
 The daemon is the authority for state and process ownership. Clients render
@@ -113,11 +113,11 @@ the same:
 - resume a native session;
 - emit structured lifecycle and permission events.
 
-Claude Code initially uses an interactive PTY. Its managed mode may consume
-streaming JSON or an optional SDK bridge. OpenCode supports both: an
+Claude Code and Codex use interactive PTYs. A future Claude managed mode may
+consume streaming JSON or an SDK bridge. OpenCode supports both: an
 interactive PTY the same way Claude Code does, and a managed mode over its
 local HTTP server for structured replies (used by the reviewer-agent
-workflow). Both interactive adapters share one PTY-backed Session
+workflow). All three interactive adapters share one PTY-backed Session
 implementation (`internal/agent/ptysession`) so a future interactive adapter
 does not reimplement PTY lifecycle, prompt/interrupt, or lifecycle-event
 plumbing.
@@ -144,16 +144,22 @@ editor, or a running game.
 
 ## Persistence
 
-Metadata belongs in SQLite through a storage interface. Terminal scrollback is
-bounded and may use append-only segment files rather than database rows. Secret
-material does not belong in either store.
+`internal/store` provides a small metadata interface implemented with SQLite
+(`modernc.org/sqlite`, pure Go). A versioned JSON snapshot is atomically upserted
+in `metadata.db` beside the daemon socket, using WAL and synchronous FULL.
+Workspace, task/dependency/assignment, artifact, terminal and agent metadata are
+durable. Successful mutations are saved before the IPC response; lifecycle
+changes are also saved. Output, prompt submissions, environment variables and
+hook tokens are not part of that snapshot. Explicit artifact content is durable.
+Leases and pending permission channels expire when their daemon disappears.
 
-Restart recovery has two levels:
-
-- Client reattachment: the daemon stayed alive; the PTY remains live.
-- Daemon restart: metadata is restored and agents with native resumable session
-  IDs may be relaunched. A Unix PTY process cannot simply survive its owning
-  daemon disappearing, so documentation and UI must distinguish these cases.
+Client reattachment retains the live process, authoritative screen and bounded
+scrollback. Daemon restart restores metadata and marks previously active agents
+and terminals interrupted. It never automatically restarts a command. Native
+resume is explicit (`agent.resume`, CLI `agent resume`, or `u` in Agents), creates
+a new local agent/terminal ID and passes the saved native session ID to the
+adapter. No native ID means no resume; launch a new agent instead. PTY output and
+screens are currently memory-only and are unavailable after daemon restart.
 
 ## Dependency boundaries
 
@@ -164,32 +170,54 @@ rewrites.
 
 ## Embedded terminal rendering
 
-The dashboard keeps Workspaces, Sessions, Tasks, Agents, and permission details
-in a left sidebar. One selected terminal is visible beside it. Shells and
-interactive agents use the same embedded `terminal.attach` path; selecting an
-agent uses that agent's `TerminalID`. Managed agents have no attachable PTY.
-The picker and task diff appear in the content area while the sidebar remains.
+The dashboard keeps Workspaces, Sessions, Tasks, Agents and permissions in the
+left sidebar. Up to four attached terminals appear beside it: two columns (a
+2×2 grid for three/four panes), or vertically stacked. A narrow window shows the
+focused pane; hidden attachments remain alive. Opening a fifth pane replaces the
+focused client attachment. Mouse clicks and `Ctrl+b o` change focus. Picker,
+read-only scrollback and picker overlays occupy the content area. Git review and
+standard file editing have their own persistent panes; native Vim/Nano use
+daemon-owned terminals. See [ADR 0004](decisions/0004-review-and-editor-panes.md).
 
-`internal/terminal.Screen` wraps the pinned experimental `x/vt` emulator.
-The TUI feeds output and replay into it and renders the resulting grid. A
-separate input pump drains the emulator's reply pipe **before replay is parsed**
-and sends terminal-query replies back through IPC to the daemon-owned PTY.
-User input and bracketed paste use this same pump in order; application cursor
-keys respect the child terminal's negotiated mode. Without the pump, a query
-blocks `Write` on an unbuffered pipe while holding the emulator lock, which also
-blocks rendering. This caused the previous apparent keyboard freeze.
+The daemon owns one `internal/terminal.Screen` per PTY and starts its reply pump
+before consuming any output. This screen preserves terminal modes, handles
+queries exactly once even without clients, and keeps 2,000 scrollback lines.
+Keyboard input, negotiated navigation and bracketed paste pass through the same
+serialized screen/input path. PTY writes have deadlines, process groups receive
+bounded shutdown signals, and normal exits drain final output before closing
+the master. Closing a pane only releases the client socket.
 
-Attachment ownership is bounded by the UI lifetime. Closing a pane, switching
-sessions, or exiting the client releases its socket, emulator pipe, and read/
-write goroutines. It does not stop the daemon-owned process. Repaint messages
-are coalesced so the reader does not wait for rendering. Stream handshakes and
-writes have deadlines. VT internals stay inside `internal/terminal`; its wrapper
-avoids the upstream emulator's unsynchronized close flag by closing the
-underlying concurrency-safe pipe directly.
+`terminal.attach` accepts additive `screen` and `observe` fields. Screen clients
+receive complete `terminal.screen` frames (styled content, dimensions, cursor
+and revision). Each subscriber has one coalescing slot; a slow client receives
+the latest complete frame rather than a damaged partial replay. Clients render
+these frames without creating VT emulators or responding to child queries.
+Legacy attachments receive canonical ANSI repaint output in the existing
+`replay`/`terminal.output` envelopes; those replays contain no terminal queries.
 
-This is one visible pane with session switching, not yet a general split tree.
-The daemon still retains a bounded raw-byte replay, not an authoritative VT
-screen snapshot. Truncated replay can begin mid-sequence or lose prior modes;
-replaying queries can repeat replies. A daemon-owned screen and explicit
-terminal-response ownership are follow-up work, especially for multiple clients.
-There is no durable metadata store or daemon-restart recovery yet.
+A terminal has at most one input/resize controller. Other screen clients attach
+as viewers. `claim`/`terminal.control` allow a viewer to claim released control;
+an active controller cannot be displaced. `input`, `paste`, `key` and `resize`
+commands are accepted only from the controller. `terminal.history` returns
+bounded history and the current frame. All additions remain within IPC v1.
+
+## Interactive agent signals and permissions
+
+Claude Code and Codex receive invocation-local command hooks; OpenCode receives
+an invocation-local plugin through merged `OPENCODE_CONFIG_CONTENT`. Global
+agent settings are not edited. The private `orkestar hook` subprocess forwards
+sanitized lifecycle identifiers to `agent.hook` using an ephemeral per-launch
+token. Native IDs become resumable metadata. Agent hooks own turn state once
+observed; process exit remains authoritative and late hooks cannot revive it.
+
+A permission hook creates an in-memory inbox entry and waits for an allow/deny
+reply. The CLI returns the documented hook decision JSON; the OpenCode plugin
+calls its native permission API. There is no text-prompt approval fallback.
+Native OpenCode replies, completed turns, process exit and shutdown release
+pending hooks. Missing/expired channels fall back to the agent's native prompt.
+No approval policy or hook-trust decision is bypassed. Codex users may need to
+review the five Orkestar hooks at first launch; disabled or untrusted hooks leave
+basic PTY/process behavior available, with limited lifecycle/resume information.
+
+See [ADR 0003](decisions/0003-daemon-screens-recovery-and-hooks.md) for the durable
+boundaries and [validation](validation.md) for what has actually been exercised.

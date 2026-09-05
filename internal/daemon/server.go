@@ -18,6 +18,7 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/store"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -42,7 +43,14 @@ type Snapshot struct {
 }
 
 type Server struct {
-	socketPath string
+	hookTokens   map[string]string
+	pendingHooks map[string]*hookPermission
+	agentWorkers sync.WaitGroup
+	socketPath   string
+	store        store.Store
+	persistMu    sync.Mutex
+	requests     sync.WaitGroup
+	connections  map[net.Conn]struct{}
 
 	mu              sync.RWMutex
 	listener        net.Listener
@@ -61,7 +69,9 @@ type Server struct {
 
 func NewServer(socketPath string) *Server {
 	return &Server{
+		hookTokens: make(map[string]string), pendingHooks: make(map[string]*hookPermission),
 		socketPath:  socketPath,
+		connections: make(map[net.Conn]struct{}),
 		workspaces:  make(map[string]Workspace),
 		terminals:   make(map[string]*terminalSession),
 		adapters:    make(map[string]agent.Adapter),
@@ -92,6 +102,16 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("restrict socket permissions: %w", err)
 	}
 
+	if err := s.openStore(); err != nil {
+		_ = listener.Close()
+		s.persistMu.Lock()
+		if s.store != nil {
+			_ = s.store.Close()
+			s.store = nil
+		}
+		s.persistMu.Unlock()
+		return err
+	}
 	s.mu.Lock()
 	s.listener = listener
 	s.mu.Unlock()
@@ -99,14 +119,30 @@ func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
+			s.stopOnce.Do(func() { close(s.stop) })
 		case <-s.stop:
 		}
 		_ = listener.Close()
 	}()
 
 	defer func() {
+		s.stopOnce.Do(func() { close(s.stop) })
+		s.mu.Lock()
+		for conn := range s.connections {
+			_ = conn.Close()
+		}
+		s.mu.Unlock()
 		s.closeTerminals()
+		s.requests.Wait()
+		s.closeTerminals() // Include launches that were already in flight.
 		s.closeAgents()
+		_ = s.persist()
+		s.persistMu.Lock()
+		if s.store != nil {
+			_ = s.store.Close()
+			s.store = nil
+		}
+		s.persistMu.Unlock()
 		s.mu.Lock()
 		s.listener = nil
 		s.mu.Unlock()
@@ -121,7 +157,15 @@ func (s *Server) Serve(ctx context.Context) error {
 			}
 			return fmt.Errorf("accept IPC connection: %w", err)
 		}
-		go s.handleConnection(connection)
+		s.mu.Lock()
+		s.connections[connection] = struct{}{}
+		s.mu.Unlock()
+		s.requests.Add(1)
+		go func() {
+			defer s.requests.Done()
+			defer func() { s.mu.Lock(); delete(s.connections, connection); s.mu.Unlock() }()
+			s.handleConnection(connection)
+		}()
 	}
 }
 
@@ -193,10 +237,16 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		s.stopOnce.Do(func() { close(s.stop) })
 	case "workspace.create":
 		result, err = s.createWorkspace(request.Params)
+	case "terminal.history":
+		result, err = s.terminalHistory(request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
 	case "agent.launch":
 		result, err = s.launchAgent(context.Background(), request.Params)
+	case "agent.hook":
+		result, err = s.hookEvent(context.Background(), request.Params)
+	case "agent.resume":
+		result, err = s.resumeAgent(context.Background(), request.Params)
 	case "agent.prompt":
 		result, err = s.promptAgent(context.Background(), request.Params)
 	case "agent.interrupt":
@@ -229,6 +279,12 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 
 	if err != nil {
 		return ipc.NewErrorResponse(request.ID, "invalid_params", err.Error())
+	}
+	if err == nil && request.Method != "system.snapshot" && request.Method != "system.ping" && request.Method != "system.shutdown" && request.Method != "terminal.history" {
+		err = s.persist()
+		if err != nil {
+			return ipc.NewErrorResponse(request.ID, "storage_error", err.Error())
+		}
 	}
 	response, err := ipc.NewResponse(request.ID, result)
 	if err != nil {

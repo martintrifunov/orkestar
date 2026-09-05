@@ -25,25 +25,33 @@ each vertical slice before broadening the surface.
 - [x] Graceful explicit daemon shutdown
 - [x] Lifecycle and reconnect tests
 - [x] Embedded shell/agent pane with persistent left navigation
-- [x] Terminal-query reply pump and real-PTY TUI regression tests
+- [x] Daemon-owned screen and query reply pump
+- [x] Multiple-client input/resize arbitration and canonical replay
+- [x] Bounded scrollback with TUI history
+- [x] SQLite metadata and explicit daemon-restart recovery
+- [x] Four-pane grid/stacked layouts with mouse focus
+- [x] Real-PTY TUI regression tests for Claude, Codex and OpenCode fixtures
 
 ## M2: Agent awareness
 
 - [x] Agent adapter contract and capability model
 - [x] Claude Code interactive adapter
+- [x] Codex interactive adapter
 - [x] OpenCode server adapter
 - [x] Lifecycle and attention contracts
-- [ ] Structured interactive Claude/OpenCode working and permission signals
+- [x] Structured Claude/Codex hook and OpenCode plugin signals
 - [x] OpenCode managed native identity and resume
-- [ ] Interactive agent native identity and resume
+- [x] Interactive native identity and explicit resume for all three adapters
 - [x] Permission inbox model, IPC and TUI
-- [ ] Live interactive permission integration
+- [x] Interactive permission reply channels (hooks/plugin; native trust applies)
 
 ## M3: Tasks and review
 
 - [x] Tasks, dependencies, and assignments
 - [x] Git worktree association
-- [x] Diff and changed-file TUI
+- [x] Persistent PR-style review pane with file selection and line numbers
+- [x] Standard text editor with mouse, undo, search and conflict-checked saves
+- [x] Configurable native Vim/Nano/custom terminal editor panes
 - [x] Test/log/diff artifacts
 - [x] Reviewer-agent workflow
 - [x] Resource leases
@@ -77,29 +85,33 @@ each vertical slice before broadening the surface.
 
 ## Reassessment — 2026-09-05
 
-M1 has a working daemon/PTY/client vertical slice and now embeds interactive
-agents alongside navigation. Tests cover capability queries and a real TUI in
-an outer PTY, not only shell output. One pane is visible at a time; selecting
-another session switches it while daemon processes continue.
+All five requested implementation priorities now have working slices, including
+Codex. The daemon owns terminal state and replies, multiple clients share a
+screen with one controller, metadata survives restart, interactive hook/plugin
+approval bridges use native replies, and the TUI supports four panes with mouse
+focus. No runtime language or GUI rewrite was needed.
 
-M2 is partial: interactive adapters launch, forward input, and report process
-lifecycle, but they do not yet infer real agent turn/attention state or capture
-interactive native session IDs. OpenCode managed sessions provide richer
-structured behavior. The permission inbox infrastructure is not proof that
-interactive agent permission prompts are integrated.
+Validation distinguishes fixtures from installed agents. Deterministic tests
+exercise all three adapters through prompt, permission allow/deny, completion
+and native resume. Outer-PTY tests drive the actual TUI and reconnect to the same
+agent process. Other tests cover detached queries, controller handoff, final
+output, bounded history, split input isolation, persistence and hook lifecycle.
+Installed Claude Code, Codex and OpenCode have startup/reattachment smoke coverage;
+Codex's native hook-trust review remains intact. See [validation](validation.md).
 
-M3 has task/dependency/assignment, worktree/diff, artifact, review, and lease
-implementations with tests. These and workspace/agent metadata remain in memory;
-client reattachment works, daemon-restart recovery does not. M4 contains the
-orchestration server only. No engine integration has been implemented.
+M2 has structured integration code and deterministic workflows; authenticated
+live model-turn/permission/resume testing across all three CLIs remains release
+validation. Hook support depends on agent version and policy. M3 metadata is now
+durable, while active leases and permission channels intentionally expire on
+daemon restart. M4 still contains the orchestration MCP server only. No engine
+integration has been implemented.
 
-Next priorities before expanding integrations:
+Next priorities:
 
-1. Expand the installed-agent smoke coverage (Claude Code v2.1.259 passed
-   startup, unsent typing and sidebar focus) to OpenCode and full workflows;
-   retain deterministic query/input fixtures for regression coverage.
-2. Move authoritative VT screen/replay and terminal-response ownership into the
-   daemon, including multiple-client arbitration and bounded scrollback.
-3. Add durable metadata and explicit restart/resume behavior.
-4. Finish structured interactive lifecycle and permission integration.
-5. Add split layouts and mouse focus after the single-pane lifecycle is stable.
+1. Exercise authenticated live turns, native approvals and resume after hook
+   review for each CLI; add these results to the versioned validation matrix.
+2. Add macOS/Linux CI, including race and real-PTY regression checks.
+3. Profile full-frame rendering under sustained output and refine layout controls
+   if needed (arbitrary split trees, pane titles, mouse selection).
+4. Implement the MCP client registry, health checks, policy/audit and serialized
+   mutation routing before introducing engine integrations.

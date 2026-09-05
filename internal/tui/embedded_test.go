@@ -90,10 +90,7 @@ func startEmbeddedTestTerminal(t *testing.T, client *ipc.Client, command []strin
 // waitEmbeddedEvent's Cmd synchronously) until the emulator's rendered
 // content contains want, or the deadline passes.
 //
-// It reads the emulator with Render, not String: SafeEmulator wraps Write,
-// Render, and Resize with locking, but String falls through unprotected
-// via struct embedding, which races against the reader goroutine's Write
-// calls. Render is what production code (renderEmbedded) uses too.
+// Render reads the latest complete daemon frame under the client view lock.
 func waitForEmbeddedEvent(t *testing.T, term *embeddedTerminal, want string) {
 	t.Helper()
 
@@ -349,6 +346,18 @@ func TestPaneReconnectResizeAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	second := openTestPane(t, openEmbeddedTerminalContext(ctx, client, started.ID, 60, 18))
+	// A new screen client may arrive before the previous socket's detach is
+	// processed. Claim released control through the same protocol as the TUI.
+	deadline := time.Now().Add(3 * time.Second)
+	for !second.view.controls() {
+		if err := second.stream.Send(map[string]any{"version": ipc.Version, "command": "claim"}); err != nil {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("reconnected pane could not claim control")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	sendEmbeddedResize(second, 70, 20)
 	second.emulator.Input([]byte("reattached\n"))
 	waitForEmbeddedEvent(t, second, "20 70")

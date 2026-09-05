@@ -1,0 +1,83 @@
+# Validation — 2026-09-05
+
+## Automated coverage
+
+The standard suite does not require installed agents, authentication or engines.
+
+- All three interactive adapters run fixture commands through daemon PTYs.
+  The actual private hook CLI carries native identity and lifecycle events over
+  IPC. The workflow submits a turn, denies and allows permissions, observes turn
+  completion, exits and explicitly resumes the saved native identity.
+- Real outer PTYs drive Bubble Tea's actual input decoder/renderer for Claude,
+  Codex and OpenCode fixture adapters, including client quit and reattachment.
+- Daemon tests answer terminal queries before any client exists, reject viewer
+  input, hand control to a viewer after disconnect and retain the latest screen.
+- Split tests focus three live panes by mouse, type/paste into each, verify input
+  isolation, close/reattach one pane, and keep history overlays read-only.
+- Terminal/PTY tests cover negotiated paste/navigation, bounded history, final
+  output/EOF and bounded input/shutdown. Layout tests cover four panes and narrow
+  windows. Store/recovery tests preserve metadata and expire live process state.
+- OpenCode plugin tests run with Node when available. Fake SDKs check both native
+  permission API shapes, ordered lifecycle events and child-session filtering.
+  They do not depend on OpenCode or a provider account.
+
+Run:
+
+```sh
+go test ./...
+go vet ./...
+go test -race ./...
+```
+
+The full test suite, vet and race checks passed on macOS arm64. A Linux amd64
+cross-build also succeeded; Linux runtime tests were not run in this session.
+
+## Installed-agent smoke matrix
+
+Run `go build -o ./orkestar ./cmd/orkestar`, then
+`python3 scripts/smoke-agents.py`. The script launches an isolated temporary
+daemon, uses installed executables on PATH, attaches/detaches/reattaches and
+shuts down only its own daemon. It does not submit a model prompt. Output reports
+status/identity availability without recording terminal content or credentials.
+
+| CLI | Version tested on macOS arm64 | Observed result |
+| --- | --- | --- |
+| Claude Code | 2.1.259 | Startup and reattachment; hook lifecycle/native ID present |
+| Codex | 0.153.4 | Startup and reattachment; native five-hook trust review displayed |
+| OpenCode | 1.18.29 | Startup and reattachment; initial prompt UI, no conversation/native ID yet |
+
+OpenCode was fetched from its official release into a temporary tools directory
+and checked against the release digest. It was not installed globally. Codex
+hook trust was not bypassed or approved automatically. No global agent settings
+were edited. Existing user daemon sessions were left running.
+
+Authenticated live model turns, tool-permission delivery and resume still need
+manual validation after normal hook trust/provider setup. Fixture success is not
+proof that every installed CLI version or approval policy behaves identically.
+Screens and scrollback survive client reattachment, but are intentionally not
+persisted across daemon restart.
+
+## Handoff
+
+Implementation of the five requested priorities plus Codex is present. Read
+[ADR 0003](decisions/0003-daemon-screens-recovery-and-hooks.md) before changing
+screen ownership, storage or hooks. The root executable is ignored by Git and
+must be rebuilt when code changes. Replacing it does not upgrade a running daemon;
+a deliberate daemon stop ends its managed processes. The older in-memory daemon
+has no automatic migration into the new SQLite store.
+
+
+## Review/editor follow-up
+
+The split/cycle regression tests cover `Ctrl+b v/s`, `Ctrl+b o`, sidebar actions
+and F6. A real outer-PTY test opens a file through the picker, edits Unicode text,
+saves with Ctrl+S, opens its resulting Git diff, cycles panes and quits. Tests
+also cover selection, undo/redo, search paste, conflict detection, file bounds,
+configuration round trips and negotiated mouse reports.
+
+Isolated installed-editor checks passed launch/edit/save for `/usr/bin/vim` and
+`/usr/bin/nano` on this Mac. Vim enabled mouse reporting. The system Nano is Pico
+and did not enable mouse reporting in the smoke check, even with `-m`; use the
+standard editor or Vim for verified mouse editing here. Native mouse forwarding
+is available for editors that negotiate it. No user files or global editor
+settings were changed by these checks.

@@ -1,7 +1,9 @@
 package terminal
 
 import (
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,5 +47,52 @@ func TestScreenCloseUnblocksQueryWithoutReader(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("close did not release query writer")
+	}
+}
+
+func TestHistoryIsBoundedAndDoesNotReplayQueries(t *testing.T) {
+	screen := NewScreen(30, 4)
+	defer screen.Close()
+	for i := 0; i < 2200; i++ {
+		if _, err := screen.Write([]byte(fmt.Sprintf("line-%04d\r\n", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := screen.History()
+	if len(history) != 2000 {
+		t.Fatalf("history has %d lines", len(history))
+	}
+	if strings.Contains(strings.Join(history, "\n"), "line-0000") {
+		t.Fatal("old history was not evicted")
+	}
+	if !strings.Contains(screen.Frame().ANSI(), "line-2199") {
+		t.Fatal("last output missing")
+	}
+	if strings.Contains(screen.Frame().ANSI(), "\x1b[6n") {
+		t.Fatal("replay contains query")
+	}
+}
+
+func TestMouseNegotiationAndPaneCoordinates(t *testing.T) {
+	s := NewScreen(80, 24)
+	defer s.Close()
+	_, _ = s.Write([]byte("\x1b[?1000h\x1b[?1006h"))
+	if !s.Frame().Mouse {
+		t.Fatal("mouse mode not published")
+	}
+	done := make(chan string, 1)
+	go func() { b := make([]byte, 64); n, _ := s.Read(b); done <- string(b[:n]) }()
+	s.Mouse("click", 2, 3, 1, 0)
+	select {
+	case b := <-done:
+		if b != "\x1b[<0;3;4M" {
+			t.Fatalf("wrong mouse report: %q", b)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mouse report blocked")
+	}
+	_, _ = s.Write([]byte("\x1b[?1000l"))
+	if s.Frame().Mouse {
+		t.Fatal("mouse mode not cleared")
 	}
 }
