@@ -79,10 +79,13 @@ type Model struct {
 	filesExpanded                         map[string]bool
 	filesTop                              int
 	pendingStop                           string
-	zoomed                                bool
-	dragging                              *splitNode
-	filesErr                              error
-	filesLoadedAt                         time.Time
+	// documentSplit places the next editor pane, so a file opened from the
+	// viewer lands where the viewer asked rather than beside the focused pane.
+	documentSplit *splitRequest
+	zoomed        bool
+	dragging      *splitNode
+	filesErr      error
+	filesLoadedAt time.Time
 
 	viewingHistory bool
 	history        []string
@@ -301,6 +304,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.prefix {
 			m.prefix = false
 			if cmd, handled := m.paneAction(message.String()); handled {
+				// Resizing repeats: the arrows keep working until another key
+				// or esc, so a divider can be moved without re-arming the
+				// prefix for every step.
+				if repeatsWithPrefix(message.String()) {
+					m.prefix = true
+				}
 				return m, cmd
 			}
 			if m.embedded != nil && !m.sidebarFocused {
@@ -313,11 +322,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.prefix = true
 			return m, nil
 		}
+		// An overlay covering the content area owns the keyboard; otherwise the
+		// file viewer does while it holds focus, ahead of any pane.
+		if m.filesFocused && !m.viewingHistory && !m.viewingDiff && !m.pickingAgent {
+			return m.updateFiles(message)
+		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingHistory && !m.viewingDiff && (m.embedded.editor != nil || m.embedded.review != nil) {
 			return m.updateDocumentKey(message)
-		}
-		if m.filesFocused {
-			return m.updateFiles(message)
 		}
 		if m.viewingHistory {
 			switch message.String() {

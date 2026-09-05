@@ -97,6 +97,7 @@ func (m *Model) insertPane(p, target *embeddedTerminal, stacked bool) {
 	m.layout = m.layout.insert(target, p, stacked)
 	m.embedded = p
 	m.sidebarFocused = false
+	m.filesFocused = false
 	m.resizePanes()
 }
 
@@ -140,6 +141,7 @@ func (m *Model) nextPane() {
 		if p == m.embedded {
 			m.embedded = panes[(i+1)%len(panes)]
 			m.sidebarFocused = false
+			m.filesFocused = false
 			m.resizePanes()
 			return
 		}
@@ -268,9 +270,11 @@ func (m *Model) resizeSplit(direction string) {
 	}
 	// Measure from the same minimum the layout uses, so the divider moves from
 	// where it is actually drawn.
-	total, step, minimum := d.width, 2, minPaneWidth
+	total, minimum := d.width, minPaneWidth
+	step := max(2, total/16)
 	if stacked {
-		total, step, minimum = d.height, 1, minPaneHeight
+		total, minimum = d.height, minPaneHeight
+		step = max(1, total/16)
 	}
 	if direction == "left" || direction == "up" {
 		step = -step
@@ -305,6 +309,7 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		if mouse.X >= r.x && mouse.X < r.x+r.width && mouse.Y >= r.y && mouse.Y < r.y+r.height {
 			m.embedded = r.terminal
 			m.sidebarFocused = false
+			m.filesFocused = false
 			m.forwardMouse("click", mouse)
 			if e := r.terminal.editor; e != nil && mouse.Button == tea.MouseLeft {
 				e.click(mouse.X-r.x-2, mouse.Y-r.y-1, mouse.Mod&tea.ModShift != 0)

@@ -169,3 +169,57 @@ func TestDividersCanBeDragged(t *testing.T) {
 		t.Fatal("a zoomed layout still offered dividers")
 	}
 }
+
+// Resizing used to move a couple of columns per press and needed the prefix
+// re-armed every time, which made dragging a divider from the keyboard tedious.
+func TestResizeStepsAreUsableAndRepeatWithoutReArmingThePrefix(t *testing.T) {
+	m := twoPanes(t)
+	start := m.paneRects()[0].width
+
+	// One press moves a visible amount, not a couple of columns.
+	m.paneAction("right")
+	moved := m.paneRects()[0].width - start
+	if moved < 5 {
+		t.Fatalf("a resize press moved only %d columns", moved)
+	}
+
+	// Arrows keep the prefix armed, so they can be pressed in a row.
+	key := func(k tea.KeyPressMsg) Model {
+		updated, _ := m.Update(k)
+		return updated.(Model)
+	}
+	m = key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	if !m.prefix {
+		t.Fatal("ctrl+b did not arm the prefix")
+	}
+	before := m.paneRects()[0].width
+	m = key(tea.KeyPressMsg{Code: tea.KeyRight})
+	if !m.prefix {
+		t.Fatal("the prefix was not kept armed for a repeat")
+	}
+	m = key(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.paneRects()[0].width <= before+moved {
+		t.Fatal("the second arrow did not resize without a new prefix")
+	}
+	// Esc ends the repeat and is not passed on to the pane.
+	m = key(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.prefix {
+		t.Fatal("esc did not end the repeat")
+	}
+	// With the prefix gone the arrow is an ordinary key again. Read it from
+	// the sidebar, where a stray arrow cannot reach a pane's emulator.
+	width := m.paneRects()[0].width
+	m.sidebarFocused = true
+	m = key(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.paneRects()[0].width != width {
+		t.Fatal("an arrow still resized after the repeat ended")
+	}
+	m.sidebarFocused = false
+	// A non-repeating action disarms the prefix as before.
+	m = key(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m = key(tea.KeyPressMsg{Code: 'z'})
+	if m.prefix || !m.zoomed {
+		t.Fatalf("zoom should not repeat: prefix=%v zoomed=%v", m.prefix, m.zoomed)
+	}
+	assertTiled(t, m, 1)
+}

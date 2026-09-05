@@ -29,6 +29,13 @@ The standard suite does not require installed agents, authentication or engines.
   message that says to stop it first. Others confirm the confirmation is per
   target and does not follow the selection, that interrupt applies only to a
   running agent, and that clearing a finished agent needs no confirmation.
+- Resize tests confirm one press moves a usable amount, that the arrows repeat
+  without re-arming the prefix, that `Esc` ends the repeat without the key
+  reaching a pane, and that a non-repeating action still disarms it.
+- Focus tests confirm the viewer yields the keyboard to a full-area overlay so
+  `Esc` closes that overlay rather than the viewer, that `Esc` then returns from
+  the viewer, that opening a file moves focus to the new editor so typing edits
+  it, and that the editor opens below the focused pane at full width.
 - File viewer tests cover tree construction and ordering, that a closed viewer
   reads nothing and does not refresh on the tick, that opening takes exactly the
   sidebar's width from the panes and gives it back on close, that its box matches

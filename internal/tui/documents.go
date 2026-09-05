@@ -115,6 +115,11 @@ func (m Model) paneRoot() string {
 func (m *Model) localPane(title, root string, screen paneScreen) *embeddedTerminal {
 	m.localSequence++
 	p := &embeddedTerminal{terminalID: fmt.Sprintf("local-%d", m.localSequence), title: title, root: root, emulator: screen, done: make(chan struct{})}
+	if split := m.documentSplit; split != nil {
+		m.documentSplit = nil
+		m.insertPane(p, split.target, split.stacked)
+		return p
+	}
 	m.addPane(p)
 	return p
 }
@@ -264,8 +269,21 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 	case "tab":
 		m.sidebarFocused = true
 		return nil, true
+	case "esc":
+		// Ends a repeating resize without the key reaching the terminal.
+		return nil, true
 	}
 	return nil, false
+}
+
+// repeatsWithPrefix reports the actions that keep the prefix armed, so they can
+// be pressed several times in a row.
+func repeatsWithPrefix(key string) bool {
+	switch key {
+	case "left", "right", "up", "down":
+		return true
+	}
+	return false
 }
 func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	p := m.embedded

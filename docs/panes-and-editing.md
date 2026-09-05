@@ -52,8 +52,13 @@ the selected entry are tracked by path, so a refresh never collapses the tree or
 moves your selection. Ignored files are excluded through Git, with a bounded
 directory walk outside a repository.
 
-Arrow keys or `k`/`j` move. `Enter` or `→` expands a directory or opens a file in
-an editor pane. `←` collapses a directory, or steps out to its parent. `r`
+Only one of the sidebar, the panes and the viewer holds the keyboard at a time,
+and a view that covers the whole content area, such as scrollback, takes it from
+all three until it closes.
+
+Arrow keys or `k`/`j` move. `Enter` or `→` expands a directory, or opens a file
+in an editor pane below the focused pane, where it gets the full width rather
+than sharing it with the tree. `←` collapses a directory, or steps out to its parent. `r`
 re-reads immediately, `Esc` hands focus back to the panes, and `Tab` goes to the
 sidebar. Clicking an entry selects it and opens or expands it, and the wheel
 scrolls the tree.
@@ -87,8 +92,11 @@ Panes are labelled in their top border with the document they hold or the
 command they run, so a screen full of shells stays readable.
 
 Splits start even and can be moved. `Ctrl+b` then an arrow moves the divider of
-the nearest enclosing split in that direction, and dragging a divider with the
-mouse does the same. Both stop before either side becomes too small to use.
+the nearest enclosing split in that direction, by about a sixteenth of the space
+being divided. The arrows repeat: the prefix stays armed after a resize, so the
+divider can be walked to where you want it without pressing `Ctrl+b` again.
+`Esc`, or any other action, ends the repeat. Dragging a divider with the mouse
+does the same thing. Both stop before either side becomes too small to use.
 
 `Ctrl+b z` zooms the focused pane to fill the whole area and back again. The
 other panes keep their processes and their place in the layout, and `F6` still

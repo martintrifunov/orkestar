@@ -91,7 +91,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		help = "Enlarge window for splits · F6 cycles hidden panes"
 	}
 	if m.prefix {
-		help = "Prefix: v/s split · o next · z zoom · arrows resize · d diff · e edit · f files · [ scrollback · q close"
+		help = "Prefix: v/s split · o next · z zoom · arrows resize (repeat) · d diff · e edit · f files · esc done"
 	}
 	if m.filesFocused {
 		help = "↑/↓ select · enter open · ←/→ collapse/expand · r refresh · esc back"

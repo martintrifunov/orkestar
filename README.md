@@ -106,13 +106,17 @@ prefix, so ordinary letters still reach the agent you are typing to.
 | `v` / `s` | Split: new shell beside / below the focused pane |
 | `o` or `F6` | Focus the next pane |
 | `z` | Zoom the focused pane to fill the area, and back |
-| arrows | Move the enclosing split's divider |
+| arrows | Move the enclosing split's divider, repeatable |
 | `d` / `e` | Review changes / open a file |
 | `f` | Show or hide the file viewer |
 | `[` | Scrollback, 2,000 lines |
 | `,` | Editor settings |
 | `t` | Claim input after another client disconnected |
 | `q` / `x` | Close the pane / discard an unsaved editor |
+
+The arrows repeat: the prefix stays armed so a divider can be moved with
+several presses, until `Esc` or any other key. Opening a file from the viewer
+puts the editor below the focused pane, at full width.
 
 Splits nest: `Ctrl+b s` then `Ctrl+b v` gives three panes, not a rearranged two.
 Panes are labelled in their border, dividers can be dragged, and closing a pane

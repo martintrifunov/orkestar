@@ -274,6 +274,9 @@ func (m *Model) activateFile(node *fileNode) tea.Cmd {
 	if !m.roomForPane() {
 		return nil
 	}
+	// Open below the focused pane rather than beside it: a file read next to
+	// the tree wants the full width, not half of it.
+	m.documentSplit = &splitRequest{target: m.embedded, stacked: true}
 	return m.openDocument(m.filesRoot, node.path)
 }
 

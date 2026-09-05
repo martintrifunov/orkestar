@@ -286,3 +286,93 @@ func keyCodeFor(name string) rune {
 	}
 	return rune(name[0])
 }
+
+// The viewer used to keep focus after opening a file and while a full-screen
+// overlay was up, so its keys swallowed Esc and the arrows meant for those.
+func TestViewerFocusIsExclusive(t *testing.T) {
+	root := viewerRoot(t)
+	m := viewerModel(t, root)
+	m.client = nil
+
+	// A full-area overlay owns the keyboard even while the viewer has focus.
+	m.viewingHistory = true
+	m.history = []string{"one", "two", "three"}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.viewingHistory {
+		t.Fatal("esc did not close scrollback while the file viewer had focus")
+	}
+	if !m.filesFocused {
+		t.Fatal("closing the overlay should leave the viewer as it was")
+	}
+	// Now esc returns from the viewer itself.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.filesFocused {
+		t.Fatal("esc did not hand focus back from the viewer")
+	}
+
+	// Opening a file moves focus to the new pane, so later keys edit rather
+	// than move the tree.
+	m.filesFocused = true
+	m.filesExpanded["internal"] = true
+	m.filesExpanded["internal/tui"] = true
+	m.filesCursor = "internal/tui/files.go"
+	rows := m.fileRows()
+	cmd := m.activateFile(rows[m.fileCursorIndex(rows)].node)
+	if cmd == nil {
+		t.Fatal("enter opened nothing")
+	}
+	updated, _ = m.Update(cmd().(documentLoaded))
+	m = updated.(Model)
+	if m.filesFocused || m.embedded == nil || m.embedded.editor == nil {
+		t.Fatalf("focus did not move to the editor: filesFocused=%v", m.filesFocused)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'x'})
+	m = updated.(Model)
+	if !strings.Contains(string(m.embedded.editor.text), "x") {
+		t.Fatal("typing went to the tree instead of the editor it just opened")
+	}
+}
+
+// A file read beside a tree wants the full width, so it opens below the
+// focused pane rather than beside it.
+func TestOpeningAFileFromTheViewerSplitsHorizontally(t *testing.T) {
+	root := viewerRoot(t)
+	m := viewerModel(t, root)
+	m.addPane(fakePane(t, "shell"))
+	m.filesFocused = true
+	shell := m.embedded
+
+	m.filesCursor = "main.go"
+	rows := m.fileRows()
+	cmd := m.activateFile(rows[m.fileCursorIndex(rows)].node)
+	if cmd == nil {
+		t.Fatal("opening the file produced no command")
+	}
+	if m.documentSplit == nil || !m.documentSplit.stacked || m.documentSplit.target != shell {
+		t.Fatalf("the placement was not recorded: %+v", m.documentSplit)
+	}
+	updated, _ := m.Update(cmd().(documentLoaded))
+	m = updated.(Model)
+	if m.documentSplit != nil {
+		t.Fatal("the placement was not consumed")
+	}
+	var editor, terminal paneRect
+	for _, r := range m.paneRects() {
+		if r.terminal.editor != nil {
+			editor = r
+		} else {
+			terminal = r
+		}
+	}
+	if editor.terminal == nil || terminal.terminal == nil {
+		t.Fatalf("expected a shell and an editor: %+v", m.paneRects())
+	}
+	if editor.x != terminal.x || editor.width != terminal.width {
+		t.Fatalf("the editor did not take the full width below: editor %+v shell %+v", editor, terminal)
+	}
+	if editor.y <= terminal.y {
+		t.Fatalf("the editor did not open below the focused pane: editor %+v shell %+v", editor, terminal)
+	}
+}
