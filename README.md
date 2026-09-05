@@ -15,6 +15,7 @@ Run your coding agents from one terminal, and keep them running when you close i
 <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.27"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-D7A84B?style=flat-square" alt="macOS and Linux">
 <img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-D7A84B?style=flat-square" alt="Supported agents">
+<a href="LICENSE"><img src="https://img.shields.io/github/license/martintrifunov/orkestar?style=flat-square&color=D7A84B" alt="MIT license"></a>
 
 </div>
 
@@ -247,3 +248,7 @@ editing, tasks and the three agent adapters are implemented and tested.
 Authenticated live model turns across every installed CLI, and the MCP client
 registry that game-engine work depends on, are the next milestones. The
 [roadmap](docs/roadmap.md) tracks what is done and what is not.
+
+## License
+
+Released under the [MIT License](LICENSE).
