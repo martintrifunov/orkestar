@@ -129,7 +129,8 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal."+args[0], map[string]any{"terminal_id": args[1]}, &result); err != nil {
 			return err
 		}
-		fmt.Printf("%s %s\n", args[1], args[0]+"ped")
+		past := map[string]string{"stop": "stopped", "remove": "removed"}[args[0]]
+		fmt.Printf("%s %s\n", args[1], past)
 		return nil
 	case "attach":
 		if len(args) != 2 {
