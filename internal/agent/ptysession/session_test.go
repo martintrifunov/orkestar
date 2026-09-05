@@ -1,6 +1,7 @@
 package ptysession_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,16 +11,30 @@ import (
 	"github.com/martintrifunov/orkestar/internal/agent/ptysession"
 )
 
+// The fixture is written once, before any test forks a child. Writing an
+// executable while a sibling parallel test forks lets that child inherit the
+// still-open write descriptor, and the exec then fails with ETXTBSY.
+var sharedFixture string
+
+func TestMain(m *testing.M) {
+	directory, err := os.MkdirTemp("", "orkestar-ptysession")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "create fixture directory:", err)
+		os.Exit(1)
+	}
+	sharedFixture = filepath.Join(directory, "fixture-agent")
+	if err := os.WriteFile(sharedFixture, []byte("#!/bin/sh\ncat >/dev/null\n"), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "write fixture executable:", err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(directory)
+	os.Exit(code)
+}
+
 func fixtureExecutable(t *testing.T) string {
 	t.Helper()
-
-	directory := t.TempDir()
-	path := filepath.Join(directory, "fixture-agent")
-	script := "#!/bin/sh\ncat >/dev/null\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fixture executable: %v", err)
-	}
-	return path
+	return sharedFixture
 }
 
 func TestLaunchRejectsMissingExecutable(t *testing.T) {
