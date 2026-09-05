@@ -20,7 +20,7 @@ func debugf(format string, args ...any) {
 		return
 	}
 	debugOnce.Do(func() {
-		file, err := os.OpenFile("/tmp/orkestar-tui-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		file, err := os.OpenFile("/tmp/orkestar-tui-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return
 		}

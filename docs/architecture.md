@@ -164,33 +164,32 @@ rewrites.
 
 ## Embedded terminal rendering
 
-A plain terminal session (started via `n` or attached from the Sessions
-panel, when it is not an agent's bridged terminal) is rendered inline as a
-pane in the dashboard, not handed to a subprocess with the real TTY. The
-TUI opens `terminal.attach` itself, feeds the raw PTY byte stream into
-`github.com/charmbracelet/x/vt` (a VT100 emulator confined to
-`internal/tui`), and renders its screen as one pane alongside the
-Workspaces/Tasks/Agents panels. Key presses are encoded back into raw bytes
-(`internal/tui/keyencode.go`) and sent as `terminal.attach` input, since
-Bubble Tea has already decoded them into structured events.
+The dashboard keeps Workspaces, Sessions, Tasks, Agents, and permission details
+in a left sidebar. One selected terminal is visible beside it. Shells and
+interactive agents use the same embedded `terminal.attach` path; selecting an
+agent uses that agent's `TerminalID`. Managed agents have no attachable PTY.
+The picker and task diff appear in the content area while the sidebar remains.
 
-Agent sessions (Claude Code, OpenCode) instead use the subprocess hand-off
-(`orkestar terminal attach` run via `tea.ExecProcess`, the real TTY handed
-to the subprocess), the same mechanism used before the embedded pane
-existed. This split is deliberate, not a shortcut: embedding a rich,
-full-screen interactive CLI that does its own terminal-capability
-negotiation (Claude Code sends DEC mode and Kitty-keyboard-protocol queries
-that nothing answers once its PTY is consumed by `vt.Emulator` instead of a
-real terminal) silently stops Bubble Tea's own key reading after the first
-keystroke. This was confirmed as a bug in the `vt`/Bubble Tea stack itself,
-not in Orkestar's code: reproduced in a ~100-line program with no
-daemon/IPC involved at all — just `vt.Emulator` feeding a real spawned
-`claude` process's output into Bubble Tea. A plain shell embedded the same
-way has no such problem, which is why the split is by session kind
-(`Model.terminalIsAgentBridged`, checking whether any `Agent.TerminalID`
-matches) rather than an all-or-nothing choice.
+`internal/terminal.Screen` wraps the pinned experimental `x/vt` emulator.
+The TUI feeds output and replay into it and renders the resulting grid. A
+separate input pump drains the emulator's reply pipe **before replay is parsed**
+and sends terminal-query replies back through IPC to the daemon-owned PTY.
+User input and bracketed paste use this same pump in order; application cursor
+keys respect the child terminal's negotiated mode. Without the pump, a query
+blocks `Write` on an unbuffered pipe while holding the emulator lock, which also
+blocks rendering. This caused the previous apparent keyboard freeze.
 
-`x/vt` is unreleased (no tagged version) as of this writing. Its
-concurrency-safety wrapper is incomplete: only call `Write`, `Render`, and
-`Resize` on the emulator from outside its owning goroutine; check
-`safe_emulator.go` in the pinned version before adding any other call.
+Attachment ownership is bounded by the UI lifetime. Closing a pane, switching
+sessions, or exiting the client releases its socket, emulator pipe, and read/
+write goroutines. It does not stop the daemon-owned process. Repaint messages
+are coalesced so the reader does not wait for rendering. Stream handshakes and
+writes have deadlines. VT internals stay inside `internal/terminal`; its wrapper
+avoids the upstream emulator's unsynchronized close flag by closing the
+underlying concurrency-safe pipe directly.
+
+This is one visible pane with session switching, not yet a general split tree.
+The daemon still retains a bounded raw-byte replay, not an authoritative VT
+screen snapshot. Truncated replay can begin mid-sequence or lose prior modes;
+replaying queries can repeat replies. A daemon-owned screen and explicit
+terminal-response ownership are follow-up work, especially for multiple clients.
+There is no durable metadata store or daemon-restart recovery yet.

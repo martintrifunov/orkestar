@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/vt"
+	"github.com/martintrifunov/orkestar/internal/terminal"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -59,11 +59,51 @@ func TestRenderShowsAgentsAndPermissions(t *testing.T) {
 	}
 }
 
-func TestRenderNarrowWidthStacksPanels(t *testing.T) {
+func TestRenderNarrowWidthKeepsSidebar(t *testing.T) {
 	model := Model{snapshot: sampleSnapshot(), width: 60, height: 40}
 	output := model.render()
 	if !strings.Contains(output, "Agents") || !strings.Contains(output, "Tasks") {
 		t.Fatalf("expected stacked layout to still include all panels, got:\n%s", output)
+	}
+}
+
+func TestAgentSelectionUsesItsOwnTerminal(t *testing.T) {
+	m := Model{snapshot: sampleSnapshot(), focus: focusAgents}
+	m.snapshot.Agents[0].TerminalID = "agent-terminal"
+	if got := m.selectedTerminalID(); got != "agent-terminal" {
+		t.Fatalf("selected %q instead of agent terminal", got)
+	}
+	m.snapshot.Agents[0].TerminalID = ""
+	if m.attachSelected() != nil {
+		t.Fatal("managed agent attached unrelated session")
+	}
+	m.focus = focusTasks
+	if m.attachSelected() != nil {
+		t.Fatal("task selection attached unrelated session")
+	}
+}
+
+func TestSidebarStaysWithinWindowWithManySessions(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{50, 16}, {60, 24}, {120, 40}, {20, 8}} {
+		m := Model{width: size.width, height: size.height, snapshot: sampleSnapshot()}
+		for i := 0; i < 100; i++ {
+			m.snapshot.Terminals = append(m.snapshot.Terminals, daemon.Terminal{ID: fmt.Sprint(i), Command: []string{strings.Repeat("long", 100)}})
+		}
+		m.selected = len(m.snapshot.Terminals) - 1
+		output := m.render()
+		if lipgloss.Height(output) > size.height || lipgloss.Width(output) > size.width {
+			t.Fatalf("layout exceeded %dx%d: %dx%d", size.width, size.height, lipgloss.Width(output), lipgloss.Height(output))
+		}
+	}
+}
+
+func TestStaleAttachmentEventDoesNotCloseReopenedPane(t *testing.T) {
+	old := &embeddedTerminal{terminalID: "same"}
+	current := &embeddedTerminal{terminalID: "same"}
+	m := Model{embedded: current}
+	updated, cmd := m.Update(embeddedEventMsg{terminalID: "same", terminal: old, exited: true})
+	if updated.(Model).embedded != current || cmd != nil {
+		t.Fatal("stale exit affected the new attachment")
 	}
 }
 
@@ -174,7 +214,7 @@ func TestRenderEmbeddedPaneMatchesEmulatorGrid(t *testing.T) {
 		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
 			columns, rows := embeddedPaneSize(size.width, size.height)
 
-			emulator := vt.NewSafeEmulator(columns, rows)
+			emulator := terminal.NewScreen(columns, rows)
 			marker := strings.Repeat("x", columns)
 			emulator.Write([]byte(marker))
 

@@ -10,8 +10,11 @@ targets; game-engine workflows will integrate through MCP.
 
 ## Status
 
-Orkestar is at the initial foundation stage. The first milestone is a reliable
-daemon/TUI vertical slice with persistent interactive PTYs and reattachment.
+Orkestar has a working Go daemon/TUI slice with interactive agent panes and
+client reattachment. Workspaces, sessions, tasks and agents stay in a left
+sidebar; a selected shell or agent runs in the adjacent terminal pane.
+Processes survive closing the UI while the daemon remains alive. Metadata is
+currently in memory; daemon-restart recovery is not implemented.
 
 See:
 
@@ -31,8 +34,26 @@ See:
 
 ## Development
 
-The project targets Go. Once the initial module is present, the standard checks
-are:
+Build and run from a project directory:
+
+```bash
+go build -o /tmp/orkestar ./cmd/orkestar
+/tmp/orkestar
+```
+
+- `a`: choose and launch an installed agent; `n`: launch a shell.
+- `Tab`: switch sidebar section; arrows select; `Enter`: open a session/agent.
+- In a pane, `Ctrl+b`, then `Tab`: focus the sidebar; `Esc`: return to the pane.
+- `Ctrl+b`, then `q`: close the pane without stopping its process.
+- `q` in the sidebar: quit the UI. Reopen and select the session to reattach.
+- In Tasks, `d` opens the diff and `m` marks done; in Agents, `y`/`x` resolves
+  an available permission request.
+
+The UI currently shows one terminal pane at a time and needs at least 50 × 16
+terminal cells. Direct full-screen attachment is also available with
+`orkestar terminal attach <terminal-id>`.
+
+Standard checks:
 
 ```bash
 go test ./...

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 type Stream struct {
@@ -14,6 +15,7 @@ type Stream struct {
 	decoder    *json.Decoder
 	encoder    *json.Encoder
 	writeMu    sync.Mutex
+	timeout    time.Duration
 }
 
 func (c *Client) OpenStream(ctx context.Context, method string, params, result any) (*Stream, error) {
@@ -22,6 +24,14 @@ func (c *Client) OpenStream(ctx context.Context, method string, params, result a
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)
 	}
+	// Context cancellation must also interrupt the handshake after dialing.
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
+	deadline := time.Now().Add(c.timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = connection.SetDeadline(deadline)
 
 	request := Request{
 		ID:      fmt.Sprintf("req_%d", requestSequence.Add(1)),
@@ -40,6 +50,7 @@ func (c *Client) OpenStream(ctx context.Context, method string, params, result a
 		connection: connection,
 		decoder:    json.NewDecoder(bufio.NewReader(connection)),
 		encoder:    json.NewEncoder(connection),
+		timeout:    c.timeout,
 	}
 	if err := stream.encoder.Encode(request); err != nil {
 		connection.Close()
@@ -69,12 +80,18 @@ func (c *Client) OpenStream(ctx context.Context, method string, params, result a
 			return nil, fmt.Errorf("decode %s result: %w", method, err)
 		}
 	}
+	if !stop() {
+		connection.Close()
+		return nil, fmt.Errorf("open %s stream: %w", method, ctx.Err())
+	}
+	_ = connection.SetDeadline(time.Time{})
 	return stream, nil
 }
 
 func (s *Stream) Send(value any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	_ = s.connection.SetWriteDeadline(time.Now().Add(s.timeout))
 	if err := s.encoder.Encode(value); err != nil {
 		return fmt.Errorf("send stream message: %w", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,10 +32,6 @@ type snapshotMsg struct {
 type terminalStartedMsg struct {
 	terminal daemon.Terminal
 	err      error
-}
-
-type attachFinishedMsg struct {
-	err error
 }
 
 type diffMsg struct {
@@ -73,7 +68,6 @@ const (
 type Model struct {
 	client        *ipc.Client
 	directory     string
-	executable    string
 	snapshot      daemon.Snapshot
 	selected      int
 	taskSelected  int
@@ -96,33 +90,27 @@ type Model struct {
 	pickingAgent  bool
 	agentPickerAt int
 
-	// embedded is the terminal rendered inline as a pane, if one is open.
-	// Only one can be open at a time; opening another one is not offered
-	// while this is set, and it swallows every key press except the
-	// ctrl+b q detach combo. Only used for plain terminal sessions (see
-	// attachSelected) — agent sessions use the subprocess hand-off
-	// instead, because embedding a rich interactive CLI like Claude Code
-	// hits a confirmed upstream bug in charmbracelet/x/vt (an unreleased
-	// library) that silently stops Bubble Tea's own key reading after the
-	// first keystroke. Reproduced in complete isolation from Orkestar's
-	// own code: a minimal program with no daemon/IPC, just vt.Emulator
-	// feeding a real spawned `claude` process's output into Bubble Tea,
-	// hits the exact same freeze. A plain shell embedded the same way
-	// never has this problem.
-	embedded *embeddedTerminal
+	// The sidebar stays usable while a terminal attachment is visible.
+	embedded       *embeddedTerminal
+	sidebarFocused bool
+	opening        bool
+	ctx            context.Context
 }
 
-func New(client *ipc.Client, directory, executable string) Model {
+func New(client *ipc.Client, directory string) Model {
 	return Model{
-		client:     client,
-		directory:  directory,
-		executable: executable,
-		loading:    true,
+		client:    client,
+		directory: directory,
+		loading:   true,
 	}
 }
 
-func Run(client *ipc.Client, directory, executable string) error {
-	program := tea.NewProgram(New(client, directory, executable))
+func Run(client *ipc.Client, directory string) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := New(client, directory)
+	model.ctx = ctx
+	program := tea.NewProgram(model)
 	_, err := program.Run()
 	return err
 }
@@ -140,9 +128,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			columns, rows := embeddedPaneSize(m.width, m.height)
 			sendEmbeddedResize(m.embedded, columns, rows)
 		}
+	case tea.PasteMsg:
+		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent {
+			m.embedded.emulator.Paste(message.Content)
+		}
 	case tea.KeyPressMsg:
-		debugf("key: str=%q text=%q code=%d mod=%d embedded=%v", message.String(), message.Text, message.Code, message.Mod, m.embedded != nil)
-		if m.embedded != nil {
+		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent {
 			return m.updateEmbedded(message)
 		}
 		if m.viewingDiff {
@@ -166,13 +157,24 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				m.pickingAgent = false
+				if m.opening || len(m.snapshot.Adapters) == 0 {
+					return m, nil
+				}
+				m.opening = true
 				return m, m.launchPickedAgent()
 			}
 			return m, nil
 		}
 		switch message.String() {
 		case "q", "ctrl+c":
+			if m.embedded != nil {
+				m.embedded.close()
+			}
 			return m, tea.Quit
+		case "esc":
+			if m.embedded != nil {
+				m.sidebarFocused = false
+			}
 		case "tab":
 			switch m.focus {
 			case focusSessions:
@@ -216,6 +218,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, m.loadSnapshot()
 		case "n":
+			if m.opening {
+				return m, nil
+			}
+			m.opening = true
 			return m, m.startTerminal([]string{defaultShell()})
 		case "a":
 			m.pickingAgent = true
@@ -224,7 +230,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			return m, m.attachSelected()
+			if m.opening {
+				return m, nil
+			}
+			id := m.selectedTerminalID()
+			if id == "" {
+				return m, nil
+			}
+			if m.embedded != nil && m.embedded.terminalID == id {
+				m.sidebarFocused = false
+				return m, nil
+			}
+			m.opening = true
+			return m, m.openTerminal(id)
 		case "d":
 			return m, m.loadDiff()
 		case "m":
@@ -240,45 +258,54 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err == nil {
 			m.snapshot = message.snapshot
 			if m.selected >= len(m.snapshot.Terminals) && m.selected > 0 {
-				m.selected = len(m.snapshot.Terminals) - 1
+				m.selected = max(0, len(m.snapshot.Terminals)-1)
 			}
 			if m.taskSelected >= len(m.snapshot.Tasks) && m.taskSelected > 0 {
-				m.taskSelected = len(m.snapshot.Tasks) - 1
+				m.taskSelected = max(0, len(m.snapshot.Tasks)-1)
 			}
 			if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
-				m.agentSelected = len(m.snapshot.Agents) - 1
+				m.agentSelected = max(0, len(m.snapshot.Agents)-1)
 			}
 		}
 	case terminalStartedMsg:
+		m.opening = false
 		m.loading = false
 		m.err = message.err
 		if message.err == nil {
 			m.snapshot.Terminals = append(m.snapshot.Terminals, message.terminal)
-			m.selected = len(m.snapshot.Terminals) - 1
-			columns, rows := embeddedPaneSize(m.width, m.height)
-			return m, openEmbeddedTerminal(m.client, message.terminal.ID, columns, rows)
+			m.selected = max(0, len(m.snapshot.Terminals)-1)
+			m.opening = true
+			return m, m.openTerminal(message.terminal.ID)
 		}
 	case embeddedReadyMsg:
+		m.opening = false
 		debugf("embeddedReadyMsg: err=%v terminal=%v", message.err, message.terminal != nil)
 		m.err = message.err
 		if message.err != nil {
 			return m, nil
 		}
+		if m.embedded != nil {
+			m.embedded.close()
+		}
 		m.embedded = message.terminal
-		return m, waitEmbeddedEvent(message.terminal.events)
+		m.sidebarFocused = false
+		columns, rows := embeddedPaneSize(m.width, m.height)
+		sendEmbeddedResize(m.embedded, columns, rows)
+		return m, waitEmbeddedEvent(message.terminal)
 	case embeddedEventMsg:
-		if m.embedded == nil || m.embedded.terminalID != message.terminalID {
+		if m.embedded == nil || m.embedded != message.terminal {
 			debugf("embeddedEventMsg: stale/mismatched, dropping (embedded=%v msgID=%s)", m.embedded != nil, message.terminalID)
 			return m, nil
 		}
 		if message.exited {
 			debugf("embeddedEventMsg: exited err=%v", message.err)
-			_ = m.embedded.stream.Close()
+			m.embedded.close()
 			m.embedded = nil
 			m.loading = true
+			m.err = message.err
 			return m, m.loadSnapshot()
 		}
-		return m, waitEmbeddedEvent(m.embedded.events)
+		return m, waitEmbeddedEvent(m.embedded)
 	case tickMsg:
 		return m, tea.Batch(m.loadSnapshot(), tick())
 	case diffMsg:
@@ -302,19 +329,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadSnapshot()
 		}
 	case agentLaunchedMsg:
+		m.opening = false
 		m.err = message.err
 		if message.err != nil {
 			return m, nil
 		}
+		m.snapshot.Agents = append(m.snapshot.Agents, message.agent)
+		m.agentSelected = len(m.snapshot.Agents) - 1
 		if message.agent.TerminalID != "" {
-			// Agent sessions use the subprocess hand-off, not the
-			// embedded pane: see the embedded field's doc comment.
-			return m, attachTerminal(m.executable, message.agent.TerminalID)
+			m.opening = true
+			return m, m.openTerminal(message.agent.TerminalID)
 		}
-		m.loading = true
-		return m, m.loadSnapshot()
-	case attachFinishedMsg:
-		m.err = message.err
 		m.loading = true
 		return m, m.loadSnapshot()
 	default:
@@ -328,98 +353,17 @@ func (m Model) View() tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "Orkestar"
+	if m.embedded != nil && !m.sidebarFocused && !m.pickingAgent && !m.viewingDiff && m.width >= 50 && m.height >= 16 {
+		x, y, visible := m.embedded.emulator.Cursor()
+		if visible {
+			view.Cursor = tea.NewCursor(embeddedSidebarWidth(m.width)+3+x, 3+y)
+		}
+	}
 	return view
 }
 
 func (m Model) render() string {
-	width := m.width
-	if width < 40 {
-		width = 40
-	}
-	if m.embedded != nil {
-		return m.renderEmbedded(width, m.height)
-	}
-	if m.viewingDiff {
-		return m.renderDiff(width)
-	}
-	if m.pickingAgent {
-		return m.renderAgentPicker(width)
-	}
-
-	header := accentStyle.Render("Orkestar") + dimStyle.Render("  persistent agent runtime")
-	workspacePanel := m.renderWorkspaces()
-	terminalPanel := m.renderTerminals()
-	taskPanel := m.renderTasks()
-	agentPanel := m.renderAgents()
-
-	var body string
-	if width >= 110 {
-		columnWidth := (width - 5) / 2
-		remainder := width - 2*columnWidth - 5
-		workspacePanel = panelStyle.Width(columnWidth).Render(workspacePanel)
-		terminalPanel = panelStyle.Width(columnWidth + remainder).Render(terminalPanel)
-		taskPanel = panelStyle.Width(columnWidth).Render(taskPanel)
-		agentPanel = panelStyle.Width(columnWidth + remainder).Render(agentPanel)
-		topRow := lipgloss.JoinHorizontal(lipgloss.Top, workspacePanel, " ", terminalPanel)
-		bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, taskPanel, " ", agentPanel)
-		body = topRow + "\n" + bottomRow
-	} else {
-		workspacePanel = panelStyle.Width(width - 4).Render(workspacePanel)
-		terminalPanel = panelStyle.Width(width - 4).Render(terminalPanel)
-		taskPanel = panelStyle.Width(width - 4).Render(taskPanel)
-		agentPanel = panelStyle.Width(width - 4).Render(agentPanel)
-		body = workspacePanel + "\n" + terminalPanel + "\n" + taskPanel + "\n" + agentPanel
-	}
-
-	status := ""
-	if m.loading {
-		status = dimStyle.Render("refreshing...")
-	}
-	if m.err != nil {
-		status = errorStyle.Render(m.err.Error())
-	}
-	help := dimStyle.Render("n shell  a new agent  enter attach  tab focus  d diff  m mark done  y/x allow/deny  r refresh  q detach UI")
-	return header + "\n\n" + body + "\n\n" + status + "\n" + help
-}
-
-// renderAgentPicker shows the list of registered adapters (from
-// snapshot.Adapters) to choose from when launching a new agent, so the set
-// of choices always matches what the daemon actually has available rather
-// than a fixed set of keybindings.
-// renderEmbedded draws the live terminal pane alongside a compact sidebar
-// of Workspaces/Tasks/Agents, so those stay visible while an agent (or
-// plain shell) session is running, instead of taking over the whole
-// screen. This is the Herd-style layout the panel replaces a subprocess
-// hand-off with.
-func (m Model) renderEmbedded(width, height int) string {
-	sidebarWidth := embeddedSidebarWidth(width)
-	sidebar := strings.Join([]string{
-		m.renderWorkspaces(),
-		"",
-		m.renderTasks(),
-		"",
-		m.renderAgents(),
-	}, "\n")
-
-	// embeddedPaneSize returns the emulator's grid dimensions (also used to
-	// size the emulator itself and the daemon's PTY), which is the box's
-	// INTERIOR size. panelStyle.Width/Height set the box's total size
-	// including its border (2 cols/rows) and horizontal padding (2 cols),
-	// so the box must be sized larger than the grid by that overhead —
-	// otherwise every line the emulator renders is wider than the box has
-	// room for, and lipgloss wraps each one, corrupting the whole layout.
-	// The sidebar uses the same outer height so the two boxes line up.
-	columns, rows := embeddedPaneSize(width, height)
-	outerHeight := rows + 2
-	sidebarPanel := panelStyle.Width(sidebarWidth).Height(outerHeight).Render(sidebar)
-
-	content := m.embedded.emulator.Render()
-	terminalPanel := panelStyle.Width(columns + 4).Height(outerHeight).Render(content)
-
-	header := accentStyle.Render("Orkestar") + dimStyle.Render(fmt.Sprintf("  terminal %s", m.embedded.terminalID))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebarPanel, " ", terminalPanel)
-	help := dimStyle.Render("ctrl+b q  detach")
-	return header + "\n\n" + body + "\n" + help
+	return m.renderEmbedded(m.width, m.height)
 }
 
 func (m Model) renderAgentPicker(width int) string {
@@ -474,7 +418,7 @@ func (m Model) renderAgents() string {
 		lines = append(lines, dimStyle.Render("No agent sessions."))
 	}
 	for index, agent := range m.snapshot.Agents {
-		line := fmt.Sprintf("%-9s  %-9s  %s", agent.Adapter, agent.State, agent.Mode)
+		line := fmt.Sprintf("%s  %s", agent.Adapter, agent.State)
 		if m.focus == focusAgents && index == m.agentSelected {
 			line = selectedStyle.Render(" " + line + " ")
 		} else {
@@ -711,38 +655,34 @@ func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
 	}
 }
 
-// attachSelected attaches to the currently selected session. Agent-bridged
-// terminals use the subprocess hand-off (see the embedded field's doc
-// comment for why); plain ones use the embedded pane.
-func (m Model) attachSelected() tea.Cmd {
-	if len(m.snapshot.Terminals) == 0 || m.selected >= len(m.snapshot.Terminals) {
-		return nil
-	}
-	terminal := m.snapshot.Terminals[m.selected]
-	if m.terminalIsAgentBridged(terminal.ID) {
-		return attachTerminal(m.executable, terminal.ID)
-	}
-	columns, rows := embeddedPaneSize(m.width, m.height)
-	return openEmbeddedTerminal(m.client, terminal.ID, columns, rows)
-}
-
-func (m Model) terminalIsAgentBridged(terminalID string) bool {
-	for _, agent := range m.snapshot.Agents {
-		if agent.TerminalID == terminalID {
-			return true
+func (m Model) selectedTerminalID() string {
+	switch m.focus {
+	case focusAgents:
+		if m.agentSelected >= 0 && m.agentSelected < len(m.snapshot.Agents) {
+			return m.snapshot.Agents[m.agentSelected].TerminalID
+		}
+	case focusSessions:
+		if m.selected >= 0 && m.selected < len(m.snapshot.Terminals) {
+			return m.snapshot.Terminals[m.selected].ID
 		}
 	}
-	return false
+	return ""
 }
 
-// attachTerminal runs `orkestar terminal attach <id>` as a subprocess,
-// taking over the screen until the user detaches (ctrl+b q) or the process
-// exits, then returns control to the dashboard.
-func attachTerminal(executable, terminalID string) tea.Cmd {
-	command := exec.Command(executable, "terminal", "attach", terminalID)
-	return tea.ExecProcess(command, func(err error) tea.Msg {
-		return attachFinishedMsg{err: err}
-	})
+func (m Model) attachSelected() tea.Cmd {
+	if id := m.selectedTerminalID(); id != "" {
+		return m.openTerminal(id)
+	}
+	return nil
+}
+
+func (m Model) openTerminal(id string) tea.Cmd {
+	ctx := m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	columns, rows := embeddedPaneSize(m.width, m.height)
+	return openEmbeddedTerminalContext(ctx, m.client, id, columns, rows)
 }
 
 // updateEmbedded handles a key press while an embedded terminal pane is
@@ -751,22 +691,29 @@ func attachTerminal(executable, terminalID string) tea.Cmd {
 // detach shortcut, so the muscle memory is the same either way).
 func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	term := m.embedded
-	debugf("updateEmbedded: str=%q detachPending=%v terminalID=%s", msg.String(), term.detachPending, term.terminalID)
 
 	if term.detachPending {
 		term.detachPending = false
 		if msg.String() == "q" {
 			debugf("updateEmbedded: detaching terminalID=%s", term.terminalID)
-			_ = term.stream.Close()
+			term.close()
 			m.embedded = nil
 			m.loading = true
 			return m, m.loadSnapshot()
 		}
+		if msg.String() == "tab" {
+			m.sidebarFocused = true
+			return m, nil
+		}
+		if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'b' {
+			term.emulator.Input([]byte{0x02})
+			return m, nil
+		}
 		// The user meant a literal ctrl+b followed by this key, not a
 		// detach: forward both instead of swallowing the ctrl+b.
-		sendEmbeddedInput(term.stream, []byte{0x02})
+		term.emulator.Input([]byte{0x02})
 		if data := encodeKey(msg); len(data) > 0 {
-			sendEmbeddedInput(term.stream, data)
+			term.emulator.Input(data)
 		}
 		return m, nil
 	}
@@ -777,10 +724,14 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if msg.Code == tea.KeyUp || msg.Code == tea.KeyDown || msg.Code == tea.KeyLeft || msg.Code == tea.KeyRight {
+		term.emulator.Navigation(msg.Code, int(msg.Mod))
+		return m, nil
+	}
 	data := encodeKey(msg)
-	debugf("updateEmbedded: encodeKey -> %d bytes: %q", len(data), data)
+
 	if len(data) > 0 {
-		sendEmbeddedInput(term.stream, data)
+		term.emulator.Input(data)
 	}
 	return m, nil
 }

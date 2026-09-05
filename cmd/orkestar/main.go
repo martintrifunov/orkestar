@@ -81,11 +81,7 @@ func runTUI(paths runtimepath.Paths) error {
 	if err != nil {
 		return fmt.Errorf("get current directory: %w", err)
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("find Orkestar executable: %w", err)
-	}
-	return tui.Run(ipc.NewClient(paths.Socket), directory, executable)
+	return tui.Run(ipc.NewClient(paths.Socket), directory)
 }
 
 func runTerminal(paths runtimepath.Paths, args []string) error {

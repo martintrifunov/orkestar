@@ -1,0 +1,133 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// fitPane clips styled lines instead of wrapping them into adjacent panes.
+func fitPane(content string, columns, rows int) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > rows {
+		lines = lines[:max(0, rows)]
+	}
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], max(0, columns), "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderEmbedded(width, height int) string {
+	if width < 50 || height < 16 {
+		return fitPane("Orkestar\nEnlarge terminal to at least 50 × 16.\nWork continues in the daemon.", width, height)
+	}
+	columns, rows := embeddedPaneSize(width, height)
+	sidebarWidth := embeddedSidebarWidth(width)
+	sidebar := panelStyle.Width(sidebarWidth).Height(rows + 2).
+		Render(m.renderSidebar(sidebarWidth-4, rows))
+	content := "Open a session\n\nSelect a session or agent and press Enter.\nPress a to launch an agent, or n for a shell."
+	if m.embedded != nil {
+		content = m.embedded.emulator.Render()
+	}
+	if m.viewingDiff {
+		content = m.renderDiff(columns)
+	}
+	if m.pickingAgent {
+		content = m.renderAgentPicker(columns)
+	}
+	paneStyle := panelStyle
+	if m.embedded != nil && !m.sidebarFocused {
+		paneStyle = paneStyle.BorderForeground(lipgloss.Color("#D7A84B"))
+	}
+	pane := paneStyle.Width(columns + 4).Height(rows + 2).Render(fitPane(content, columns, rows))
+	title := "  persistent agent runtime"
+	if m.embedded != nil {
+		title = fmt.Sprintf("  terminal %s", m.embedded.terminalID)
+	}
+	if m.opening {
+		title += "  opening…"
+	}
+	if m.err != nil {
+		title = "  " + errorStyle.Render(m.err.Error())
+	}
+	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
+	help := "a agent  n shell  tab section  enter open  q quit"
+	if m.embedded != nil && !m.sidebarFocused {
+		help = "ctrl+b tab sidebar  ctrl+b q close pane  ctrl+b ctrl+b send prefix"
+	}
+	if m.embedded != nil && m.sidebarFocused {
+		help = "tab section  enter open  esc terminal  a agent  n shell  q quit"
+	}
+	if m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused) {
+		help = "tab section  d diff  m mark done  a agent  q quit"
+	}
+	if m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused) {
+		help = "tab section  enter open  y/x allow/deny  a agent  q quit"
+	}
+	if m.pickingAgent {
+		help = "up/down select  enter launch  esc cancel"
+	}
+	if m.viewingDiff {
+		help = "esc close diff"
+	}
+	return header + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", pane) + "\n" + ansi.Truncate(dimStyle.Render(help), width, "…")
+}
+
+func (m Model) renderSidebar(columns, rows int) string {
+	sections := []string{m.renderWorkspaces(), m.renderTerminals(), m.renderTasks(), m.renderAgents()}
+	heights := make([]int, len(sections))
+	total := len(sections) - 1
+	for i, section := range sections {
+		heights[i] = len(strings.Split(section, "\n"))
+		total += heights[i]
+	}
+	// Share scarce rows across sections while retaining every section heading.
+	for total > rows {
+		largest := 0
+		for i := range heights {
+			if heights[i] > heights[largest] {
+				largest = i
+			}
+		}
+		if heights[largest] <= 2 {
+			break
+		}
+		heights[largest]--
+		total--
+	}
+	selected := []int{0, m.selected * 2, 0, 0}
+	for i, task := range m.snapshot.Tasks {
+		if i >= m.taskSelected {
+			break
+		}
+		selected[2]++
+		if task.WorktreePath != "" {
+			selected[2]++
+		}
+	}
+	for i, agent := range m.snapshot.Agents {
+		if i >= m.agentSelected {
+			break
+		}
+		selected[3]++
+		if agent.AttentionReason != "" {
+			selected[3]++
+		}
+	}
+	for i, section := range sections {
+		lines := strings.Split(section, "\n")
+		if len(lines) > heights[i] {
+			count := heights[i] - 1
+			start := min(max(0, selected[i]-count+1), len(lines)-1-count)
+			lines = append([]string{lines[0]}, lines[1+start:1+start+count]...)
+		}
+		if (i == 1 && m.focus == focusSessions || i == 2 && m.focus == focusTasks || i == 3 && m.focus == focusAgents) && (m.embedded == nil || m.sidebarFocused) {
+			lines[0] = accentStyle.Render("› ") + lines[0]
+		}
+		sections[i] = fitPane(strings.Join(lines, "\n"), columns, heights[i])
+	}
+	return fitPane(strings.Join(sections, "\n\n"), columns, rows)
+}
