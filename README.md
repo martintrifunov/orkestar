@@ -64,6 +64,11 @@ The UI needs at least 50 × 16 terminal cells. Narrow windows show the focused
 pane; wider windows show the split layout. Direct full-screen attachment is also available with
 `orkestar terminal attach <terminal-id>`.
 
+`scripts/smoke-agents.py` checks installed CLIs start and reattach without
+sending a prompt. `scripts/live-agents.py` runs authenticated turns, permission
+allow/deny, interrupt and resume against a throwaway daemon; it spends real
+tokens, so run it deliberately.
+
 Codex may ask you to review Orkestar's five command hooks at first launch. Hooks
 are configured for that invocation and do not bypass native trust or approvals.
 If hooks are disabled or untrusted, the PTY still works but structured lifecycle

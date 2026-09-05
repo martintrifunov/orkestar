@@ -10,6 +10,8 @@ The standard suite does not require installed agents, authentication or engines.
   completion, exits and explicitly resumes the saved native identity.
 - Real outer PTYs drive Bubble Tea's actual input decoder/renderer for Claude,
   Codex and OpenCode fixture adapters, including client quit and reattachment.
+  Another drives `Ctrl+b s` then `Ctrl+b v` and checks the rendered frame shows
+  three distinct shells nested as requested, with close collapsing one split.
 - Daemon tests answer terminal queries before any client exists, reject viewer
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
@@ -57,9 +59,37 @@ and checked against the release digest. It was not installed globally. Codex
 hook trust was not bypassed or approved automatically. No global agent settings
 were edited. Existing user daemon sessions were left running.
 
-Authenticated live model turns, tool-permission delivery and resume still need
-manual validation after normal hook trust/provider setup. Fixture success is not
-proof that every installed CLI version or approval policy behaves identically.
+## Live authenticated matrix
+
+`scripts/live-agents.py` exercises what fixtures cannot: real model turns from a
+logged-in CLI. It starts an isolated daemon in a temporary runtime directory and
+a fresh temporary Git workspace, then runs one adapter at a time through launch,
+a plain turn, a permission request denied and then allowed, an interrupt, exit
+and explicit native resume that must recall the earlier turn. It records
+booleans, states and timings only. Screen content, prompts and credentials are
+never printed. It shuts down only its own daemon and never touches a running
+one.
+
+```sh
+go build -o ./orkestar ./cmd/orkestar
+python3 scripts/live-agents.py --adapters claude-code
+```
+
+This spends real tokens on the account each CLI is logged into, so it is run
+deliberately rather than as part of the standard suite. A CLI showing its own
+hook-trust review or an unauthenticated CLI is reported and skipped rather than
+answered automatically; approve hooks natively once, then rerun.
+
+| CLI | Logged in on this Mac | Live matrix result |
+| --- | --- | --- |
+| Claude Code 2.1.259 | yes (claude.ai) | not yet run |
+| Codex 0.153.4 | yes (ChatGPT) | not yet run |
+| OpenCode 1.18.29 | no credentials | blocked: `opencode auth login` first |
+
+Record the run's JSON summary here once it has been executed. Until then,
+authenticated live model turns, tool-permission delivery and resume remain
+unproven. Fixture success is not proof that every installed CLI version or
+approval policy behaves identically.
 Screens and scrollback survive client reattachment, but are intentionally not
 persisted across daemon restart.
 

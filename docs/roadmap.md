@@ -108,8 +108,9 @@ integration has been implemented.
 
 Next priorities:
 
-1. Exercise authenticated live turns, native approvals and resume after hook
-   review for each CLI; add these results to the versioned validation matrix.
+1. Run `scripts/live-agents.py` for each authenticated CLI and record its JSON
+   summary in the validation matrix. The harness exists; the runs spend real
+   tokens and have not been executed. OpenCode needs `opencode auth login`.
 2. Add macOS/Linux CI, including race and real-PTY regression checks.
 3. Profile full-frame rendering under sustained output and refine layout controls
    if needed (split ratios and drag resizing, pane titles, mouse selection).
