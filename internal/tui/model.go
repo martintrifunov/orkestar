@@ -1016,7 +1016,7 @@ func defaultShell() string {
 	if shell := os.Getenv("SHELL"); shell != "" {
 		return shell
 	}
-	return "/bin/sh"
+	return platformShell()
 }
 
 func sameDirectory(left, right string) bool {
