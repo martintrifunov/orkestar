@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/martintrifunov/orkestar/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/martintrifunov/orkestar/ci.yml?style=flat-square&label=build&color=D7A84B" alt="Build status"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.27"></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-D7A84B?style=flat-square" alt="macOS and Linux">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-D7A84B?style=flat-square" alt="macOS, Linux and Windows">
   <img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-D7A84B?style=flat-square" alt="Supported agents">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/martintrifunov/orkestar?style=flat-square&color=D7A84B" alt="MIT license"></a>
 </p>
@@ -46,13 +46,35 @@ No account, no server, no browser. One static binary.
 
 ## Installation
 
-Build from source. Go 1.27 or newer, macOS or Linux:
+Version **v0.1.0** introduces Homebrew and Windows PowerShell distribution.
+These commands become available after the release and tap formula are published
+(see [release preparation](docs/releases.md)).
+
+```bash
+brew install martintrifunov/tap/orkestar
+```
+
+Windows 10 1809+ / Windows 11, from PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/martintrifunov/orkestar/v0.1.0/install.ps1 -OutFile install.ps1
+./install.ps1
+```
+
+The installer verifies the checksum and adds Orkestar to your user PATH.
+Use Windows Terminal; shell panes prefer PowerShell 7, falling back to Windows
+PowerShell. Agent CLIs must be installed separately.
+
+Build from source with Go 1.27 or newer on macOS, Linux or Windows:
 
 ```bash
 git clone https://github.com/martintrifunov/orkestar
 cd orkestar
 go build -o ./orkestar ./cmd/orkestar
 ```
+
+On Windows, use `./build.ps1` to build or `./build.ps1 -Task Install` to install.
+Check the build with `orkestar --version`.
 
 Install the agent CLIs you want to drive: `claude`, `codex` or `opencode`.
 Orkestar works without them, as a persistent terminal multiplexer.
@@ -124,6 +146,14 @@ leaves its process running. Click any pane to focus it. When the window is too
 small for every split, the focused pane fills the space and `F6` still cycles
 the hidden ones.
 
+### Multiline agent input
+
+`Shift+Enter` is forwarded as a modified Enter; plain Enter submits. Your outer
+terminal must distinguish those keys (Kitty keyboard protocol or CSI-u). If it
+sends both as carriage return, configure Shift+Enter to send `ESC [ 13 ; 2 u`, or
+use the agent's alternate newline binding such as `Alt+Enter` or `Ctrl+j`.
+Orkestar cannot recover a modifier the outer terminal did not send.
+
 ### Tasks
 
 Select the Tasks section with `Tab`, then `c` creates one.
@@ -179,7 +209,7 @@ at `ORKESTAR_TUI_CONFIG`. The settings panel (`Ctrl+b`, comma) shows the path.
 
 The daemon is the authority for state and process ownership. It holds each
 pseudoterminal, one terminal screen per session with bounded scrollback, and the
-agent adapters. Clients speak a versioned local protocol over a Unix socket and
+agent adapters. Clients speak a versioned local protocol over a Unix socket (Windows: a private named pipe) and
 render frames the daemon sends them; they never own a managed process. Several
 clients can watch one session, but only one holds input at a time.
 
@@ -198,6 +228,7 @@ For the boundaries and the reasoning behind them, see
 ## Command line
 
 ```
+orkestar --version                                show application version
 orkestar                                          start the UI
 orkestar status                                   show daemon state
 orkestar reset [--yes]                            clear all daemon state
@@ -232,13 +263,19 @@ Nothing has changed. Run 'orkestar reset --yes' to go ahead.
 ```
 
 Nothing on disk is deleted. Task worktrees are left where they are and listed
-so you can remove any you no longer want with `git worktree remove`. Registered
-agent adapters survive, since they are configuration rather than state. To clear
+so you can remove any you no longer want with `git worktree remove`. The new daemon loads its registered
+agent adapters as configuration. To clear
 a single session instead, use `orkestar terminal remove` or press `X` in the
 sidebar.
 
-Rebuilding the binary does not upgrade a daemon that is already running. Stop it
-with `orkestar daemon stop` once its work can end, then start Orkestar again.
+`orkestar reset --yes` handles shutdown itself: it waits for the running daemon
+and its final metadata write to finish, starts the current binary to clear the
+saved records, then stops that daemon too. This also works with older daemons
+that do not implement `system.reset`. The next launch starts a fresh daemon.
+Previewing with `orkestar reset` never stops a running daemon.
+
+Rebuilding alone does not replace a running daemon. A confirmed reset now does
+that as part of clearing its state.
 Metadata survives a restart; terminal screens and scrollback are held in memory
 and do not.
 
@@ -268,6 +305,7 @@ exercised.
 - [Architecture](docs/architecture.md)
 - [Panes and editing](docs/panes-and-editing.md)
 - [Validation](docs/validation.md)
+- [Releases](docs/releases.md)
 - [Roadmap](docs/roadmap.md)
 - [Decision records](docs/decisions/)
 - [Agent guide](AGENTS.md), for contributors and coding agents

@@ -121,3 +121,15 @@ Next priorities:
    inside a terminal pane has not.
 4. Implement the MCP client registry, health checks, policy/audit and serialized
    mutation routing before introducing engine integrations.
+
+## v0.1.0 distribution — requested 2026-09-05
+
+- [x] Version command and initial changelog
+- [x] Preserve Shift+Enter and make confirmed reset stop the daemon, including older versions
+- [x] Windows ConPTY, named-pipe transport and PowerShell scripts
+- [x] Release archives, checksums and Homebrew formula generation
+- [ ] Run native Windows CI and installed-agent validation
+- [ ] Publish v0.1.0 and install the formula in martintrifunov/homebrew-tap
+
+This adds Windows explicitly at the user's request. Release preparation does not
+mean the tag, binaries or Homebrew formula have already been published.

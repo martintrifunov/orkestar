@@ -188,3 +188,26 @@ and did not enable mouse reporting in the smoke check, even with `-m`; use the
 standard editor or Vim for verified mouse editing here. Native mouse forwarding
 is available for editors that negotiate it. No user files or global editor
 settings were changed by these checks.
+
+## Windows release validation
+
+Native Windows CI now exercises ConPTY final output, input deadlines and a
+PowerShell session that survives detach/reattach and clears on reset over a
+private named pipe. These tests are added but have not been run on Windows in
+the local macOS session. The original POSIX PTY fixtures run on macOS/Linux.
+Windows installed Claude Code, Codex and OpenCode model-turn and hook behavior
+remain unvalidated. Cross-builds are a compile check, not runtime evidence.
+
+## v0.1.0 local checks
+
+On macOS arm64, `go test ./...` and `go vet ./...` pass. Race checks pass for
+TUI, daemon, IPC and PTY packages. The real outer-PTY adapter matrix verifies
+that CSI-u Shift+Enter reaches Claude Code, Codex and OpenCode fixtures intact.
+Windows amd64 vet passes; six macOS/Linux/Windows amd64/arm64 release archives
+build locally. Native Windows CI and authenticated agent runs remain pending.
+
+Confirmed CLI reset is tested against both a current subprocess daemon and a
+legacy fixture without `system.reset`. The legacy fixture closes its listener,
+then delays its last metadata write. Tests verify that preview leaves it alive,
+reset waits for process exit, clears persisted records, preserves user files,
+and leaves the replacement daemon stopped.

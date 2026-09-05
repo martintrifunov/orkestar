@@ -243,3 +243,18 @@ basic PTY/process behavior available, with limited lifecycle/resume information.
 
 See [ADR 0003](decisions/0003-daemon-screens-recovery-and-hooks.md) for the durable
 boundaries and [validation](validation.md) for what has actually been exercised.
+
+## Windows and distribution
+
+Windows uses ConPTY behind `internal/pty`, a detached daemon and a current-user
+named pipe behind `internal/ipc`; the protocol and metadata layout are shared
+with macOS/Linux. Shell panes use PowerShell on Windows. Semantic versioning
+begins at v0.1.0 with Homebrew and PowerShell distribution. See
+[ADR 0007](decisions/0007-windows-and-versioned-releases.md) and
+[release procedures](releases.md).
+
+Confirmed CLI reset also shuts down the daemon. It waits for the OS-identified
+IPC peer process to exit before starting the current binary, clearing persisted
+state through `system.reset`, and stopping it. This supports old daemons without
+the reset method and prevents their final SQLite write from restoring records
+after reset. The existing IPC `system.reset` method itself remains compatible.
