@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -32,7 +33,9 @@ func TestSQLiteRoundTripAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
+	// Windows has no Unix mode bits; Go reports 0666 there. The metadata file
+	// inherits the ACL of the user-private runtime directory instead.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("metadata permissions %v", info.Mode())
 	}
 }
