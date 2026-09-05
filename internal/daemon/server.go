@@ -193,8 +193,14 @@ func (s *Server) handleConnection(connection net.Conn) {
 			s.handleAgentAttach(agentConnection{Scanner: scanner, Encoder: encoder, Request: request})
 			return
 		}
-		response := s.handleRequest(request)
-		if err := encoder.Encode(response); err != nil {
+		response, shutdown := s.handleRequest(request)
+		encodeErr := encoder.Encode(response)
+		if shutdown {
+			// Only now: stopping the server closes this connection, which would
+			// otherwise race the acknowledgement and hand the client an EOF.
+			s.stopOnce.Do(func() { close(s.stop) })
+		}
+		if encodeErr != nil {
 			return
 		}
 	}
@@ -203,14 +209,17 @@ func (s *Server) handleConnection(connection net.Conn) {
 	}
 }
 
-func (s *Server) handleRequest(request ipc.Request) ipc.Response {
+// handleRequest returns the response and whether the caller must stop the
+// server once that response has been written.
+func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 	if request.Version != ipc.Version {
-		return ipc.NewErrorResponse(request.ID, "unsupported_version", fmt.Sprintf("protocol version %d is not supported", request.Version))
+		return ipc.NewErrorResponse(request.ID, "unsupported_version", fmt.Sprintf("protocol version %d is not supported", request.Version)), false
 	}
 
 	var (
-		result any
-		err    error
+		result   any
+		err      error
+		shutdown bool
 	)
 
 	switch request.Method {
@@ -222,7 +231,7 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.resetState(request.Params)
 	case "system.shutdown":
 		result = map[string]string{"status": "stopping"}
-		s.stopOnce.Do(func() { close(s.stop) })
+		shutdown = true
 	case "workspace.create":
 		result, err = s.createWorkspace(request.Params)
 	case "terminal.history":
@@ -270,23 +279,23 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 	case "artifact.create":
 		result, err = s.createArtifact(request.Params)
 	default:
-		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method))
+		return ipc.NewErrorResponse(request.ID, "method_not_found", fmt.Sprintf("unknown method %q", request.Method)), false
 	}
 
 	if err != nil {
-		return ipc.NewErrorResponse(request.ID, "invalid_params", err.Error())
+		return ipc.NewErrorResponse(request.ID, "invalid_params", err.Error()), shutdown
 	}
 	if err == nil && request.Method != "system.snapshot" && request.Method != "system.ping" && request.Method != "system.shutdown" && request.Method != "terminal.history" {
 		err = s.persist()
 		if err != nil {
-			return ipc.NewErrorResponse(request.ID, "storage_error", err.Error())
+			return ipc.NewErrorResponse(request.ID, "storage_error", err.Error()), shutdown
 		}
 	}
 	response, err := ipc.NewResponse(request.ID, result)
 	if err != nil {
-		return ipc.NewErrorResponse(request.ID, "internal_error", err.Error())
+		return ipc.NewErrorResponse(request.ID, "internal_error", err.Error()), shutdown
 	}
-	return response
+	return response, shutdown
 }
 
 func (s *Server) snapshot() Snapshot {
