@@ -214,6 +214,18 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 		m.opening = true
 		m.notice = ""
 		return m.startTerminal([]string{defaultShell()}), true
+	case "z":
+		if len(m.visiblePanes()) < 2 {
+			m.notice = "Only one pane. Ctrl+b v/s splits it."
+			return nil, true
+		}
+		m.zoomed = !m.zoomed
+		m.notice = ""
+		m.resizePanes()
+		return nil, true
+	case "left", "right", "up", "down":
+		m.resizeSplit(key)
+		return nil, true
 	case "f":
 		return m.toggleFiles(), true
 	case "d":

@@ -44,10 +44,18 @@ When any leaf would be narrower than 24 cells or shorter than 7 rows, the client
 shows only the focused pane at full size and says so in the header and footer.
 Hidden panes keep their attachments; `F6` and `Ctrl+b o` cycle through them.
 
+Each internal node carries the share of its rectangle the first child receives.
+Zero means an even split, so a tree built before this existed needs no
+migration. `Ctrl+b` with an arrow moves the nearest enclosing divider of that
+orientation, and dragging a divider does the same with the mouse; both clamp so
+neither side falls below the usable minimum. `Ctrl+b z` zooms the focused leaf
+over the whole content area without changing the tree, so the other panes keep
+their processes and cycling still reaches them.
+
 ## Consequences
 
 Layout state remains client-side and ephemeral; the daemon knows nothing about
-splits and gains no new IPC. Splits are always equal halves; there is no ratio
-adjustment, drag-to-resize, zoom toggle or pane swapping yet. Deep one-sided
+splits and gains no new IPC. There is no pane swapping or moving a pane to a
+different branch yet. Deep one-sided
 splitting reaches the minimum size quickly and triggers the focused-pane
 fallback rather than producing unusable boxes.

@@ -10,6 +10,8 @@ continues to type into that agent.
 | Split: open a new shell beside the focused pane | Ctrl+b, v |
 | Split: open a new shell below the focused pane | Ctrl+b, s |
 | Focus the next open pane | F6 or Ctrl+b, o |
+| Zoom the focused pane, and back | Ctrl+b, z |
+| Move the enclosing split's divider | Ctrl+b, arrow keys |
 | Open another shell | Ctrl+b, n |
 | Open agent picker | Ctrl+b, a |
 | Open workspace/task worktree review | Ctrl+b, d |
@@ -80,6 +82,17 @@ review panes and editors opened without a split key divide the focused pane
 along its longer edge. Closing a pane hands its space to the pane it was split
 from. The new pane always lands beside the pane that was focused when you
 pressed the key, even if you focus something else while the shell starts.
+
+Panes are labelled in their top border with the document they hold or the
+command they run, so a screen full of shells stays readable.
+
+Splits start even and can be moved. `Ctrl+b` then an arrow moves the divider of
+the nearest enclosing split in that direction, and dragging a divider with the
+mouse does the same. Both stop before either side becomes too small to use.
+
+`Ctrl+b z` zooms the focused pane to fill the whole area and back again. The
+other panes keep their processes and their place in the layout, and `F6` still
+cycles through them while zoomed, swapping which one fills the space.
 
 The default limit is 16 open panes; set `"max_panes"` in `tui.json` (1 to 64).
 Above the limit, opening or splitting is refused with a notice. Nothing is

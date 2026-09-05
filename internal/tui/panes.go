@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -46,6 +47,11 @@ func (m Model) paneRects() []paneRect {
 		return nil
 	}
 	x, y, w, h := m.contentArea()
+	// Zoom hands the whole content area to the focused pane. The others keep
+	// their attachments and their place in the tree.
+	if m.zoomed && m.embedded != nil {
+		return []paneRect{{m.embedded, x, y, w, h}}
+	}
 	rects := tree.rects(x, y, w, h, nil)
 	for _, r := range rects {
 		if r.width < minPaneWidth || r.height < minPaneHeight {
@@ -151,13 +157,138 @@ func (m Model) renderPanes() string {
 			style = style.BorderForeground(lipgloss.Color("#D7A84B"))
 		}
 		content := r.terminal.emulator.Render()
-		boxes[r.terminal] = style.Width(r.width).Height(r.height).Render(fitPane(content, r.width-4, r.height-2))
+		box := style.Width(r.width).Height(r.height).Render(fitPane(content, r.width-4, r.height-2))
+		boxes[r.terminal] = withPaneTitle(box, m.paneLabel(r.terminal), r.width, style)
 	}
 	if len(rects) == 1 {
 		return boxes[rects[0].terminal]
 	}
 	return m.tree().render(boxes)
 }
+
+// paneLabel names a pane for its border: the document for a local pane, and
+// the command for a daemon-owned terminal, falling back to its ID.
+func (m Model) paneLabel(p *embeddedTerminal) string {
+	switch {
+	case p.editor != nil:
+		return p.editor.title()
+	case p.review != nil:
+		return "Changes"
+	case p.title != "":
+		return p.title
+	}
+	for _, terminal := range m.snapshot.Terminals {
+		if terminal.ID == p.terminalID && len(terminal.Command) > 0 {
+			return filepath.Base(terminal.Command[0])
+		}
+	}
+	return p.terminalID
+}
+
+// withPaneTitle draws the name into the pane's top border, the way a tiling
+// terminal labels its panes, so it costs no content row.
+func withPaneTitle(box, title string, width int, style lipgloss.Style) string {
+	lines := strings.Split(box, "\n")
+	if len(lines) == 0 || title == "" {
+		return box
+	}
+	label := ansi.Truncate(title, max(0, width-8), "…")
+	fill := width - 5 - ansi.StringWidth(label)
+	if fill < 1 {
+		return box
+	}
+	border := style.GetBorderTopForeground()
+	lines[0] = lipgloss.NewStyle().Foreground(border).Render("╭─ " + label + " " + strings.Repeat("─", fill) + "╮")
+	return strings.Join(lines, "\n")
+}
+
+// dividers lists every movable boundary between panes. A zoomed or collapsed
+// layout has none.
+func (m Model) dividers() []divider {
+	if m.zoomed || len(m.paneRects()) < 2 {
+		return nil
+	}
+	x, y, width, height := m.contentArea()
+	return m.tree().dividers(x, y, width, height, nil)
+}
+
+// dividerAt finds the boundary under a pointer, allowing a column either side
+// so the two pane borders that meet there are both grabbable.
+func (m Model) dividerAt(px, py int) (divider, bool) {
+	for _, d := range m.dividers() {
+		if d.vertical {
+			if abs(px-d.at()) <= 1 && py >= d.y && py < d.y+d.height {
+				return d, true
+			}
+			continue
+		}
+		if abs(py-d.at()) <= 1 && px >= d.x && px < d.x+d.width {
+			return d, true
+		}
+	}
+	return divider{}, false
+}
+
+func (m Model) dividerFor(node *splitNode) (divider, bool) {
+	for _, d := range m.dividers() {
+		if d.node == node {
+			return d, true
+		}
+	}
+	return divider{}, false
+}
+
+// dragDividerTo moves a divider being dragged to follow the pointer.
+func (m *Model) dragDividerTo(px, py int) {
+	d, ok := m.dividerFor(m.dragging)
+	if !ok {
+		m.dragging = nil
+		return
+	}
+	if d.vertical && d.width > 0 {
+		d.node.setRatio(float64(px-d.x) / float64(d.width))
+	} else if !d.vertical && d.height > 0 {
+		d.node.setRatio(float64(py-d.y) / float64(d.height))
+	}
+	m.resizePanes()
+}
+
+// resizeSplit moves the divider of the nearest enclosing split in a direction,
+// so the focused pane grows or shrinks by a predictable step.
+func (m *Model) resizeSplit(direction string) {
+	stacked := direction == "up" || direction == "down"
+	node := m.tree().ancestor(m.embedded, stacked)
+	if node == nil {
+		m.notice = "No split to resize in that direction."
+		return
+	}
+	d, ok := m.dividerFor(node)
+	if !ok {
+		return
+	}
+	// Measure from the same minimum the layout uses, so the divider moves from
+	// where it is actually drawn.
+	total, step, minimum := d.width, 2, minPaneWidth
+	if stacked {
+		total, step, minimum = d.height, 1, minPaneHeight
+	}
+	if direction == "left" || direction == "up" {
+		step = -step
+	}
+	if total > 0 {
+		node.setRatio(float64(node.split(total, minimum)+step) / float64(total))
+	}
+	m.notice = ""
+	m.resizePanes()
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if m.pickingAgent || m.viewingDiff || m.viewingHistory || m.prompting() {
 		return m, nil
@@ -165,6 +296,10 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	mouse := msg.Mouse()
 	if cmd, inViewer := m.filesClick(mouse.X, mouse.Y); inViewer {
 		return m, cmd
+	}
+	if d, ok := m.dividerAt(mouse.X, mouse.Y); ok && mouse.Button == tea.MouseLeft {
+		m.dragging = d.node
+		return m, nil
 	}
 	for _, r := range m.paneRects() {
 		if mouse.X >= r.x && mouse.X < r.x+r.width && mouse.Y >= r.y && mouse.Y < r.y+r.height {
@@ -243,6 +378,9 @@ func (m Model) paneTitle() string {
 		name = m.embedded.editor.title()
 	}
 	label := fmt.Sprintf("  %d panes · %s", len(m.visiblePanes()), name)
+	if m.zoomed && len(m.visiblePanes()) > 1 {
+		label += " · zoomed (ctrl+b z)"
+	}
 	if len(m.paneRects()) < len(m.visiblePanes()) {
 		label += " · enlarge window for splits"
 	}

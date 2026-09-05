@@ -108,6 +108,8 @@ prefix, so ordinary letters still reach the agent you are typing to.
 | `v` | Split: new shell beside the focused pane |
 | `s` | Split: new shell below the focused pane |
 | `o` or `F6` | Focus the next pane |
+| `z` | Zoom the focused pane to fill the area, and back |
+| arrows | Move the divider of the enclosing split |
 | `n` / `a` | New shell / new agent |
 | `d` | Review changes |
 | `e` | Open or create a file |
@@ -128,6 +130,11 @@ picking up files an agent creates or deletes without any keystroke. Arrow keys
 move, `Enter` opens a file in an editor pane or expands a directory, and `Esc`
 returns to the panes. Clicking works too. Ignored files are left out, the same
 way the file picker leaves them out.
+
+Each pane is labelled in its top border with its file or command. Dividers can
+be dragged with the mouse, and the arrow keys move them from the keyboard.
+Zooming keeps every other pane attached and running, and `F6` still cycles
+through them while zoomed.
 
 The mouse wheel scrolls the review and editor panes, the file viewer, and the
 scrollback view once it is open. It never opens scrollback by itself.

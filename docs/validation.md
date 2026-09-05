@@ -16,6 +16,13 @@ The standard suite does not require installed agents, authentication or engines.
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
   isolation, close/reattach one pane, and keep history overlays read-only.
+- Layout tests cover zoom giving the focused pane the exact content area while
+  the others stay in the tree and remain reachable by cycling, pane labels
+  appearing in the border without changing a box's size and truncating when too
+  long, keyboard resizing moving a divider and staying exactly tiled under two
+  hundred presses in each direction without falling below the minimum, and mouse
+  dragging a divider including clamping at the edge and offering none while
+  zoomed.
 - Lifecycle tests stop a real daemon session from the sidebar and confirm the
   first press only asks, the second stops it, a finished session is then cleared
   along with its pane, and the daemon refuses to remove a running one with a

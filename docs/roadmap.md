@@ -116,8 +116,8 @@ Next priorities:
 2. Watch the first CI runs and tighten any test whose timing is too tight for a
    shared runner. The workflow builds, vets, tests and race-tests on macOS and
    Linux, and cross-builds every supported target.
-3. Profile full-frame rendering under sustained output and refine layout controls
-   if needed (split ratios and drag resizing, pane titles, mouse selection).
-   Arbitrary split trees shipped in ADR 0005.
+3. Profile full-frame rendering under sustained output. Split trees, ratios,
+   drag resizing, pane titles and a zoom toggle have shipped; mouse selection
+   inside a terminal pane has not.
 4. Implement the MCP client registry, health checks, policy/audit and serialized
    mutation routing before introducing engine integrations.

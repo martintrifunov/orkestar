@@ -79,6 +79,8 @@ type Model struct {
 	filesExpanded                         map[string]bool
 	filesTop                              int
 	pendingStop                           string
+	zoomed                                bool
+	dragging                              *splitNode
 	filesErr                              error
 	filesLoadedAt                         time.Time
 
@@ -195,6 +197,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.clipboardTarget = nil
 		return m, cmd
 	case tea.MouseMotionMsg:
+		if m.dragging != nil {
+			if message.Mouse().Button != tea.MouseLeft {
+				m.dragging = nil
+				return m, nil
+			}
+			m.dragDividerTo(message.Mouse().X, message.Mouse().Y)
+			return m, nil
+		}
 		if m.embedded != nil && m.embedded.editor != nil && message.Mouse().Button != tea.MouseLeft {
 			m.embedded.editor.dragging = false
 		}
@@ -209,6 +219,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseReleaseMsg:
+		if m.dragging != nil {
+			m.dragging = nil
+			return m, nil
+		}
 		if m.forwardMouse("release", message.Mouse()) {
 			return m, nil
 		}
