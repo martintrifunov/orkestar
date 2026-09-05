@@ -32,6 +32,10 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 1 && (args[0] == "--version" || args[0] == "version" || args[0] == "-v") {
+		fmt.Println("orkestar " + version)
+		return nil
+	}
 	paths, err := runtimepath.Resolve()
 	if err != nil {
 		return err
@@ -169,6 +173,7 @@ func serveDaemon(paths runtimepath.Paths) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	server := daemon.NewServer(paths.Socket)
+	server.SetVersion(version)
 	server.RegisterAdapter(claude.New(""))
 	server.RegisterAdapter(codex.New(""))
 	server.RegisterAdapter(opencode.New("", "", nil))
@@ -195,12 +200,16 @@ func printStatus(paths runtimepath.Paths) error {
 	defer cancel()
 
 	var result struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
+		Version string `json:"version"`
 	}
 	if err := ipc.NewClient(paths.Socket).Call(ctx, "system.ping", nil, &result); err != nil {
 		return fmt.Errorf("daemon is not available at %s: %w", paths.Socket, err)
 	}
-	fmt.Printf("daemon %s (%s)\n", result.Status, paths.Socket)
+	if result.Version == "" {
+		result.Version = "unversioned"
+	}
+	fmt.Printf("daemon %s, version %s; client %s (%s)\n", result.Status, result.Version, version, paths.Socket)
 	return nil
 }
 

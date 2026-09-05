@@ -43,6 +43,7 @@ type Snapshot struct {
 }
 
 type Server struct {
+	buildVersion string
 	hookTokens   map[string]string
 	pendingHooks map[string]*hookPermission
 	agentWorkers sync.WaitGroup
@@ -66,6 +67,9 @@ type Server struct {
 	stop            chan struct{}
 	stopOnce        sync.Once
 }
+
+// SetVersion sets the build identity advertised by ping. Call before Serve.
+func (s *Server) SetVersion(version string) { s.buildVersion = version }
 
 func NewServer(socketPath string) *Server {
 	return &Server{
@@ -211,7 +215,7 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 
 	switch request.Method {
 	case "system.ping":
-		result = map[string]string{"status": "ok"}
+		result = map[string]string{"status": "ok", "version": s.buildVersion}
 	case "system.snapshot":
 		result = s.snapshot()
 	case "system.reset":
