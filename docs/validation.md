@@ -64,6 +64,11 @@ go vet ./...
 go test -race ./...
 ```
 
+`.github/workflows/ci.yml` runs exactly these on `ubuntu-latest` and
+`macos-latest` for every push and pull request, after a `gofmt` check, and
+cross-builds linux/amd64, linux/arm64, darwin/amd64 and darwin/arm64 with cgo
+disabled. Nothing in the suite needs the network or an installed agent CLI.
+
 The full test suite, vet and race checks passed on macOS arm64. A Linux amd64
 cross-build also succeeded; Linux runtime tests were not run in this session.
 

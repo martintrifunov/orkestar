@@ -209,6 +209,11 @@ go vet ./...
 go test -race ./...
 ```
 
+Every push and pull request runs the same checks on macOS and Linux, plus a
+formatting check and a cross-build of each supported target. The suite needs no
+network and no installed agent CLIs: it starts real daemons on temporary sockets
+and drives real pseudoterminals with fixture commands.
+
 Two scripts check real, installed CLIs against an isolated temporary daemon,
 never your running one:
 

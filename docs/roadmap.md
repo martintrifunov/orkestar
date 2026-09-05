@@ -9,7 +9,7 @@ each vertical slice before broadening the surface.
 - [x] Agent instructions
 - [x] Go/TUI/daemon decision record
 - [x] Go module and local test/vet checks
-- [ ] CI automation
+- [x] CI automation
 
 ## M1: Persistent terminal vertical slice
 
@@ -113,7 +113,9 @@ Next priorities:
 1. Run `scripts/live-agents.py` for each authenticated CLI and record its JSON
    summary in the validation matrix. The harness exists; the runs spend real
    tokens and have not been executed. OpenCode needs `opencode auth login`.
-2. Add macOS/Linux CI, including race and real-PTY regression checks.
+2. Watch the first CI runs and tighten any test whose timing is too tight for a
+   shared runner. The workflow builds, vets, tests and race-tests on macOS and
+   Linux, and cross-builds every supported target.
 3. Profile full-frame rendering under sustained output and refine layout controls
    if needed (split ratios and drag resizing, pane titles, mouse selection).
    Arbitrary split trees shipped in ADR 0005.
