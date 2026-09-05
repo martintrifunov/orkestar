@@ -115,7 +115,9 @@ func (r *reviewPane) Render() string {
 	old, newLine := 0, 0
 	var rendered []string
 	for _, line := range lines {
-		line = ansi.Strip(line)
+		// Tabs would be expanded by the outer terminal past the pane width and
+		// wrap, pushing every later row of the screen down. Render them as spaces.
+		line = strings.ReplaceAll(ansi.Strip(line), "\t", "    ")
 		prefix := "           "
 		color := ""
 		switch {

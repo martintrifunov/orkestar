@@ -8,8 +8,10 @@ import (
 )
 
 // fitPane clips styled lines instead of wrapping them into adjacent panes.
+// Tabs are replaced because the outer terminal would expand them beyond the
+// measured width and wrap the row.
 func fitPane(content string, columns, rows int) string {
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(strings.ReplaceAll(content, "\t", " "), "\n")
 	if len(lines) > rows {
 		lines = lines[:max(0, rows)]
 	}

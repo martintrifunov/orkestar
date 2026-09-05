@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/martintrifunov/orkestar/internal/files"
 )
 
@@ -78,5 +79,22 @@ func TestMouseMotionWithoutHeldButtonDoesNotScrollEditor(t *testing.T) {
 	m = updated.(Model)
 	if e.dragging || e.top != 25 {
 		t.Fatal("stale drag moved viewport")
+	}
+}
+func TestPaneRenderingNeverEmitsTabs(t *testing.T) {
+	m := Model{width: 120, height: 30}
+	r := &reviewPane{files: []reviewFile{{path: "file"}}, diff: "@@ -1,2 +1,2 @@\n \t\treturn m, m.openDocument(p.root, r.files[r.selected].path)\n+\tnew\n"}
+	p := m.localPane("Diff", t.TempDir(), r)
+	p.review = r
+	if strings.Contains(r.Render(), "\t") {
+		t.Fatal("review rendered raw tabs; the terminal would wrap the line")
+	}
+	if got := fitPane("a\tb\n", 10, 2); strings.Contains(got, "\t") {
+		t.Fatalf("fitPane kept a tab: %q", got)
+	}
+	for _, line := range strings.Split(ansi.Strip(m.renderPanes()), "\n") {
+		if ansi.StringWidth(line) > m.width || strings.Contains(line, "\t") {
+			t.Fatalf("pane row exceeds terminal width: %q", line)
+		}
 	}
 }
