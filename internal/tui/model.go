@@ -174,10 +174,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.clipboardTarget = nil
 	case tea.MouseMotionMsg:
+		if m.embedded != nil && m.embedded.editor != nil && message.Mouse().Button != tea.MouseLeft {
+			m.embedded.editor.dragging = false
+		}
 		if m.forwardMouse("motion", message.Mouse()) {
 			return m, nil
 		}
-		if m.embedded != nil && m.embedded.editor != nil && m.embedded.editor.dragging {
+		if m.embedded != nil && m.embedded.editor != nil && m.embedded.editor.dragging && message.Mouse().Button == tea.MouseLeft {
 			for _, r := range m.paneRects() {
 				if r.terminal == m.embedded {
 					m.embedded.editor.click(message.Mouse().X-r.x-2, message.Mouse().Y-r.y-1, true)
@@ -202,6 +205,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forwardMouse("wheel", message.Mouse()) {
 			return m, nil
 		}
+		if message.Mouse().Button != tea.MouseWheelUp && message.Mouse().Button != tea.MouseWheelDown {
+			return m, nil
+		}
 		if !m.filePrompt && !m.settingsOpen && !m.viewingHistory && !m.viewingDiff {
 			mouse := message.Mouse()
 			step := 3
@@ -211,11 +217,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			for _, rect := range m.paneRects() {
 				if mouse.X >= rect.x && mouse.X < rect.x+rect.width && mouse.Y >= rect.y && mouse.Y < rect.y+rect.height {
 					if e := rect.terminal.editor; e != nil {
-						e.top = max(0, min(len(strings.Split(string(e.text), "\n"))-1, e.top+step))
+						e.scroll(step)
 						return m, nil
 					}
 					if r := rect.terminal.review; r != nil {
-						r.top = max(0, r.top+step)
+						r.scroll(step)
 						return m, nil
 					}
 				}

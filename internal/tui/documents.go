@@ -254,13 +254,13 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, m.openDocument(p.root, r.files[r.selected].path)
 			}
 		case "up", "k":
-			r.top = max(0, r.top-1)
+			r.scroll(-1)
 		case "down", "j":
-			r.top++
+			r.scroll(1)
 		case "pgup":
-			r.top = max(0, r.top-r.rows)
+			r.scroll(-r.rows)
 		case "pgdown":
-			r.top += r.rows
+			r.scroll(r.rows)
 		}
 		return m, nil
 	}

@@ -149,11 +149,11 @@ func (r *reviewPane) Render() string {
 		}
 		rendered = append(rendered, line)
 	}
-	r.top = min(r.top, max(0, len(rendered)-1))
-	return strings.Join(append(out, rendered[r.top:min(len(rendered), r.top+max(1, r.rows-len(out)))]...), "\n")
+	top := max(0, min(r.top, r.maxTop()))
+	return strings.Join(append(out, rendered[top:min(len(rendered), top+max(1, r.rows-len(out)))]...), "\n")
 }
 func (r *reviewPane) Cursor() (int, int, bool) { return 0, 0, false }
-func (r *reviewPane) Resize(w, h int)          { r.columns = w; r.rows = h }
+func (r *reviewPane) Resize(w, h int)          { r.columns = w; r.rows = h; r.top = min(r.top, r.maxTop()) }
 func (r *reviewPane) Input([]byte)             {}
 func (r *reviewPane) Paste(string)             {}
 func (r *reviewPane) Navigation(rune, int)     {}
@@ -180,3 +180,9 @@ func (b *reviewOutput) Write(p []byte) (int, error) {
 
 func (b *reviewOutput) Bytes() []byte { return b.buffer.Bytes() }
 func (b *reviewOutput) Len() int      { return b.buffer.Len() }
+
+func (r *reviewPane) maxTop() int {
+	header := 2 + min(3, max(0, len(r.files)-max(0, r.selected-1)))
+	return max(0, len(strings.Split(r.diff, "\n"))-max(1, r.rows-header))
+}
+func (r *reviewPane) scroll(delta int) { r.top = max(0, min(r.maxTop(), r.top+delta)) }

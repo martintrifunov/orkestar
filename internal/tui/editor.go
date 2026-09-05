@@ -156,8 +156,19 @@ func (e *textEditor) Cursor() (int, int, bool) {
 	display := strings.ReplaceAll(string(r[min(e.left, len(r)):col]), "\t", " ")
 	return 6 + ansi.StringWidth(display), 1 + row - e.top, true
 }
-func (e *textEditor) Resize(w, h int) { e.columns = w; e.rows = h; e.reveal() }
-func (e *textEditor) Input(b []byte)  { e.replace(string(b)) }
+func (e *textEditor) Resize(w, h int) {
+	e.columns = w
+	e.rows = h
+	e.top = min(e.top, e.maxTop())
+}
+func (e *textEditor) maxTop() int {
+	return max(0, len(strings.Split(string(e.text), "\n"))-max(1, e.rows-2))
+}
+func (e *textEditor) scroll(delta int) {
+	e.dragging = false
+	e.top = max(0, min(e.maxTop(), e.top+delta))
+}
+func (e *textEditor) Input(b []byte) { e.replace(string(b)) }
 func (e *textEditor) Paste(s string) {
 	if e.searching {
 		e.query += s
