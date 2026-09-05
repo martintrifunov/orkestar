@@ -68,18 +68,18 @@ func (m Model) renderEmbedded(width, height int) string {
 		title = "  " + errorStyle.Render(m.err.Error())
 	}
 	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
-	help := "a agent  n shell  tab section  enter open  q quit"
+	help := "a agent  n shell  enter open  X stop/remove  f files  tab section  q quit"
 	if m.embedded != nil && !m.sidebarFocused {
 		help = "Ctrl+b then: v/s split · o next · d diff · e edit · f files · [ scrollback · q close"
 	}
 	if m.embedded != nil && m.sidebarFocused {
-		help = "tab section  enter open  esc terminal  a agent  n shell  q quit"
+		help = "enter open  X stop/remove  a agent  n shell  f files  esc terminal  q quit"
 	}
 	if m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused) {
 		help = "c new  d diff  m done  x cancel  w worktree  t assign  tab section"
 	}
 	if m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused) {
-		help = "tab section  enter open  u resume  y/x allow/deny  a agent  q quit"
+		help = "enter open  u resume  i interrupt  X stop/remove  y/x allow/deny  tab section"
 	}
 	if m.pickingAgent {
 		help = "up/down select  enter launch  esc cancel"

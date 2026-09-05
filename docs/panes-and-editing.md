@@ -21,6 +21,23 @@ continues to type into that agent.
 | Close focused pane | Ctrl+b, q |
 | Explicitly discard a dirty standard editor | Ctrl+b, x |
 
+## Sessions and agents
+
+`X` in the Sessions or Agents section stops whatever is selected, or clears it
+from the list once it has finished. Stopping something that is still running
+asks for a second `X` first: the daemon holds that work independently of the UI,
+so ending it should be deliberate. Clearing a finished entry happens at once, and
+also closes any pane still attached to it.
+
+`i` interrupts an agent's current turn without ending the session, the same
+thing Ctrl+C does when typed into its terminal.
+
+A session that belongs to an agent cannot be removed on its own; remove the
+agent and its terminal goes too. Sessions restored after a daemon restart are
+marked interrupted and can be cleared the same way. The command line has the
+same operations: `orkestar terminal stop|remove` and
+`orkestar agent stop|remove|interrupt`.
+
 ## File viewer
 
 `Ctrl+b f` opens a file tree on the right edge of the window, the same width and

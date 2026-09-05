@@ -16,6 +16,12 @@ The standard suite does not require installed agents, authentication or engines.
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
   isolation, close/reattach one pane, and keep history overlays read-only.
+- Lifecycle tests stop a real daemon session from the sidebar and confirm the
+  first press only asks, the second stops it, a finished session is then cleared
+  along with its pane, and the daemon refuses to remove a running one with a
+  message that says to stop it first. Others confirm the confirmation is per
+  target and does not follow the selection, that interrupt applies only to a
+  running agent, and that clearing a finished agent needs no confirmation.
 - File viewer tests cover tree construction and ordering, that a closed viewer
   reads nothing and does not refresh on the tick, that opening takes exactly the
   sidebar's width from the panes and gives it back on close, that its box matches

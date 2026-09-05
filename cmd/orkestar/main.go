@@ -91,7 +91,7 @@ func runTUI(paths runtimepath.Paths) error {
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | orkestar terminal attach <terminal-id>")
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | stop <terminal-id> | remove <terminal-id>")
 	}
 
 	switch args[0] {
@@ -118,6 +118,18 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 			return err
 		}
 		fmt.Printf("%s\t%s\t%s\n", terminal.ID, terminal.State, terminal.Command[0])
+		return nil
+	case "stop", "remove":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: orkestar terminal %s <terminal-id>", args[0])
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var result any
+		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal."+args[0], map[string]any{"terminal_id": args[1]}, &result); err != nil {
+			return err
+		}
+		fmt.Printf("%s %s\n", args[1], args[0]+"ped")
 		return nil
 	case "attach":
 		if len(args) != 2 {
@@ -229,9 +241,14 @@ Usage:
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>
+  orkestar terminal stop <terminal-id>
+  orkestar terminal remove <terminal-id>
   orkestar agent list
   orkestar agent launch <workspace-id> <claude-code|codex|opencode>
   orkestar agent resume <agent-id>
+  orkestar agent stop <agent-id>
+  orkestar agent remove <agent-id>
+  orkestar agent interrupt <agent-id>
   orkestar task create <workspace-id> <title> [--depends-on id1,id2] [--no-review]
   orkestar task list [workspace-id]
   orkestar task status <task-id> <pending|in_progress|done|cancelled>

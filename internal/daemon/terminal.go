@@ -157,6 +157,29 @@ func (s *terminalSession) resize(columns, rows int) error {
 	s.publish()
 	return nil
 }
+
+// stop ends the process and waits briefly for the output pump to record the
+// final state, so the reply says what actually happened. A session restored
+// after a daemon restart has no process and is marked directly.
+func (s *terminalSession) stop(timeout time.Duration) Terminal {
+	live := s.process != nil
+	_ = s.close()
+	if !live {
+		s.mu.Lock()
+		if !finishedState(s.metadata.State) {
+			s.metadata.State = "stopped"
+			s.publish()
+		}
+		s.mu.Unlock()
+		return s.snapshot()
+	}
+	select {
+	case <-s.done:
+	case <-time.After(timeout):
+	}
+	return s.snapshot()
+}
+
 func (s *terminalSession) close() error {
 	s.closeOnce.Do(func() {
 		_ = s.screen.Close()

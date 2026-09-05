@@ -73,6 +73,9 @@ screenshot, build, or review report.
 - Persist metadata and reconstruct recoverable sessions after restart.
 - Enforce permissions and resource leases.
 - Host agent adapters and MCP routing.
+- Stop and forget individual sessions and agents on request. A running record
+  must be stopped before it can be removed, and removing an agent takes its
+  bridged terminal with it, so no record is left pointing at a missing one.
 - Shut down deliberately; client disconnect is not a shutdown signal.
 
 ## Client responsibilities

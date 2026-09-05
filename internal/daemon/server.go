@@ -241,6 +241,10 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.terminalHistory(request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
+	case "terminal.stop":
+		result, err = s.stopTerminal(request.Params)
+	case "terminal.remove":
+		result, err = s.removeTerminal(request.Params)
 	case "agent.launch":
 		result, err = s.launchAgent(context.Background(), request.Params)
 	case "agent.hook":
@@ -251,6 +255,10 @@ func (s *Server) handleRequest(request ipc.Request) ipc.Response {
 		result, err = s.promptAgent(context.Background(), request.Params)
 	case "agent.interrupt":
 		result, err = s.interruptAgent(context.Background(), request.Params)
+	case "agent.stop":
+		result, err = s.stopAgent(request.Params)
+	case "agent.remove":
+		result, err = s.removeAgent(request.Params)
 	case "permission.list":
 		result = map[string]any{"permissions": s.listPermissions()}
 	case "permission.resolve":

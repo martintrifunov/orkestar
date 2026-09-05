@@ -78,6 +78,7 @@ type Model struct {
 	filesTree                             *fileNode
 	filesExpanded                         map[string]bool
 	filesTop                              int
+	pendingStop                           string
 	filesErr                              error
 	filesLoadedAt                         time.Time
 
@@ -175,6 +176,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case highlightedMsg:
 		return m, message.editor.applyHighlight(message)
+	case lifecycleMsg:
+		return m, m.applyLifecycle(message)
 	case filesLoadedMsg:
 		m.applyFiles(message)
 	case reviewLoaded:
@@ -445,6 +448,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.opening = true
 			return m, m.openTerminal(id)
+		case "X", "shift+x":
+			return m, m.stopOrRemoveSelected()
+		case "i":
+			return m, m.interruptSelected()
 		case "f":
 			return m, m.toggleFiles()
 		case "c":

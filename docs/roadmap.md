@@ -28,6 +28,7 @@ each vertical slice before broadening the surface.
 - [x] Daemon-owned screen and query reply pump
 - [x] Multiple-client input/resize arbitration and canonical replay
 - [x] Bounded scrollback with TUI history
+- [x] Stop, remove and interrupt sessions and agents from the UI and CLI
 - [x] SQLite metadata and explicit daemon-restart recovery
 - [x] Nested split-tree layouts with a configurable pane limit and mouse focus
 - [x] Real-PTY TUI regression tests for Claude, Codex and OpenCode fixtures

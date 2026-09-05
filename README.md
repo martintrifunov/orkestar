@@ -70,7 +70,14 @@ permission requests. The rest of the window is a tree of panes.
 | `r` | Refresh |
 | `u` | Resume an inactive agent |
 | `y` / `x` | Allow or deny a pending permission request |
+| `i` | Interrupt an agent's current turn |
+| `X` | Stop a running session or agent, or clear a finished one |
 | `q` | Quit the UI |
+
+Stopping something that is still running asks for a second `X`, because it ends
+work the daemon is holding for you. Clearing an entry that has already finished
+is immediate. A session that belongs to an agent is cleared by removing the
+agent, so neither is left pointing at the other.
 
 With **Tasks** selected:
 
@@ -182,7 +189,9 @@ orkestar daemon serve | stop                      run or stop the daemon
 orkestar workspace create [directory]
 orkestar terminal start <workspace-id> -- <cmd>   run a command in a PTY
 orkestar terminal attach <terminal-id>            full-screen attach
+orkestar terminal stop | remove <terminal-id>
 orkestar agent list | launch <workspace-id> <adapter> | resume <agent-id>
+orkestar agent stop | remove | interrupt <agent-id>
 orkestar task create | list | status | assign | worktree | diff
 orkestar mcp serve                                orchestration MCP server
 ```
