@@ -1,91 +1,166 @@
 # Orkestar
 
-Orkestar is a local-first runtime and terminal UI for coordinating coding
-agents and the tools they operate.
+**A local-first runtime and terminal UI for coordinating coding agents.**
 
-The background daemon owns interactive sessions so work continues when the UI
-disconnects. The TUI provides one place to see agents, tasks, approvals, logs,
-and development-tool integrations. Claude Code, Codex and OpenCode are supported agent
-targets; game-engine workflows will integrate through MCP.
+Orkestar runs a background daemon that owns your agent sessions, and a terminal
+UI that attaches to it. Because the daemon owns the processes, closing the UI,
+losing a connection, or rebooting your editor does not stop the work. Reopen the
+UI and reattach exactly where you left off.
 
-## Status
+It targets Claude Code, Codex and OpenCode today, with game-engine workflows
+planned through MCP.
 
-Orkestar has a Go daemon/TUI with nested split panes (16 by default) beside a
-persistent left sidebar. Processes and terminal state survive closing the UI.
-SQLite preserves workspaces, tasks, artifacts and session metadata across daemon
-restart; native agent resume is explicit. Claude Code, Codex and OpenCode support
-interactive launch, lifecycle hooks/plugins and native permission replies.
+## Highlights
 
-See:
+- **Work survives the UI.** A daemon owns every PTY, terminal screen and agent
+  process. Clients are disposable.
+- **Nested split panes.** Tile shells, agents, diffs and editors side by side or
+  stacked, up to 16 panes, with mouse focus and per-pane input isolation.
+- **Built-in review and editing.** A PR-style diff pane and a text editor with
+  syntax highlighting for roughly 300 languages, or hand off to Vim, Nano or
+  your own editor.
+- **Structured agent integration.** Lifecycle events, native permission
+  prompts answered from the UI, and explicit session resume, using each CLI's
+  own hook or plugin mechanism without touching your global settings.
+- **Durable state.** SQLite keeps workspaces, tasks, artifacts and session
+  metadata across daemon restarts.
+- **One static binary.** Pure Go, no cgo, no external services.
 
-- [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
-- [Architecture decisions](docs/decisions/)
-- [Agent guide](AGENTS.md)
+## Requirements
 
-## Product principles
+- Go 1.27 or newer to build
+- macOS or Linux
+- A terminal at least 50 × 16 cells
+- Optionally the agent CLIs you want to drive: `claude`, `codex`, `opencode`
 
-- Local-first and terminal-native
-- Persistent work independent of any client UI
-- Structured agent integrations with universal PTY fallback
-- Tasks and attention states above raw process status
-- Safe, serialized access to mutable game-engine editors
-- One executable where practical
-
-## Development
-
-Build and run from a project directory:
+## Install
 
 ```bash
+git clone https://github.com/martintrifunov/orkestar
+cd orkestar
 go build -o ./orkestar ./cmd/orkestar
+```
+
+## Quick start
+
+Run it from the project you want to work in:
+
+```bash
 ./orkestar
 ```
 
-- `a`: choose and launch an installed agent; `n`: launch a shell.
-- `Tab`: switch sidebar section; arrows select; `Enter`: open a session/agent.
-- In a pane, `Ctrl+b`, then `Tab`: focus the sidebar; `Esc`: return to the pane.
-- `Ctrl+b`, then `v`: open a shell beside the focused pane; `s`: open one below
-  it. Every split creates a new pane; splits nest. `o` (or `F6`): next pane.
-  Each action needs its own prefix.
-- `Ctrl+b`, then `d`: review changes; `e`: edit a file; comma: editor settings.
-  Choose standard keyboard/mouse editing, native Vim, native Nano, or a custom command.
-  The standard editor highlights around 300 languages, including YAML, TOML,
-  JSON and shell, in Orkestar's own palette. Press `h` in settings to toggle it.
-- `Ctrl+b`, then `a`: another agent; `n`: another shell.
-- Click a pane to focus it. Up to 16 panes are open at once (`max_panes` in
-  `tui.json`); beyond that, new panes are refused until one is closed. Nothing
-  is ever replaced silently.
-- `Ctrl+b`, then `[`: scrollback; wheel or Page Up/Down scrolls; `Esc` returns.
-- `Ctrl+b`, then `t`: claim input if another client's controller has disconnected.
-- `Ctrl+b`, then `q`: close the pane without stopping its process.
-- `q` in the sidebar: quit the UI. Reopen and select the session to reattach.
-- In Tasks, `d` opens the diff and `m` marks done; in Agents, `y`/`x` resolves
-  an available native permission request. `u` explicitly resumes an inactive agent.
+The UI starts a daemon if one is not already running. Press `a` to launch an
+agent, or `n` for a shell. Press `q` to leave; the agent keeps running. Start
+Orkestar again and press `Enter` on the session to reattach.
 
-The UI needs at least 50 × 16 terminal cells. Narrow windows show the focused
-pane; wider windows show the split layout. Direct full-screen attachment is also available with
-`orkestar terminal attach <terminal-id>`.
+## The interface
 
-`scripts/smoke-agents.py` checks installed CLIs start and reattach without
-sending a prompt. `scripts/live-agents.py` runs authenticated turns, permission
-allow/deny, interrupt and resume against a throwaway daemon; it spends real
-tokens, so run it deliberately.
+A persistent sidebar lists workspaces, sessions, tasks, agents and pending
+permission requests. The rest of the window is a tree of panes.
 
-Codex may ask you to review Orkestar's five command hooks at first launch. Hooks
-are configured for that invocation and do not bypass native trust or approvals.
-If hooks are disabled or untrusted, the PTY still works but structured lifecycle
-and native resume identity may be unavailable.
+### Sidebar
 
-`./orkestar agent list`, `agent launch <workspace-id> <adapter>` and
-`agent resume <agent-id>` also expose agent management from the CLI.
+| Key | Action |
+| --- | --- |
+| `a` | Launch an agent |
+| `n` | Open a shell |
+| `Tab` | Next section |
+| `↑` `↓` | Move the selection |
+| `Enter` | Open the selected session or agent |
+| `r` | Refresh |
+| `u` | Resume an inactive agent |
+| `y` / `x` | Allow or deny a pending permission request |
+| `d` / `m` | Task diff / mark a task done |
+| `q` | Quit the UI |
 
-After rebuilding, an already running daemon continues using its old code. Stop
-it with `./orkestar daemon stop` when its running work can end, then reopen
-`./orkestar`. The previous in-memory daemon cannot migrate its live sessions into
-the new store. From this version onward metadata persists; screens and scrollback
-remain in memory and do not survive daemon restart.
+### Panes
 
-Standard checks:
+Press and release `Ctrl+b`, then the action key. Each action needs its own
+prefix, so ordinary letters still reach the agent you are typing to.
+
+| Key | Action |
+| --- | --- |
+| `v` | Split: new shell beside the focused pane |
+| `s` | Split: new shell below the focused pane |
+| `o` or `F6` | Focus the next pane |
+| `n` / `a` | New shell / new agent |
+| `d` | Review changes |
+| `e` | Open or create a file |
+| `,` | Editor settings |
+| `[` | Scrollback (2,000 lines) |
+| `t` | Claim input after another client disconnected |
+| `Tab` | Focus the sidebar |
+| `q` | Close the pane, leaving its process running |
+| `x` | Discard an editor with unsaved changes |
+
+Splits nest: `Ctrl+b s` then `Ctrl+b v` gives three panes, not a rearranged
+two. Click any pane to focus it. When the window is too small for every split,
+the focused pane fills the space and `F6` still cycles the hidden ones.
+
+### Review and editing
+
+`Ctrl+b d` opens a PR-style review of the workspace or task worktree, with
+changed-file selection, colored hunks and old and new line numbers. `Ctrl+b e`
+finds or creates a file.
+
+The built-in editor handles UTF-8 files up to 1 MiB with mouse selection,
+undo and redo, search, clipboard access and conflict-checked saves that never
+overwrite a change an agent made underneath you. It highlights around 300
+languages in Orkestar's own palette, lexing in the background so typing never
+waits. Vim, Nano and custom editor commands run as real daemon-owned terminals
+instead.
+
+See [panes and editing](docs/panes-and-editing.md) for the full reference.
+
+## Configuration
+
+Editor settings live in `orkestar/tui.json` inside your OS configuration
+directory, or at `ORKESTAR_TUI_CONFIG`. The settings panel (`Ctrl+b`, comma)
+shows the exact path.
+
+```json
+{
+  "editor": "custom",
+  "command": ["nvim", "-c", "set mouse=a"],
+  "max_panes": 16,
+  "syntax": true
+}
+```
+
+`ORKESTAR_RUNTIME_DIR` relocates the daemon socket and database.
+
+## Agent integrations
+
+Claude Code, Codex and OpenCode launch interactively through a PTY. OpenCode
+additionally supports a managed HTTP mode used by the reviewer workflow.
+
+Lifecycle signals and permission prompts arrive through invocation-local hooks
+(Claude, Codex) or a plugin (OpenCode). Orkestar never edits your global agent
+configuration and never bypasses a native trust or approval decision. Codex may
+ask you to review Orkestar's five command hooks the first time you launch it. If
+hooks are declined the PTY still works, but structured lifecycle events and
+resume identity may be unavailable.
+
+## Command line
+
+```
+orkestar                                          start the UI
+orkestar status                                   show daemon state
+orkestar daemon serve | stop                      run or stop the daemon
+orkestar workspace create [directory]
+orkestar terminal start <workspace-id> -- <cmd>   run a command in a PTY
+orkestar terminal attach <terminal-id>            full-screen attach
+orkestar agent list | launch <workspace-id> <adapter> | resume <agent-id>
+orkestar task create | list | status | assign | worktree | diff
+orkestar mcp serve                                orchestration MCP server
+```
+
+Rebuilding the binary does not upgrade a daemon that is already running. Stop it
+with `orkestar daemon stop` once its work can end, then start Orkestar again.
+Metadata persists across restarts; terminal screens and scrollback are held in
+memory and do not.
+
+## Development
 
 ```bash
 go test ./...
@@ -93,11 +168,39 @@ go vet ./...
 go test -race ./...
 ```
 
-Installed-agent smoke checks: `python3 scripts/smoke-agents.py` (isolated daemon,
-no submitted model prompts). See [validation](docs/validation.md) for coverage.
+Two scripts check real, installed CLIs against an isolated temporary daemon,
+never your running one:
 
-The repository may contain local commits during development. Nothing is pushed
-to `origin` without explicit user permission.
+- `python3 scripts/smoke-agents.py` starts and reattaches each installed CLI
+  without submitting a prompt.
+- `python3 scripts/live-agents.py` drives an authenticated CLI through a real
+  turn, permission allow and deny, interrupt and resume. It spends tokens on
+  the logged-in account, so run it deliberately.
 
-See [panes and editing](docs/panes-and-editing.md) for review, save, selection,
-mouse and editor configuration shortcuts.
+[docs/validation.md](docs/validation.md) records what has actually been
+exercised, and distinguishes fixture coverage from installed-CLI coverage.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Panes and editing](docs/panes-and-editing.md)
+- [Validation](docs/validation.md)
+- [Roadmap](docs/roadmap.md)
+- [Architecture decisions](docs/decisions/)
+- [Agent guide](AGENTS.md) for contributors and coding agents
+
+## Status
+
+The daemon, IPC, PTY ownership, persistence, panes, review, editing and the
+three agent adapters are implemented and tested. Authenticated live model turns
+across every installed CLI, CI, and the MCP client registry are the next
+milestones. The [roadmap](docs/roadmap.md) tracks what is done and what is not.
+
+## Design principles
+
+- Local-first and terminal-native
+- Persistent work independent of any client UI
+- Structured agent integrations with a universal PTY fallback
+- Tasks and attention states above raw process status
+- Safe, serialized access to mutable game-engine editors
+- One executable where practical
