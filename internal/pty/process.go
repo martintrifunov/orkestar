@@ -12,6 +12,13 @@ import (
 	"github.com/charmbracelet/x/xpty"
 )
 
+type terminalIO interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	Close() error
+	SetWriteDeadline(time.Time) error
+}
+
 type StartOptions struct {
 	Command   string
 	Arguments []string
@@ -22,7 +29,7 @@ type StartOptions struct {
 }
 
 type Process struct {
-	io        *os.File
+	io        terminalIO
 	writeMu   sync.Mutex
 	pty       xpty.Pty
 	cmd       *exec.Cmd
@@ -149,6 +156,7 @@ func (p *Process) Close() error {
 
 func (p *Process) wait(ctx context.Context) {
 	err := xpty.WaitProcess(ctx, p.cmd)
+	finishPTY(p.pty)
 	p.waitMu.Lock()
 	if p.stopping.Load() {
 		err = nil

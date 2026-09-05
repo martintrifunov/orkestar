@@ -21,7 +21,7 @@ func stopProcessGroup(process *os.Process, force bool) {
 	}
 	_ = syscall.Kill(-process.Pid, signal)
 }
-func prepareIO(p xpty.Pty) (*os.File, error) {
+func prepareIO(p xpty.Pty) (terminalIO, error) {
 	// Close the parent's slave descriptor. Otherwise an exited child never
 	// produces EOF on the master, and closing the master first loses final output.
 	u := p.(*xpty.UnixPty)
@@ -38,3 +38,5 @@ func prepareIO(p xpty.Pty) (*os.File, error) {
 	// A nonblocking descriptor registered with Go's poller supports write deadlines.
 	return os.NewFile(uintptr(fd), "orkestar-pty"), nil
 }
+
+func finishPTY(xpty.Pty) {}
