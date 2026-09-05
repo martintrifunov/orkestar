@@ -69,7 +69,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
 	help := "a agent  n shell  tab section  enter open  q quit"
 	if m.embedded != nil && !m.sidebarFocused {
-		help = "Ctrl+b then: v/s split · o next · d diff · e edit · , settings · q close"
+		help = "Ctrl+b then: v/s split · o next · d diff · e edit · [ scrollback · , settings · q close"
 	}
 	if m.embedded != nil && m.sidebarFocused {
 		help = "tab section  enter open  esc terminal  a agent  n shell  q quit"
@@ -90,7 +90,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		help = "Enlarge window for splits · F6 cycles hidden panes"
 	}
 	if m.prefix {
-		help = "Prefix: v/s split · o next · d diff · e edit · , settings · q close"
+		help = "Prefix: v/s split · o next · d diff · e edit · [ scrollback · , settings · q close"
 	}
 	if m.filePrompt || m.settingsOpen {
 		help = "Enter confirm · Esc cancel"

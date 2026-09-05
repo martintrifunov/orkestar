@@ -15,9 +15,22 @@ continues to type into that agent.
 | Open workspace/task worktree review | Ctrl+b, d |
 | Find/open/create a file | Ctrl+b, e |
 | Editor settings, including syntax highlighting | Ctrl+b, comma |
+| Scrollback for the focused terminal | Ctrl+b, [ |
 | Focus sidebar | Ctrl+b, Tab |
 | Close focused pane | Ctrl+b, q |
 | Explicitly discard a dirty standard editor | Ctrl+b, x |
+
+## Scrolling and scrollback
+
+The mouse wheel scrolls whichever review or editor pane is under the pointer,
+and scrolls the scrollback view once it is open. It does nothing over a terminal
+pane, unless that program has asked for mouse reporting, in which case the
+program receives the event itself.
+
+Scrollback is `Ctrl+b [`. It replaces the content area with the focused
+terminal's last 2,000 lines, so it is a deliberate action rather than something
+a stray wheel movement can trigger. Page Up, Page Down, the arrow keys and the
+wheel move through it, and `Esc` returns to the panes.
 
 ## Splits
 

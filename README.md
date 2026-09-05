@@ -93,6 +93,9 @@ prefix, so ordinary letters still reach the agent you are typing to.
 | `q` | Close the pane, leaving its process running |
 | `x` | Discard an editor with unsaved changes |
 
+The mouse wheel scrolls the review and editor panes, and the scrollback view
+once it is open. It never opens scrollback by itself.
+
 Splits nest: `Ctrl+b s` then `Ctrl+b v` gives three panes, not a rearranged
 two. Click any pane to focus it. When the window is too small for every split,
 the focused pane fills the space and `F6` still cycles the hidden ones.

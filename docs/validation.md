@@ -16,6 +16,9 @@ The standard suite does not require installed agents, authentication or engines.
   input, hand control to a viewer after disconnect and retain the latest screen.
 - Split tests focus three live panes by mouse, type/paste into each, verify input
   isolation, close/reattach one pane, and keep history overlays read-only.
+- Scrollback tests confirm the wheel never opens the overlay over a terminal
+  pane or the sidebar, that `Ctrl+b [` does open it against a real daemon
+  terminal, and that the wheel then scrolls it within bounds until `Esc`.
 - Split-tree tests cover mixed orientation splits through real daemon shells
   (`s` then `v` gives three distinct panes with the first unchanged), nine panes
   tiling the content area exactly with no overlap after resize, collapse onto the

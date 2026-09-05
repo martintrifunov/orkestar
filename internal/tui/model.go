@@ -209,41 +209,39 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyOffset = 0
 		}
 	case tea.MouseWheelMsg:
+		// A terminal that negotiated mouse reporting receives the event itself.
 		if m.forwardMouse("wheel", message.Mouse()) {
 			return m, nil
 		}
-		if message.Mouse().Button != tea.MouseWheelUp && message.Mouse().Button != tea.MouseWheelDown {
+		mouse := message.Mouse()
+		if mouse.Button != tea.MouseWheelUp && mouse.Button != tea.MouseWheelDown {
 			return m, nil
 		}
-		if !m.filePrompt && !m.settingsOpen && !m.viewingHistory && !m.viewingDiff {
-			mouse := message.Mouse()
-			step := 3
-			if mouse.Button == tea.MouseWheelUp {
-				step = -3
-			}
-			for _, rect := range m.paneRects() {
-				if mouse.X >= rect.x && mouse.X < rect.x+rect.width && mouse.Y >= rect.y && mouse.Y < rect.y+rect.height {
-					if e := rect.terminal.editor; e != nil {
-						e.scroll(step)
-						return m, nil
-					}
-					if r := rect.terminal.review; r != nil {
-						r.scroll(step)
-						return m, nil
-					}
+		step := 3
+		if mouse.Button == tea.MouseWheelUp {
+			step = -3
+		}
+		if m.viewingHistory {
+			m.historyOffset = max(0, min(max(0, len(m.history)-1), m.historyOffset-step))
+			return m, nil
+		}
+		if m.filePrompt || m.settingsOpen || m.viewingDiff || m.pickingAgent {
+			return m, nil
+		}
+		// The wheel scrolls a document pane under the pointer and does nothing
+		// over a terminal pane. Scrollback replaces the whole view, so it is an
+		// explicit Ctrl+b [ action rather than something a stray wheel movement
+		// can trigger.
+		for _, rect := range m.paneRects() {
+			if mouse.X >= rect.x && mouse.X < rect.x+rect.width && mouse.Y >= rect.y && mouse.Y < rect.y+rect.height {
+				if e := rect.terminal.editor; e != nil {
+					e.scroll(step)
 				}
+				if r := rect.terminal.review; r != nil {
+					r.scroll(step)
+				}
+				return m, nil
 			}
-		}
-		if m.viewingDiff || m.pickingAgent || message.Mouse().X < embeddedSidebarWidth(m.width) {
-			return m, nil
-		}
-		if !m.viewingHistory {
-			return m, m.loadHistory()
-		}
-		if message.Mouse().Button == tea.MouseWheelUp {
-			m.historyOffset = min(max(0, len(m.history)-1), m.historyOffset+3)
-		} else {
-			m.historyOffset = max(0, m.historyOffset-3)
 		}
 	case tea.MouseClickMsg:
 		return m.mouseClick(message)

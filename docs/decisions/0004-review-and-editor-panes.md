@@ -40,8 +40,12 @@ file panes. Native modes invoke the real editors for their complete keymaps;
 custom terminal editor commands are an argv array with the file path appended.
 Native mouse input travels over additive IPC v1 `mouse` commands. The daemon
 encodes reports according to the child terminal's negotiated mouse mode and
-accepts them only from the controller. Frame metadata advertises mouse mode;
-other terminals retain Orkestar scrollback-wheel behavior.
+accepts them only from the controller. Frame metadata advertises mouse mode. Over a
+terminal that has not negotiated mouse reporting the wheel originally opened
+Orkestar's scrollback overlay; that was removed, because a movement as easy to
+make by accident should not replace the whole content area. Scrollback is now
+reached only with `Ctrl+b [`, and the wheel scrolls document panes and the open
+overlay.
 
 ## Limits
 
