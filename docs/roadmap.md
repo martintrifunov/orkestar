@@ -93,7 +93,7 @@ promise of walking away true; the sixth is daily-use polish.
 - [x] **Workflow templates.** Declare a set of tasks, their dependencies and
       the agents that work them, then apply it. Worth little without the wait
       primitive and worth a lot with it, which is why it sits below.
-- [ ] **Remote daemon attachment over SSH.** The hard part is done: the daemon
+- [x] **Remote daemon attachment over SSH.** The hard part is done: the daemon
       has owned every process since M1 and clients are already disposable, so
       this is a transport problem rather than an architectural one. The largest
       piece here, and nothing else depends on it.
@@ -128,8 +128,19 @@ promise of walking away true; the sixth is daily-use polish.
 
 ## M5 progress — 2026-09-06
 
-Five of six shipped the day M5 was written. Remote attachment is the one left,
-and it is the largest; nothing else depended on it, which is why it sits last.
+All six shipped the day M5 was written.
+
+Remote attachment is ssh and only ssh: the daemon never listens on a network
+and Orkestar has no credential of its own. A TCP listener with TLS and tokens
+was considered and rejected — it means designing an authentication model in
+exchange for what ssh already does. What is untested is ssh itself, since the
+machine this was built on runs no sshd; the proxy half is covered end to end.
+
+One thing left open deliberately: a screen frame is the whole screen rather
+than a diff, about 12KB for a 120x40 pane. Frames are now offered at most
+sixty times a second per subscriber, which is enough for a local socket and
+for a good link. A slow one would want frame diffing, which is a much larger
+change and not worth making before someone has felt the need.
 
 Three bugs surfaced from building the rest, all found by using the thing rather
 than by a test:
