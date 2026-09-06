@@ -91,8 +91,15 @@ func (s *Session) Process() *pty.Process {
 
 // Prompt sends text to the agent as if a user typed it, followed by a
 // newline to submit it.
+// submit is the byte an Enter key press actually sends. Agent CLIs draw their
+// own interface and read the terminal raw, where carriage return is Enter and
+// a line feed is just a character: sent one, Claude Code leaves the text
+// sitting unsubmitted in its input box. The TUI's own key encoding has always
+// sent carriage return; this is what agent.prompt should have been sending.
+const submit = "\r"
+
 func (s *Session) Prompt(ctx context.Context, text string) error {
-	if _, err := s.process.Write([]byte(text + "\n")); err != nil {
+	if _, err := s.process.Write([]byte(text + submit)); err != nil {
 		return fmt.Errorf("pty session: send prompt: %w", err)
 	}
 	return nil

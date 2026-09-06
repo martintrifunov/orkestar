@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,4 +213,66 @@ func TestTypedControlCCountsAsAnInterrupt(t *testing.T) {
 	}
 
 	waitForState(t, session, agent.StateStopped)
+}
+
+// A prompt has to end with the byte Enter sends. Agent CLIs read the terminal
+// raw and act on carriage return; a line feed lands as an ordinary character
+// and the text sits in the input box, submitted by nobody. Verified against
+// Claude Code, which never submits a line-feed-terminated prompt however long
+// it is given.
+//
+// The fixture puts the terminal in raw mode so the line discipline stops
+// translating CR to NL on the way in, which is what hides this everywhere else.
+func TestPromptEndsWithCarriageReturn(t *testing.T) {
+	t.Parallel()
+
+	executable := filepath.Join(t.TempDir(), "fixture")
+	// The fixture announces raw mode rather than the test guessing at it: a
+	// prompt written while the line discipline is still translating CR to NL
+	// would report the very failure this is checking for.
+	script := "#!/bin/sh\nstty raw -echo 2>/dev/null\nprintf READY\nhead -c 3 | od -An -tx1\n"
+	if err := os.WriteFile(executable, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	session, err := ptysession.Launch("fixture", executable, agent.LaunchOptions{
+		Directory: t.TempDir(), Columns: 80, Rows: 24,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer session.Close()
+
+	read := func(until string, what string) string {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		var seen string
+		for time.Now().Before(deadline) && !strings.Contains(seen, until) {
+			buffer := make([]byte, 256)
+			n, readErr := session.Process().Read(buffer)
+			seen += string(buffer[:n])
+			if readErr != nil {
+				break
+			}
+		}
+		if !strings.Contains(seen, until) {
+			t.Fatalf("%s: never saw %q, got %q", what, until, seen)
+		}
+		return seen
+	}
+	read("READY", "waiting for raw mode")
+
+	if err := session.Prompt(t.Context(), "hi"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	seen := read("\n", "waiting for the bytes the process read")
+	// 68 69 are "hi"; 0d is the carriage return that submits it.
+	if !strings.Contains(seen, "68") || !strings.Contains(seen, "69") {
+		t.Fatalf("the prompt text never arrived: %q", seen)
+	}
+	if strings.Contains(seen, "0a") {
+		t.Fatalf("the prompt ended with a line feed: %q", seen)
+	}
+	if !strings.Contains(seen, "0d") {
+		t.Fatalf("the prompt did not end with a carriage return: %q", seen)
+	}
 }
