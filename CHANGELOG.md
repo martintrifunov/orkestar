@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Install on macOS and Linux with a curl one-liner, or through mise's `ubi`
+  backend. The installer verifies the release checksum before unpacking, and
+  says what to add to `PATH` rather than editing a shell profile.
 - Rebind any key with a `keys` map in `tui.json`, including the prefix.
   Dispatch and the help line both read from it, so a rebinding cannot leave the
   help describing a keyboard that no longer exists. Unknown actions and keys

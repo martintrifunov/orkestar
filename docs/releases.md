@@ -4,6 +4,12 @@ The current version is **v0.3.0**, following v0.2.0 of 2026-09-06. Source builds
 report the source default; release packaging stamps the tag version with
 `-X main.version`. Update the source default and changelog for each release.
 
+Three things install from the published archives and so depend on their names
+staying `orkestar-<os>-<arch>.<tar.gz|zip>` beside a `SHA256SUMS`: `install.sh`,
+`install.ps1`, and mise through its `ubi` backend, which picks an asset by
+matching the platform in that name. Renaming an archive breaks all three
+silently, since each simply fails to find its file.
+
 Before publishing, run the full macOS/Linux CI and native Windows job. Windows
 checks include ConPTY final output, bounded writes, PowerShell session reattachment
 and reset over named pipes. Installed agent model-turn/hook validation remains in

@@ -46,10 +46,27 @@ No account, no server, no browser. One static binary.
 
 ## Installation
 
-On macOS or Linux, with Homebrew:
+On macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/martintrifunov/orkestar/main/install.sh | sh
+```
+
+The installer verifies the release checksum before unpacking anything, installs
+to `/usr/local/bin` when that is writable and `~/.local/bin` otherwise, and
+tells you if that directory is not on your `PATH` rather than editing your
+shell profile. Set `ORKESTAR_INSTALL_DIR` to choose somewhere else.
+
+With Homebrew:
 
 ```bash
 brew install martintrifunov/tap/orkestar
+```
+
+With [mise](https://mise.jdx.dev), which reads the same GitHub releases:
+
+```bash
+mise use -g ubi:martintrifunov/orkestar
 ```
 
 Install the latest x64 or ARM64 release from PowerShell, on Windows 10 1809+ or

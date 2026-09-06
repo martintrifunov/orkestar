@@ -116,7 +116,7 @@ Ordered by what stands between a new user and a working session.
       negotiable: a tool that cannot be rebound is a tool they have to think
       about. Themes come after, and only because the palette is already
       consistent enough not to be the problem.
-- [ ] **`install.sh` and mise distribution.** A Homebrew tap and a PowerShell
+- [x] **`install.sh` and mise distribution.** A Homebrew tap and a PowerShell
       script leave out the way most people install a terminal tool, which is a
       curl one-liner. Cheap, and it removes the first step where someone gives
       up.
