@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.1
+
+Fixes for eight things a review of 0.4.0 found, three of which meant a headline
+feature did not work at all.
+
+- Start a named session's daemon in that session's directory. `--session` was
+  passed to the parent and not the child, so auto-starting one bound the
+  default socket and opened the default database while the caller waited for a
+  socket that never appeared.
+- Keep an ssh session alive past the call that opened it. It was tied to the
+  dial's context, which every caller cancels on return, so a remote pane died
+  before its first frame and no connection was ever reused.
+- Give a remote interface a directory to work in, taken from an existing
+  workspace or given as `orkestar --remote <host> <directory>`. Without one,
+  creating a shell, an agent or a task failed on an empty path.
+- Wire the right-click menu's "Take control" to something. It was offered and
+  did nothing.
+- Send the bound prefix through to a pane when it is pressed twice, rather than
+  always `Ctrl+B`. Rebinding the prefix left no way to reach a nested tmux.
+- Honour a rebound `edit-file` from the sidebar, which still looked for `e`.
+- Report a template whose tasks were created but whose agent could not start,
+  in the result rather than as an error that discarded it.
+- Treat `orkestar task wait --timeout=0` as the default wait rather than a
+  15-second client deadline against a 5-minute server one.
+
 ## 0.4.0
 
 Two milestones: agents can now coordinate rather than only run, and somebody

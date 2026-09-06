@@ -1,6 +1,6 @@
 # Releases
 
-The current version is **v0.4.0**, following v0.3.0 of 2026-09-06. Source builds
+The current version is **v0.4.1**, following v0.4.0 of 2026-09-06. Source builds
 report the source default; release packaging stamps the tag version with
 `-X main.version`. Update the source default and changelog for each release.
 
@@ -15,7 +15,7 @@ checks include ConPTY final output, bounded writes, PowerShell session reattachm
 and reset over named pipes. Installed agent model-turn/hook validation remains in
 [validation.md](validation.md); fixtures do not establish that coverage.
 
-Commit and push the reviewed project changes, then tag that commit (`v0.4.0` for
+Commit and push the reviewed project changes, then tag that commit (`v0.4.1` for
 the current release) and
 publish a GitHub release. `.github/workflows/release.yml` checks out that exact tag,
 tests it, builds six archives, and uploads them with SHA256SUMS. The workflow can

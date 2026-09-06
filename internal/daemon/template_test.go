@@ -102,6 +102,45 @@ func TestApplyTemplateStartsOnlyWhatCanBegin(t *testing.T) {
 	}
 }
 
+// When a launch fails after the tasks exist, the caller has to be told what
+// now exists. An error would discard the result and skip the persist, leaving
+// real tasks and worktrees that nobody was told about.
+func TestAFailedLaunchIsReportedInTheResult(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTaskAgentFixture(t)
+	// The adapter is registered, so the pre-flight check passes, and the
+	// launch itself fails because the fixture refuses a second session.
+	fixture.writeTemplate(t, "two", `{
+	  "name": "two",
+	  "tasks": [
+	    {"key": "a", "title": "A", "auto_review": false, "agent": "fake-agent"},
+	    {"key": "b", "title": "B", "auto_review": false, "agent": "fake-agent"}
+	  ]
+	}`)
+	fixture.adapter.failAfter(1)
+
+	var applied daemon.AppliedTemplate
+	if err := fixture.call(t, "template.apply", map[string]any{
+		"workspace_id": fixture.workspace.ID, "name": "two", "start": true,
+	}, &applied); err != nil {
+		t.Fatalf("a failed launch was reported as an error, discarding the result: %v", err)
+	}
+	if applied.Failed == "" {
+		t.Fatal("the failure was not reported")
+	}
+	if len(applied.Tasks) != 2 {
+		t.Fatalf("the created tasks were not reported: %+v", applied.Tasks)
+	}
+
+	// And they were persisted, rather than waiting for some later mutation.
+	var snapshot daemon.Snapshot
+	fixture.mustCall(t, "system.snapshot", nil, &snapshot)
+	if len(snapshot.Tasks) != 2 {
+		t.Fatalf("the daemon holds %d tasks", len(snapshot.Tasks))
+	}
+}
+
 // A template that names an adapter nobody registered must fail before it
 // creates anything, or it leaves half a pipeline behind.
 func TestApplyTemplateChecksAdaptersBeforeCreatingTasks(t *testing.T) {

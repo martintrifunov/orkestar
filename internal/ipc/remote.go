@@ -80,8 +80,15 @@ func sshArguments(host, executable string) []string {
 }
 
 // dialSSH starts one ssh session and presents its stdio as a connection.
-func dialSSH(ctx context.Context, host, executable string) (net.Conn, error) {
-	command := exec.CommandContext(ctx, "ssh", sshArguments(host, executable)...)
+//
+// Deliberately not exec.CommandContext. The context here belongs to the dial,
+// and every caller cancels it on return — the terminal stream's five-second
+// handshake context, a snapshot call's two-second one. Tying the session to it
+// kills ssh the moment the call that opened it returns, which would leave a
+// remote pane dead before its first frame and make pooling impossible. A
+// connection's lifetime is the connection's, and Close ends it.
+func dialSSH(_ context.Context, host, executable string) (net.Conn, error) {
+	command := exec.Command("ssh", sshArguments(host, executable)...)
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", host, err)
@@ -131,7 +138,10 @@ func (c *sshConn) Close() error {
 	if c.command.Process != nil {
 		_ = c.command.Process.Kill()
 	}
-	_, _ = c.command.Process.Wait()
+	// cmd.Wait rather than Process.Wait: the session owns pipes, and only
+	// exec.Cmd knows to clean up after them. It also reports a process that
+	// was never started instead of dereferencing a nil one.
+	_ = c.command.Wait()
 	return nil
 }
 

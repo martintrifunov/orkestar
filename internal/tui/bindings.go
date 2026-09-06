@@ -297,3 +297,18 @@ func (m Model) helpLine() string {
 		" open  " + k(ActionStopRemove) + " stop/remove  " + k(ActionFiles) + " files  " +
 		k(ActionSection) + " section  " + k(ActionQuit) + " quit"
 }
+
+// prefixBytes is what the prefix key sends to a pane when it is passed
+// through. Encoding the bound key rather than a constant is what lets someone
+// on ctrl+a reach a nested tmux; sending ctrl+b would leave them no way in.
+func (m Model) prefixBytes() []byte {
+	key := m.keys.key(ActionPrefix)
+	if len(key) > len("ctrl+") && strings.HasPrefix(key, "ctrl+") {
+		if letter := key[len("ctrl+"):]; len(letter) == 1 && letter[0] >= 'a' && letter[0] <= 'z' {
+			return []byte{letter[0] - 'a' + 1}
+		}
+	}
+	// Anything else is sent as its own text, which is the best that can be
+	// done for a prefix that is not a control character.
+	return []byte(key)
+}

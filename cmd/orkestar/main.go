@@ -54,10 +54,14 @@ func run(args []string) error {
 	// before the verbs because it changes which daemon every one of them
 	// talks to, not what they do.
 	if len(args) >= 1 && args[0] == "--remote" {
-		if len(args) != 2 {
-			return errors.New("usage: orkestar --remote <[user@]host>")
+		if len(args) < 2 || len(args) > 3 {
+			return errors.New("usage: orkestar --remote <[user@]host> [directory-on-that-host]")
 		}
-		return runRemoteTUI(args[1])
+		remoteDirectory := ""
+		if len(args) == 3 {
+			remoteDirectory = args[2]
+		}
+		return runRemoteTUI(args[1], remoteDirectory)
 	}
 
 	if len(args) == 0 {
@@ -122,7 +126,7 @@ func runTUI(paths runtimepath.Paths) error {
 // here, which is the point: notifications, the clipboard and the terminal all
 // belong to the machine the person is sitting at, while the agents keep
 // running on the one that has the work.
-func runRemoteTUI(host string) error {
+func runRemoteTUI(host, directory string) error {
 	remote, err := ipc.ParseRemote(host)
 	if err != nil {
 		return err
@@ -145,9 +149,24 @@ func runRemoteTUI(host string) error {
 			version, remote.Host, remoteVersion)
 	}
 
-	// The working directory is the remote's business, and it is the only thing
-	// the interface cannot ask for over the wire yet.
-	return tui.Run(client, "")
+	// The interface needs a directory to create workspaces, tasks and shells
+	// in, and it is the remote's directory rather than this machine's. With
+	// none given, an existing workspace supplies it; with no workspaces
+	// either, say so rather than starting an interface where every create key
+	// fails on an empty path.
+	if directory == "" {
+		var snapshot daemon.Snapshot
+		if err := client.Call(ctx, "system.snapshot", nil, &snapshot); err != nil {
+			return err
+		}
+		if len(snapshot.Workspaces) == 0 {
+			return fmt.Errorf(
+				"%s has no workspaces yet, so there is nothing to work in; pass a directory on that machine: orkestar --remote %s <directory>",
+				remote.Host, remote.Host)
+		}
+		directory = snapshot.Workspaces[0].Directory
+	}
+	return tui.Run(client, directory)
 }
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
@@ -357,7 +376,7 @@ func printUsage() {
 Usage:
   orkestar
   orkestar --session <name> [command...]
-  orkestar --remote <[user@]host>
+  orkestar --remote <[user@]host> [directory-on-that-host]
   orkestar daemon serve
   orkestar daemon stop
   orkestar daemon proxy

@@ -177,3 +177,68 @@ func TestTheMenuDoesNotDisturbTheFrame(t *testing.T) {
 		}
 	}
 }
+
+// Every entry the menu offers must actually do something. One that silently
+// did nothing would teach the wrong thing about all of them.
+func TestEveryMenuEntryIsWired(t *testing.T) {
+	m, first, _ := taskModel(t)
+	m.embedded = first
+	// A pane this client is not driving, so "Take control" is offered.
+	first.view = &remoteScreen{controller: false}
+
+	items := m.menuFor(first)
+	if len(items) == 0 {
+		t.Fatal("the menu is empty")
+	}
+	claim := false
+	for _, item := range items {
+		if item.action == ActionClaimPane {
+			claim = true
+		}
+		// paneAction reports whether it recognised the key. An entry it does
+		// not recognise is an entry that does nothing.
+		probe := m
+		if _, handled := probe.paneAction(m.keys.key(item.action)); !handled {
+			t.Errorf("the %q entry (%s) is not wired to anything", item.label, item.action)
+		}
+	}
+	if !claim {
+		t.Fatal("a pane this client does not drive should offer taking control")
+	}
+}
+
+// Pressed twice the prefix passes itself through, which is how a nested tmux
+// is reached. It has to be the key the user bound.
+func TestThePrefixPassesItselfThrough(t *testing.T) {
+	m := Model{}
+	if got := m.prefixBytes(); len(got) != 1 || got[0] != 0x02 {
+		t.Fatalf("the default prefix sends %v, want ctrl+b", got)
+	}
+
+	var complaints []string
+	m.keys, complaints = newBindings(map[string]string{"prefix": "ctrl+a"})
+	if len(complaints) != 0 {
+		t.Fatalf("complaints: %v", complaints)
+	}
+	if got := m.prefixBytes(); len(got) != 1 || got[0] != 0x01 {
+		t.Fatalf("a rebound prefix sends %v, want ctrl+a", got)
+	}
+}
+
+// Rebinding edit-file must not leave the sidebar's editor key doing nothing.
+func TestARebedEditorKeyStillOpensTheEditor(t *testing.T) {
+	m, first, _ := taskModel(t)
+	m.embedded = first
+	var complaints []string
+	m.keys, complaints = newBindings(map[string]string{"edit-file": "E"})
+	if len(complaints) != 0 {
+		t.Fatalf("complaints: %v", complaints)
+	}
+	if _, handled := m.paneAction(m.keys.key(ActionEditFile)); !handled {
+		t.Fatal("the rebound editor key does nothing")
+	}
+	// And the key it replaced no longer reaches it.
+	if _, handled := m.paneAction("e"); handled {
+		t.Fatal("the old editor key still works")
+	}
+}

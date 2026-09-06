@@ -302,3 +302,55 @@ func TestSSHArguments(t *testing.T) {
 		}
 	}
 }
+
+// A connection's lifetime is the connection's, not the dial's. Every caller
+// cancels its dial context on return — the terminal stream's handshake
+// context, a snapshot call's — so tying the session to it would kill a remote
+// pane before its first frame and make pooling impossible.
+func TestADialledConnectionOutlivesItsDialContext(t *testing.T) {
+	server := newCountingServer(t)
+
+	// A dialer shaped like the ssh one: a subprocess whose stdio is the
+	// connection, started while a short-lived context is in scope.
+	client := ipc.NewClientWithDialer("subprocess", func(ctx context.Context, _ time.Duration) (net.Conn, error) {
+		return net.Dial("unix", server.path())
+	})
+	defer client.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 5*time.Second)
+	var first map[string]string
+	if err := client.Call(dialCtx, "first", nil, &first); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// Exactly what a caller does on return.
+	cancelDial()
+
+	// The pooled connection has to still work afterwards.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var second map[string]string
+	if err := client.Call(ctx, "second", nil, &second); err != nil {
+		t.Fatalf("the connection did not survive its dial context: %v", err)
+	}
+	if accepted, _ := server.counts(); accepted != 1 {
+		t.Fatalf("the second call opened a new connection: %d accepted", accepted)
+	}
+}
+
+// The ssh transport must not be built with a context that would carry the
+// dial's cancellation into the session's lifetime.
+func TestSSHSessionsAreNotBoundToTheDialContext(t *testing.T) {
+	source, err := os.ReadFile("remote.go")
+	if err != nil {
+		t.Fatalf("read remote.go: %v", err)
+	}
+	// Code only: the comment above dialSSH names the thing it is avoiding.
+	for number, line := range strings.Split(string(source), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		if strings.Contains(line, "exec.CommandContext") {
+			t.Fatalf("remote.go:%d ties the ssh session to a context; a dial's cancellation would kill it", number+1)
+		}
+	}
+}

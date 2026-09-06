@@ -29,6 +29,11 @@ func Ensure(ctx context.Context, paths runtimepath.Paths) error {
 	}
 
 	command := exec.Command(executable, "daemon", "serve")
+	// The child has to land on the same paths as the parent. Without this it
+	// resolves the default ones, binds the default socket and opens the
+	// default database, while the parent waits for a session socket that never
+	// appears — and a stray daemon is left attached to somebody else's board.
+	command.Env = append(os.Environ(), "ORKESTAR_RUNTIME_DIR="+paths.Directory)
 	command.Stdin = nil
 	command.Stdout = logFile
 	command.Stderr = logFile

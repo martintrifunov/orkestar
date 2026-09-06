@@ -224,7 +224,9 @@ are separate actions rather than the same letter twice.
 
 ## Attaching to a daemon on another machine
 
-`orkestar --remote user@host` runs the interface here and the daemon there.
+`orkestar --remote user@host [directory]` runs the interface here and the
+daemon there. The directory is a path on that machine; with none given, an
+existing workspace there supplies it.
 That is the point of it: notifications, the clipboard and the terminal belong
 to the machine you are sitting at, while the agents keep running on the one
 with the work. Sitting in an ssh session and running `orkestar` has always

@@ -26,6 +26,11 @@ type AppliedTemplate struct {
 	// because something they depend on has not finished. Applying does not
 	// wait around for them; task.wait until startable is how to pick them up.
 	Waiting []string `json:"waiting,omitempty"`
+	// Failed says why an agent could not be started, when the tasks were
+	// created but a launch was not. It is carried in the result rather than
+	// returned as an error: an error discards the result, so the caller would
+	// never learn which tasks and worktrees now exist.
+	Failed string `json:"failed,omitempty"`
 }
 
 // templatePath resolves a template name to a file inside the workspace,
@@ -191,9 +196,12 @@ func (s *Server) applyTemplate(ctx context.Context, rawParams json.RawMessage) (
 		}
 		launched, err := s.launchForTask(ctx, task, declared.Agent, declared.Prompt)
 		if err != nil {
-			// The tasks are already real and useful. Report what went wrong
-			// against the work rather than discarding it.
-			return applied, fmt.Errorf("start %q: %w", declared.Key, err)
+			// Reported in the result, not as an error. The tasks and their
+			// worktrees are already real, and an error would discard the
+			// result and skip the persist that records them, leaving the
+			// caller with no idea what now exists.
+			applied.Failed = fmt.Sprintf("start %q: %v", declared.Key, err)
+			return applied, nil
 		}
 		applied.Agents = append(applied.Agents, launched)
 	}

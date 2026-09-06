@@ -516,7 +516,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			cmd, _ := m.paneAction("e")
+			cmd, _ := m.paneAction(m.keys.key(ActionEditFile))
 			return m, cmd
 		case m.keys.is(key, ActionResume):
 			if !m.roomForPane() {
@@ -1105,13 +1105,17 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.sidebarFocused = true
 			return m, nil
 		}
+		// Pressed twice, the prefix passes itself through, which is how a
+		// nested tmux or screen is reached. It has to be the bound key: a user
+		// on ctrl+a who gets ctrl+b has no way to reach the thing inside.
+		prefix := m.prefixBytes()
 		if msg.String() == m.keys.key(ActionPrefix) {
-			term.emulator.Input([]byte{0x02})
+			term.emulator.Input(prefix)
 			return m, nil
 		}
-		// The user meant a literal ctrl+b followed by this key, not a
-		// detach: forward both instead of swallowing the ctrl+b.
-		term.emulator.Input([]byte{0x02})
+		// The user meant a literal prefix followed by this key, not a detach:
+		// forward both instead of swallowing the prefix.
+		term.emulator.Input(prefix)
 		if data := encodeKey(msg); len(data) > 0 {
 			term.emulator.Input(data)
 		}

@@ -3,9 +3,11 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,7 +26,15 @@ type controllableAdapter struct {
 	// executable, when set, makes each session own a real PTY process so it
 	// satisfies agent.ProcessSession.
 	executable string
+	// launches counts sessions handed out, and failFrom is the launch number
+	// from which the adapter refuses, so a test can fail one launch in the
+	// middle of a sequence.
+	launches *atomic.Int64
+	failFrom *atomic.Int64
 }
+
+// failAfter makes the adapter refuse every launch after the first n.
+func (a *controllableAdapter) failAfter(n int64) { a.failFrom.Store(n) }
 
 func newControllableAdapter(name string) *controllableAdapter {
 	return &controllableAdapter{
@@ -35,6 +45,8 @@ func newControllableAdapter(name string) *controllableAdapter {
 			SupportsInterrupt:   true,
 		},
 		sessions: make(chan *controllableSession, 4),
+		launches: new(atomic.Int64),
+		failFrom: new(atomic.Int64),
 	}
 }
 
@@ -55,6 +67,9 @@ func newPTYControllableAdapter(t *testing.T, name string) *controllableAdapter {
 func (a *controllableAdapter) Capabilities() agent.Capabilities { return a.capabilities }
 
 func (a *controllableAdapter) Launch(ctx context.Context, options agent.LaunchOptions) (agent.Session, error) {
+	if limit := a.failFrom.Load(); limit > 0 && a.launches.Add(1) > limit {
+		return nil, fmt.Errorf("fixture adapter refuses launch %d", limit+1)
+	}
 	session := &controllableSession{
 		id:      "native-1",
 		state:   agent.StateReady,

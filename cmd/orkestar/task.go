@@ -295,6 +295,13 @@ func taskWait(paths runtimepath.Paths, args []string) error {
 			if err != nil {
 				return fmt.Errorf("invalid timeout %q", value)
 			}
+			// Zero means the daemon's default, which is longer than this
+			// command's own deadline would be if it took the number at face
+			// value: the wait would then die on the connection rather than on
+			// the timeout it was given.
+			if parsed <= 0 {
+				parsed = 300
+			}
 			timeout = parsed
 			continue
 		}

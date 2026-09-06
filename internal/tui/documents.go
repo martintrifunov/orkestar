@@ -290,6 +290,12 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 			m.renameTo = m.embedded.title
 		}
 		return nil, true
+	case ActionClaimPane:
+		// Reachable from the sidebar and the right-click menu, not only from a
+		// focused pane. A menu entry that silently did nothing would teach the
+		// wrong thing about every other entry.
+		m.claimPane()
+		return nil, true
 	case ActionDetachPanel:
 		m.sidebarFocused = true
 		return nil, true
