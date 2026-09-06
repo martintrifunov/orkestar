@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/martintrifunov/orkestar/internal/git"
 	"github.com/martintrifunov/orkestar/internal/workflow"
@@ -82,6 +84,89 @@ func (s *Server) updateTask(rawParams json.RawMessage) (workflow.Task, error) {
 		Description: params.Description,
 		DependsOn:   params.DependsOn,
 	})
+}
+
+// maxWaitTimeout bounds how long a wait may hold its connection. A wait is a
+// request that deliberately does not answer yet, so it needs a ceiling: an
+// orchestrator that asks to wait forever should be told no rather than leak a
+// connection and a watcher for the life of the daemon.
+const (
+	defaultWaitTimeout = 5 * time.Minute
+	maxWaitTimeout     = time.Hour
+)
+
+// waitTimeout turns a caller's requested seconds into a bounded duration.
+func waitTimeout(seconds int) (time.Duration, error) {
+	if seconds < 0 {
+		return 0, errors.New("wait timeout cannot be negative")
+	}
+	if seconds == 0 {
+		return defaultWaitTimeout, nil
+	}
+	if requested := time.Duration(seconds) * time.Second; requested <= maxWaitTimeout {
+		return requested, nil
+	}
+	return 0, fmt.Errorf("wait timeout cannot exceed %s", maxWaitTimeout)
+}
+
+// waitForTask blocks until a task reaches a condition. It is the primitive an
+// orchestrating agent has no substitute for: every other task method answers
+// immediately, so watching another agent's work means asking again and again,
+// and for an agent every ask costs a turn.
+func (s *Server) waitForTask(ctx context.Context, rawParams json.RawMessage) (workflow.Task, error) {
+	var params struct {
+		TaskID  string `json:"task_id"`
+		Until   string `json:"until"`
+		Timeout int    `json:"timeout_seconds"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return workflow.Task{}, fmt.Errorf("decode task wait params: %w", err)
+	}
+	timeout, err := waitTimeout(params.Timeout)
+	if err != nil {
+		return workflow.Task{}, err
+	}
+	until := workflow.Condition(params.Until)
+	if params.Until == "" {
+		until = workflow.ConditionFinished
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// A shutdown must release the wait, or the daemon cannot stop until every
+	// outstanding one has timed out.
+	go func() {
+		select {
+		case <-s.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return s.tasks.WaitFor(ctx, params.TaskID, until)
+}
+
+// waitForAgentSession blocks until an agent reaches a condition.
+func (s *Server) waitForAgentSession(ctx context.Context, rawParams json.RawMessage) (Agent, error) {
+	var params struct {
+		AgentID string `json:"agent_id"`
+		Until   string `json:"until"`
+		Timeout int    `json:"timeout_seconds"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return Agent{}, fmt.Errorf("decode agent wait params: %w", err)
+	}
+	timeout, err := waitTimeout(params.Timeout)
+	if err != nil {
+		return Agent{}, err
+	}
+	until := AgentCondition(params.Until)
+	if params.Until == "" {
+		until = AgentIdle
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.waitForAgent(ctx, params.AgentID, until)
 }
 
 func (s *Server) assignTask(rawParams json.RawMessage) (workflow.Task, error) {

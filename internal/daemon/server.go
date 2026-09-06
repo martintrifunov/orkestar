@@ -262,6 +262,10 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.resolvePermission(context.Background(), request.Params)
 	case "task.create":
 		result, err = s.createTask(request.Params)
+	case "task.wait":
+		result, err = s.waitForTask(context.Background(), request.Params)
+	case "agent.wait":
+		result, err = s.waitForAgentSession(context.Background(), request.Params)
 	case "task.update":
 		result, err = s.updateTask(request.Params)
 	case "task.setStatus":
@@ -287,7 +291,7 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 	if err != nil {
 		return ipc.NewErrorResponse(request.ID, "invalid_params", err.Error()), shutdown
 	}
-	if err == nil && request.Method != "system.snapshot" && request.Method != "system.ping" && request.Method != "system.shutdown" && request.Method != "terminal.history" {
+	if err == nil && !readOnlyMethod(request.Method) {
 		err = s.persist()
 		if err != nil {
 			return ipc.NewErrorResponse(request.ID, "storage_error", err.Error()), shutdown
@@ -298,6 +302,18 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		return ipc.NewErrorResponse(request.ID, "internal_error", err.Error()), shutdown
 	}
 	return response, shutdown
+}
+
+// readOnlyMethod names the methods that change nothing, so a reply does not
+// rewrite the whole snapshot to disk. The waits belong here for a second
+// reason: one can sit for minutes and then persist state it never touched.
+func readOnlyMethod(method string) bool {
+	switch method {
+	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history", "task.wait", "agent.wait":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) snapshot() Snapshot {

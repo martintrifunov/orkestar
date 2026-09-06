@@ -521,3 +521,129 @@ func TestMCPTaskUpdate(t *testing.T) {
 		"task_id": first.ID, "depends_on": []string{second.ID},
 	})
 }
+
+// The whole point of the wait primitive, end to end: an agent starts work and
+// blocks on the result rather than asking again and again.
+func TestMCPTaskWait(t *testing.T) {
+	t.Parallel()
+
+	daemonClient := startTestDaemon(t)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{"directory": t.TempDir()})
+	task := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "Ship it", "auto_review": false,
+	})
+
+	waited := make(chan workflow.Task, 1)
+	go func() {
+		waited <- callTool[workflow.Task](t, session, "task_wait", map[string]any{
+			"task_id": task.ID, "until": "done", "timeout_seconds": 20,
+		})
+	}()
+
+	select {
+	case got := <-waited:
+		t.Fatalf("the wait returned before anything happened: %+v", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	callTool[workflow.Task](t, session, "task_set_status", map[string]any{
+		"task_id": task.ID, "status": "done",
+	})
+
+	select {
+	case got := <-waited:
+		if got.Status != workflow.StatusDone {
+			t.Fatalf("the wait returned %+v", got)
+		}
+	case <-time.After(25 * time.Second):
+		t.Fatal("the wait never returned")
+	}
+}
+
+// Holding a dependency, an orchestrator wants to know when the thing it is
+// gating becomes startable.
+func TestMCPTaskWaitForStartable(t *testing.T) {
+	t.Parallel()
+
+	daemonClient := startTestDaemon(t)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{"directory": t.TempDir()})
+	blocker := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "First", "auto_review": false,
+	})
+	dependent := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "Second",
+		"depends_on": []string{blocker.ID}, "auto_review": false,
+	})
+
+	waited := make(chan workflow.Task, 1)
+	go func() {
+		waited <- callTool[workflow.Task](t, session, "task_wait", map[string]any{
+			"task_id": dependent.ID, "until": "startable", "timeout_seconds": 20,
+		})
+	}()
+	select {
+	case <-waited:
+		t.Fatal("a blocked task reported as startable")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	callTool[workflow.Task](t, session, "task_set_status", map[string]any{
+		"task_id": blocker.ID, "status": "done",
+	})
+	select {
+	case <-waited:
+	case <-time.After(25 * time.Second):
+		t.Fatal("clearing the dependency did not release the wait")
+	}
+}
+
+// Waiting for something that can no longer happen is reported, not sat on.
+func TestMCPWaitFailsRatherThanHanging(t *testing.T) {
+	t.Parallel()
+
+	daemonClient := startTestDaemon(t)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{"directory": t.TempDir()})
+	task := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "Abandoned", "auto_review": false,
+	})
+	callTool[workflow.Task](t, session, "task_set_status", map[string]any{
+		"task_id": task.ID, "status": "cancelled",
+	})
+
+	callToolExpectError(t, session, "task_wait", map[string]any{
+		"task_id": task.ID, "until": "done", "timeout_seconds": 20,
+	})
+	callToolExpectError(t, session, "task_wait", map[string]any{
+		"task_id": "task_missing", "until": "done", "timeout_seconds": 5,
+	})
+}
+
+// An orchestrator that starts an agent needs to know when it is stuck.
+func TestMCPAgentWait(t *testing.T) {
+	t.Parallel()
+
+	adapter := stubAdapter{agent.Capabilities{Name: "stub", SupportsInteractive: true, SupportsPrompt: true}, &stubSessions{}}
+	daemonClient := startTestDaemonWithAdapters(t, adapter)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{"directory": t.TempDir()})
+	task := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "Work", "auto_review": false,
+	})
+	launched := callTool[daemon.Agent](t, session, "task_start", map[string]any{"task_id": task.ID})
+
+	// The stub reports ready and never moves, so a short wait for idle must
+	// time out rather than return something untrue.
+	callToolExpectError(t, session, "agent_wait", map[string]any{
+		"agent_id": launched.ID, "until": "idle", "timeout_seconds": 1,
+	})
+	callToolExpectError(t, session, "agent_wait", map[string]any{
+		"agent_id": launched.ID, "until": "whenever", "timeout_seconds": 5,
+	})
+}

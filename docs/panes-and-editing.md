@@ -143,6 +143,31 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Waiting on work
+
+Every other method answers immediately, which is fine for a person watching a
+sidebar and useless for an agent: following another agent's work by asking
+again and again costs a model turn per ask. `task.wait` and `agent.wait` block
+until something is true instead.
+
+```
+orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
+```
+
+A task can be waited on until it is `done`, `finished` either way, or
+`startable` — nothing blocks it any more, which is what to use when holding a
+dependency. An agent can be waited on until it is `blocked` and genuinely
+cannot continue without someone, `idle` and wanting input, or `stopped`.
+
+A wait that can no longer be satisfied fails rather than sitting until its
+deadline: waiting for a cancelled task to be done, or a stopped agent to go
+idle, is a caller's mistake and it should hear about it. Every wait is bounded,
+default five minutes and at most an hour, because a wait holds its connection
+open by design.
+
+Over MCP these are `task_wait` and `agent_wait`, which is what turns "an agent
+can start work" into "an agent can run a pipeline".
+
 ## The bell
 
 Orkestar rings the terminal bell twice: when a task reaches **done**, and when

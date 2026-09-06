@@ -67,6 +67,14 @@ func newTaskAgentFixtureWith(t *testing.T, adapter *controllableAdapter) taskAge
 	return taskAgentFixture{client: client, adapter: adapter, workspace: workspace, directory: directory}
 }
 
+// callWithoutT is for a call made on another goroutine, where t must not be
+// touched. A wait needs the full ceiling, since the point is that it blocks.
+func (f taskAgentFixture) callWithoutT(method string, params any, result any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	return f.client.Call(ctx, method, params, result)
+}
+
 func (f taskAgentFixture) call(t *testing.T, method string, params any, result any) error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

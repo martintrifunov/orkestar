@@ -269,6 +269,7 @@ Usage:
   orkestar task assign <task-id> <agent-id>
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
+  orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
   orkestar task diff <task-id>
   orkestar mcp serve
   orkestar help

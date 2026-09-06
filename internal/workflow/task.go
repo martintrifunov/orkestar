@@ -3,6 +3,7 @@
 package workflow
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -57,8 +58,9 @@ type Task struct {
 // transition rules. It has no knowledge of workspaces, agents, or IPC; the
 // daemon translates between those and Board calls.
 type Board struct {
-	mu    sync.Mutex
-	tasks map[string]Task
+	mu       sync.Mutex
+	tasks    map[string]Task
+	watchers map[chan struct{}]struct{}
 	// order records the sequence tasks were created in. Creation timestamps
 	// alone do not order them: two tasks created in the same clock tick
 	// compare equal, and ranging a map to build the list means the sidebar can
@@ -69,7 +71,46 @@ type Board struct {
 
 // NewBoard returns an empty Board.
 func NewBoard() *Board {
-	return &Board{tasks: make(map[string]Task), order: make(map[string]uint64)}
+	return &Board{
+		tasks:    make(map[string]Task),
+		watchers: make(map[chan struct{}]struct{}),
+		order:    make(map[string]uint64),
+	}
+}
+
+// Watch returns a channel that carries a value whenever any task changes, and
+// a function that stops watching.
+//
+// It signals that something moved, not what: the channel holds one pending
+// wake and further changes leave it alone. A waiter is expected to re-read the
+// board and judge for itself, which is what makes coalescing safe — a caller
+// that misses three intermediate changes still sees the state they left
+// behind. Delivering the tasks themselves would mean either blocking a
+// mutation on a slow reader or dropping the one event that mattered.
+func (b *Board) Watch() (<-chan struct{}, func()) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	changes := make(chan struct{}, 1)
+	b.watchers[changes] = struct{}{}
+	return changes, func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if _, ok := b.watchers[changes]; ok {
+			delete(b.watchers, changes)
+			close(changes)
+		}
+	}
+}
+
+// notify wakes every watcher. Callers must hold b.mu, which is what lets a
+// waiter register before its first read and never miss the change in between.
+func (b *Board) notify() {
+	for changes := range b.watchers {
+		select {
+		case changes <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // Create adds a new task. DependsOn entries must reference existing tasks;
@@ -113,6 +154,7 @@ func (b *Board) Create(workspaceID, title, description string, dependsOn []strin
 	b.tasks[id] = task
 	b.order[id] = b.next
 	b.next++
+	b.notify()
 	return task, nil
 }
 
@@ -159,6 +201,7 @@ func (b *Board) Update(taskID string, edit TaskEdit) (Task, error) {
 
 	task.UpdatedAt = time.Now().UTC()
 	b.tasks[taskID] = task
+	b.notify()
 	return task, nil
 }
 
@@ -241,6 +284,7 @@ func (b *Board) SetStatus(taskID string, status Status) (Task, error) {
 	task.Status = status
 	task.UpdatedAt = time.Now().UTC()
 	b.tasks[taskID] = task
+	b.notify()
 	return task, nil
 }
 
@@ -256,6 +300,7 @@ func (b *Board) Assign(taskID, agentID string) (Task, error) {
 	task.AssigneeAgentID = agentID
 	task.UpdatedAt = time.Now().UTC()
 	b.tasks[taskID] = task
+	b.notify()
 	return task, nil
 }
 
@@ -274,6 +319,7 @@ func (b *Board) SetWorktree(taskID, path, branch string) (Task, error) {
 	task.WorktreeBranch = branch
 	task.UpdatedAt = time.Now().UTC()
 	b.tasks[taskID] = task
+	b.notify()
 	return task, nil
 }
 
@@ -311,4 +357,101 @@ func newID(prefix string) (string, error) {
 		return "", fmt.Errorf("generate ID: %w", err)
 	}
 	return prefix + "_" + hex.EncodeToString(raw), nil
+}
+
+// Condition is a state a waiter is waiting for a task to reach.
+type Condition string
+
+const (
+	// ConditionDone waits for the task to be completed. A task that is
+	// cancelled instead fails the wait rather than hanging until the deadline:
+	// waiting for a completion that can no longer happen is a caller's bug and
+	// they should hear about it.
+	ConditionDone Condition = "done"
+	// ConditionFinished waits for the task to stop being open, either way.
+	ConditionFinished Condition = "finished"
+	// ConditionStartable waits until nothing blocks the task, which is what an
+	// orchestrator holding a dependency actually wants to know.
+	ConditionStartable Condition = "startable"
+)
+
+func (c Condition) valid() bool {
+	switch c {
+	case ConditionDone, ConditionFinished, ConditionStartable:
+		return true
+	default:
+		return false
+	}
+}
+
+// satisfiedBy reports whether the task meets the condition, and whether
+// waiting any longer is pointless. Callers must hold b.mu.
+func (b *Board) satisfiedBy(task Task, until Condition) (met bool, hopeless bool) {
+	switch until {
+	case ConditionDone:
+		return task.Status == StatusDone, task.Status == StatusCancelled
+	case ConditionFinished:
+		return task.Status == StatusDone || task.Status == StatusCancelled, false
+	case ConditionStartable:
+		if task.Status == StatusCancelled {
+			return false, true
+		}
+		for _, dependencyID := range task.DependsOn {
+			dependency, ok := b.tasks[dependencyID]
+			if !ok || dependency.Status != StatusDone {
+				return false, false
+			}
+		}
+		return true, false
+	}
+	return false, true
+}
+
+// WaitFor blocks until a task meets a condition, the wait becomes pointless,
+// or ctx ends. It is the primitive an orchestrating agent has no substitute
+// for: without it, watching another agent's work means asking again and again,
+// and for an agent every ask is a turn.
+//
+// The watcher is registered before the first read, so a change landing between
+// the two wakes the wait rather than being missed.
+func (b *Board) WaitFor(ctx context.Context, taskID string, until Condition) (Task, error) {
+	if !until.valid() {
+		return Task{}, fmt.Errorf("invalid wait condition %q", until)
+	}
+	changes, stop := b.Watch()
+	defer stop()
+
+	for {
+		b.mu.Lock()
+		task, ok := b.tasks[taskID]
+		var met, hopeless bool
+		if ok {
+			met, hopeless = b.satisfiedBy(task, until)
+		}
+		b.mu.Unlock()
+
+		switch {
+		case !ok:
+			return Task{}, fmt.Errorf("task %q does not exist", taskID)
+		case met:
+			return task, nil
+		case hopeless:
+			return task, fmt.Errorf("task %q is %s and will never be %s", taskID, task.Status, until)
+		}
+
+		select {
+		case <-changes:
+		case <-ctx.Done():
+			return task, fmt.Errorf("waiting for task %q to be %s: %w", taskID, until, ctx.Err())
+		}
+	}
+}
+
+// Watchers reports how many watchers are registered. It exists so a test can
+// prove waits clean up after themselves: a daemon that leaks one per
+// orchestration call would wake an ever-growing list on every task change.
+func (b *Board) Watchers() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.watchers)
 }

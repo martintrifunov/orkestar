@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ func runTask(paths runtimepath.Paths, args []string) error {
 		return taskAssign(paths, args[1:])
 	case "worktree":
 		return taskWorktree(paths, args[1:])
+	case "wait":
+		return taskWait(paths, args[1:])
 	case "diff":
 		return taskDiff(paths, args[1:])
 	default:
@@ -46,6 +49,7 @@ var errTaskUsage = errors.New(`usage:
   orkestar task assign <task-id> <agent-id>
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
+  orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
   orkestar task diff <task-id>`)
 
 func taskCreate(paths runtimepath.Paths, args []string) error {
@@ -211,6 +215,40 @@ func taskWorktree(paths runtimepath.Paths, args []string) error {
 		}
 	default:
 		return errTaskUsage
+	}
+	printTask(task)
+	return nil
+}
+
+// taskWait blocks until a task reaches a state. It exists for scripts and
+// agents: everything else the daemon offers answers immediately, so following
+// another agent's work otherwise means asking in a loop.
+func taskWait(paths runtimepath.Paths, args []string) error {
+	if len(args) < 1 || len(args) > 3 {
+		return errTaskUsage
+	}
+	until, timeout := "finished", 300
+	for _, argument := range args[1:] {
+		if value, ok := strings.CutPrefix(argument, "--timeout="); ok {
+			parsed, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("invalid timeout %q", value)
+			}
+			timeout = parsed
+			continue
+		}
+		until = argument
+	}
+
+	// The connection deadline comes from this context, so it has to outlast
+	// the wait the daemon was asked for.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout+15)*time.Second)
+	defer cancel()
+	var task workflow.Task
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "task.wait", map[string]any{
+		"task_id": args[0], "until": until, "timeout_seconds": timeout,
+	}, &task); err != nil {
+		return err
 	}
 	printTask(task)
 	return nil

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -54,6 +55,16 @@ func NewServer(client *ipc.Client) *sdk.Server {
 		Name:        "task_start",
 		Description: "Launch an agent to work a task, in the task's git worktree when it has one, assign the task to it, and tell it what to do. The prompt defaults to the task's own title and description, and is held until the agent's session reports it has started, so there is no need to wait before calling this. The task moves to in_progress once the agent acts on it. Use agent_list to see which adapters are available and what is already running.",
 	}, taskStart(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "task_wait",
+		Description: "Block until a task reaches a state, instead of polling task_list. 'done' waits for completion and fails if the task is cancelled instead; 'finished' accepts either; 'startable' waits until nothing blocks it, which is what to use when holding a dependency. Returns the task.",
+	}, taskWait(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "agent_wait",
+		Description: "Block until an agent reaches a state: 'blocked' when it genuinely cannot continue without someone, 'idle' when it has finished its turn and wants input, 'stopped' when the session has ended. Use this rather than calling agent_list in a loop.",
+	}, agentWait(client))
 
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "agent_prompt",
@@ -291,6 +302,54 @@ func chooseAdapter(available []agent.Capabilities, requested string) (string, st
 		return "", "", fmt.Errorf("adapter %q supports neither interactive nor managed sessions", requested)
 	}
 	return "", "", fmt.Errorf("adapter %q is not registered; available: %s", requested, strings.Join(names, ", "))
+}
+
+// waitSeconds bounds what a tool asks the daemon to wait, and is also the
+// deadline on the call itself: the client sets its connection deadline from
+// the context, so a context shorter than the wait would cut it off early.
+const waitSeconds = 300
+
+type taskWaitInput struct {
+	TaskID         string `json:"task_id"`
+	Until          string `json:"until,omitempty" jsonschema:"done, finished, or startable; defaults to finished"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"how long to wait before giving up; defaults to 300"`
+}
+
+// taskWait is the primitive that turns starting work into running a pipeline.
+// Without it an orchestrating agent can only ask again and again, and for an
+// agent every ask is a turn.
+func taskWait(client *ipc.Client) sdk.ToolHandlerFor[taskWaitInput, workflow.Task] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in taskWaitInput) (*sdk.CallToolResult, workflow.Task, error) {
+		seconds := in.TimeoutSeconds
+		if seconds <= 0 {
+			seconds = waitSeconds
+		}
+		ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds+15)*time.Second)
+		defer cancel()
+		return callIPC[workflow.Task](ctx, client, "task.wait", map[string]any{
+			"task_id": in.TaskID, "until": in.Until, "timeout_seconds": seconds,
+		})
+	}
+}
+
+type agentWaitInput struct {
+	AgentID        string `json:"agent_id"`
+	Until          string `json:"until,omitempty" jsonschema:"blocked, idle, or stopped; defaults to idle"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"how long to wait before giving up; defaults to 300"`
+}
+
+func agentWait(client *ipc.Client) sdk.ToolHandlerFor[agentWaitInput, daemon.Agent] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in agentWaitInput) (*sdk.CallToolResult, daemon.Agent, error) {
+		seconds := in.TimeoutSeconds
+		if seconds <= 0 {
+			seconds = waitSeconds
+		}
+		ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds+15)*time.Second)
+		defer cancel()
+		return callIPC[daemon.Agent](ctx, client, "agent.wait", map[string]any{
+			"agent_id": in.AgentID, "until": in.Until, "timeout_seconds": seconds,
+		})
+	}
 }
 
 type agentPromptInput struct {

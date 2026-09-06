@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -646,4 +647,80 @@ func (s *Server) sendOpeningPrompt(entry *agentSession, text string, settle bool
 		}
 		_ = s.persist()
 	}()
+}
+
+// AgentCondition is a state a waiter is waiting for an agent session to reach.
+type AgentCondition string
+
+const (
+	// AgentBlocked is the one herdr named and the one that matters most: stop
+	// waiting when the agent genuinely cannot continue without someone.
+	AgentBlocked AgentCondition = "blocked"
+	// AgentIdle waits for the agent to finish its turn and want input.
+	AgentIdle AgentCondition = "idle"
+	// AgentStopped waits for the session to end, however it ends.
+	AgentStopped AgentCondition = "stopped"
+)
+
+func (c AgentCondition) valid() bool {
+	switch c {
+	case AgentBlocked, AgentIdle, AgentStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// satisfiedBy reports whether a state meets the condition, and whether waiting
+// longer is pointless. A stopped session never becomes idle or blocked again.
+func (c AgentCondition) satisfiedBy(state string) (met bool, hopeless bool) {
+	finished := state == "stopped" || state == "crashed" || state == "interrupted"
+	switch c {
+	case AgentStopped:
+		return finished, false
+	case AgentIdle:
+		return state == string(agent.StateWaitingInput), finished
+	case AgentBlocked:
+		return isAttentionState(agent.State(state)), finished
+	}
+	return false, true
+}
+
+// waitForAgent blocks until an agent session reaches a condition, the wait
+// becomes pointless, or ctx ends.
+//
+// It subscribes before reading the current state, so a change landing between
+// the two wakes the wait instead of being missed, and it re-reads rather than
+// trusting the event, so a coalesced or dropped one costs nothing.
+func (s *Server) waitForAgent(ctx context.Context, agentID string, until AgentCondition) (Agent, error) {
+	if !until.valid() {
+		return Agent{}, fmt.Errorf("invalid wait condition %q", until)
+	}
+	entry, err := s.findAgent(agentID)
+	if err != nil {
+		return Agent{}, err
+	}
+	metadata, events, unsubscribe := entry.subscribe()
+	defer unsubscribe()
+
+	for {
+		met, hopeless := until.satisfiedBy(metadata.State)
+		switch {
+		case met:
+			return metadata, nil
+		case hopeless:
+			return metadata, fmt.Errorf("agent %q is %s and will never be %s", agentID, metadata.State, until)
+		}
+		select {
+		case _, open := <-events:
+			if !open {
+				return metadata, fmt.Errorf("agent %q is no longer being watched", agentID)
+			}
+			metadata = entry.snapshot()
+		case <-ctx.Done():
+			return metadata, fmt.Errorf("waiting for agent %q to be %s: %w", agentID, until, ctx.Err())
+		case <-s.stop:
+			return metadata, errors.New("daemon is shutting down")
+		}
+	}
 }

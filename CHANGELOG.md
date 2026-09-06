@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Wait for work instead of polling it: `task.wait` and `agent.wait` over IPC,
+  `task_wait` and `agent_wait` over MCP, and `orkestar task wait`. A task can be
+  waited on until done, finished either way, or startable; an agent until it is
+  blocked, idle or stopped. A wait that can no longer be satisfied fails rather
+  than holding its connection to the deadline, and every wait is bounded.
 - Order tasks and artifacts by when they were created rather than only by their
   timestamps. Two created in the same clock tick compared equal, so the sidebar
   could show them in a different order on each refresh.
