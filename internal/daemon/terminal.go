@@ -29,6 +29,11 @@ type Terminal struct {
 type terminalEvent struct {
 	Name string
 	Data []byte
+	// frame marks an event whose payload is the screen as it stands when the
+	// event is delivered. Rendering it here rather than in Data is what keeps
+	// a coalesced event cheap: output that a client never sees costs one
+	// enqueue, not one render.
+	frame bool
 }
 type terminalSubscriber struct {
 	events chan terminalEvent
@@ -42,9 +47,13 @@ type terminalSession struct {
 	subscribers map[*terminalSubscriber]struct{}
 	controller  *terminalSubscriber
 	revision    uint64
-	done        chan struct{}
-	inputDone   chan struct{}
-	closeOnce   sync.Once
+	// rendered caches the frame for renderedAt, so subscribers sharing a
+	// revision render it once between them.
+	rendered   terminal.Frame
+	renderedAt uint64
+	done       chan struct{}
+	inputDone  chan struct{}
+	closeOnce  sync.Once
 }
 
 func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSession {
@@ -81,10 +90,29 @@ func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSessio
 	return s
 }
 func (s *terminalSession) snapshot() Terminal { s.mu.Lock(); defer s.mu.Unlock(); return s.metadata }
+
+// frame renders the screen, reusing the last render while the revision has
+// not moved. Callers must hold s.mu.
 func (s *terminalSession) frame() terminal.Frame {
+	if s.renderedAt == s.revision && s.renderedAt != 0 {
+		return s.rendered
+	}
 	f := s.screen.Frame()
 	f.Revision = s.revision
+	s.rendered, s.renderedAt = f, s.revision
 	return f
+}
+
+// frameEvent encodes the current screen the way subscriber wants it. Callers
+// must hold s.mu.
+func (s *terminalSession) frameEvent(screen bool, terminalID string) (string, []byte) {
+	f := s.frame()
+	if screen {
+		b, _ := json.Marshal(f)
+		return "terminal.screen", b
+	}
+	b, _ := json.Marshal(map[string]string{"terminal_id": terminalID, "data": base64.StdEncoding.EncodeToString([]byte(f.ANSI()))})
+	return "terminal.output", b
 }
 func (s *terminalSession) subscribe(screen, observe bool) (terminal.Frame, *terminalSubscriber, func(), error) {
 	s.mu.Lock()
@@ -113,22 +141,22 @@ func (s *terminalSession) subscribe(screen, observe bool) (terminal.Frame, *term
 	}
 	return frame, sub, detach, nil
 }
+
+// publish tells every subscriber the screen moved. It renders nothing: the
+// PTY hands over one chunk per line of sustained output, and a render for each
+// of them was thrown away as soon as the next chunk arrived.
 func (s *terminalSession) publish() {
 	s.revision++
-	f := s.frame()
 	for sub := range s.subscribers {
-		var e terminalEvent
+		name := "terminal.output"
 		if sub.screen {
-			b, _ := json.Marshal(f)
-			e = terminalEvent{Name: "terminal.screen", Data: b}
-		} else {
-			e = terminalEvent{Name: "terminal.output", Data: []byte(f.ANSI())}
+			name = "terminal.screen"
 		}
 		select {
 		case <-sub.events:
 		default:
 		}
-		sub.events <- e
+		sub.events <- terminalEvent{Name: name, frame: true}
 	}
 }
 func (s *terminalSession) input(encoded string) error {
@@ -378,22 +406,17 @@ func (s *Server) handleTerminalAttach(conn net.Conn, scanner *bufio.Scanner, enc
 				err = nil
 			}
 		case e := <-sub.events:
-			var data []byte
-			if e.Name == "terminal.output" {
-				data, _ = json.Marshal(map[string]string{"terminal_id": p.TerminalID, "data": base64.StdEncoding.EncodeToString(e.Data)})
-			} else {
-				data = e.Data
+			data := e.Data
+			if e.frame {
+				session.mu.Lock()
+				_, data = session.frameEvent(p.Screen, p.TerminalID)
+				session.mu.Unlock()
 			}
 			if e.Name == "terminal.exit" {
+				// The receiver obtains the final frame before the exit event.
 				session.mu.Lock()
-				f := session.frame()
+				name, b := session.frameEvent(p.Screen, p.TerminalID)
 				session.mu.Unlock()
-				name := "terminal.screen"
-				b, _ := json.Marshal(f)
-				if !p.Screen {
-					name = "terminal.output"
-					b, _ = json.Marshal(map[string]string{"terminal_id": p.TerminalID, "data": base64.StdEncoding.EncodeToString([]byte(f.ANSI()))})
-				}
 				_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 				if encoder.Encode(ipc.Event{Version: ipc.Version, Event: name, Data: b}) != nil {
 					return

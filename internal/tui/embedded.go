@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,7 +32,19 @@ type embeddedTerminal struct {
 	closeOnce     sync.Once
 	detachPending bool
 	exited        bool
+
+	// painted is when this pane last woke the UI, in Unix nanoseconds. Frames
+	// are applied to view the moment they arrive, so a repaint always draws
+	// the newest screen and the only thing throttling costs is redundant
+	// draws.
+	painted atomic.Int64
 }
+
+// repaintInterval is the shortest gap between repaints a pane will ask for. A
+// build log arrives as thousands of frames a second, each one a full-screen
+// draw in the client; past about sixty a second nobody can see the difference,
+// and the client is left pegging a core to draw frames the user never reads.
+const repaintInterval = 16 * time.Millisecond
 
 func (t *embeddedTerminal) close() {
 	t.closeOnce.Do(func() {
@@ -172,7 +185,7 @@ func waitEmbeddedEvent(term *embeddedTerminal) tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case event := <-term.events:
-			return event
+			return term.throttle(event)
 		case <-term.done:
 			select {
 			case event := <-term.events:
@@ -182,6 +195,26 @@ func waitEmbeddedEvent(term *embeddedTerminal) tea.Cmd {
 			return embeddedEventMsg{terminalID: term.terminalID, terminal: term, exited: true}
 		}
 	}
+}
+
+// throttle holds a repaint back until repaintInterval has passed since the
+// last one, which coalesces the frames that pile up behind it. An idle pane
+// waits for nothing, because its last repaint is already older than that, and
+// an exit is never delayed.
+func (term *embeddedTerminal) throttle(message tea.Msg) tea.Msg {
+	if event, ok := message.(embeddedEventMsg); !ok || event.exited || event.err != nil {
+		return message
+	}
+	if wait := repaintInterval - time.Since(time.Unix(0, term.painted.Load())); wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-term.done:
+		}
+	}
+	term.painted.Store(time.Now().UnixNano())
+	return message
 }
 
 // sendEmbeddedInput forwards user bytes to the daemon input owner.
