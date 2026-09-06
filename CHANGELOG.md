@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+Tasks stop being a list beside the agents and start describing them: an agent
+is launched for a task, told what to do, and the board follows what it does.
+Two prompts that never arrived and one interrupt reported as a crash are
+fixed along the way.
 
 - Edit a task after creating it: `e` on a task in the sidebar, `task_update`
   over MCP, or `orkestar task edit` with `--title`, `--description` and

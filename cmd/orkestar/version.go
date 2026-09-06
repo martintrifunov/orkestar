@@ -1,4 +1,4 @@
 package main
 
 // Overridden by release builds using -X main.version.
-var version = "0.2.0"
+var version = "0.3.0"
