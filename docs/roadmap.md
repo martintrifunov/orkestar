@@ -66,7 +66,42 @@ each vertical slice before broadening the surface.
 - [ ] Per-agent tool exposure
 - [ ] Serialized mutation routing
 
-## M5: Game engines
+## M5: Coordination and reach
+
+Ordered by what unblocks the most. The first four deepen orchestration, which
+is what Orkestar has that a terminal multiplexer does not; the fifth makes the
+promise of walking away true; the sixth is daily-use polish.
+
+- [ ] **Task and agent event subscriptions, with a blocking wait.** Every
+      `task.*` method is request/response today, so an agent orchestrating
+      three tasks can only poll, at the cost of a model turn per check. Add a
+      task event stream beside the terminal and agent ones, and
+      `task.wait`/`agent.wait` with an until condition (done, blocked,
+      stopped). Expose both over MCP, not only IPC. This is what turns
+      "an agent can start work" into "an agent can run a pipeline", and every
+      item below composes better once it exists.
+- [ ] **Notifications that leave the terminal.** The bell only rings for
+      someone already attached, and the moments it detects — a task finishing,
+      an agent stopping with work unfinished — are by definition the ones
+      nobody is watching. The detection is written and tested; it needs a
+      delivery path out of the TUI.
+- [ ] **An agent skill document for the orchestration loop.** The MCP tools
+      describe themselves one at a time and nothing teaches the shape: create a
+      task, give it a worktree, start an agent on it, wait, review, complete.
+      An agent will not infer it. Written after the wait primitive so it
+      teaches the finished loop rather than needing a rewrite.
+- [ ] **Workflow templates.** Declare a set of tasks, their dependencies and
+      the agents that work them, then apply it. Worth little without the wait
+      primitive and worth a lot with it, which is why it sits below.
+- [ ] **Remote daemon attachment over SSH.** The hard part is done: the daemon
+      has owned every process since M1 and clients are already disposable, so
+      this is a transport problem rather than an architectural one. The largest
+      piece here, and nothing else depends on it.
+- [ ] **Task-scoped pane groups.** Panes already belong to a task; the sidebar
+      does not group them that way. The affordance other multiplexers get from
+      arbitrary tabs, taken from the structure Orkestar already models.
+
+## M6: Game engines
 
 - [ ] Unreal Engine MCP detection and routing
 - [ ] Unreal editor lease and automation artifacts
@@ -78,12 +113,46 @@ each vertical slice before broadening the surface.
 ## Later possibilities
 
 - Mouse menus and right-click actions
-- Rich terminal layouts and tabs
-- Inline image protocols
-- SSH and remote daemon attachment
-- Workflow templates and plugin distribution
+- Configurable key bindings and themes; people arrive with muscle memory, so
+  bindings matter more than colours
+- Inline image protocols — revisit with M6, where a screenshot of an engine
+  viewport is the artifact the workflow produces
+- Additional agent adapters (Cursor, Grok); the contract exists, each is reach
+  rather than depth
+- Named sessions, pane renaming, `install.sh` and mise distribution
+- Plugin distribution. Deliberately not before there are users: designing
+  extension points against zero real extensions means guessing wrong and then
+  supporting the guess
 - Optional native desktop client, only if TUI and engine panels cannot support a
   validated workflow
+
+## Reassessment — 2026-09-06
+
+M0 through M3 are complete. M4 holds only the orchestration MCP server, now
+carrying task and agent tools so one agent can hand work to another; the four
+remaining items are a different job, Orkestar acting as a gateway to *other*
+MCP servers, and none of it is started. M5 is new, M6 is the old M5 renumbered.
+
+M5 comes from reading [herdr](https://github.com/herdrdev/herdr), an
+agent-native terminal multiplexer with far more people and reach. Competing
+with it on multiplexer surface — plugins, themes, tabs, graphics, a marketplace
+— is a race Orkestar loses and does not need to run. What it has instead is a
+workflow layer: tasks with dependencies, worktrees, a review gate, artifacts,
+leases, and MCP. Everything promoted into M5 was chosen because it makes that
+layer work, not because a multiplexer has it.
+
+The one thing herdr does that Orkestar cannot is let an agent wait on another
+agent. That is the first item, and it is the gap that matters: the work shipped
+in v0.3.0 lets an agent start a task and follows the board as it runs, but
+leaves no way to wait for the result.
+
+Also worth recording, because it shaped this list more than any feature
+comparison: three bugs found on 2026-09-06 had all been present since v0.1.0 —
+a prompt that never submitted, a launch that briefed nobody, an interrupt
+reported as a crash. Each passed every deterministic fixture and failed against
+a real agent. The fixtures test Orkestar's machinery, not that the machinery
+moves an agent. Running `scripts/live-agents.py` is still outstanding and is
+the standing answer to that class of defect.
 
 ## Reassessment — 2026-09-05
 
