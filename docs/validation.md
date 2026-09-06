@@ -191,23 +191,59 @@ settings were changed by these checks.
 
 ## Windows release validation
 
-Native Windows CI now exercises ConPTY final output, input deadlines and a
-PowerShell session that survives detach/reattach and clears on reset over a
-private named pipe. These tests are added but have not been run on Windows in
-the local macOS session. The original POSIX PTY fixtures run on macOS/Linux.
-Windows installed Claude Code, Codex and OpenCode model-turn and hook behavior
-remain unvalidated. Cross-builds are a compile check, not runtime evidence.
+Native Windows CI has now run and passed on `windows-latest`. It exercises
+ConPTY final output and input deadlines (`internal/pty`), a PowerShell session
+that survives detach/reattach and clears on reset over a private named pipe
+(`internal/daemon`), and the CLI reset sequence (`cmd/orkestar`). The same job
+builds with `build.ps1`, checks architecture detection with
+`install.ps1 -CheckArchitecture`, and runs `scripts/windows-smoke.ps1`, which
+confirms a detached daemon survives CLI exit. That is real runtime evidence on
+Windows, not a cross-compile.
 
-## v0.1.0 local checks
+Not covered: `install.ps1` end to end on real hardware, meaning the release
+download, checksum verification and user `PATH` update. Windows installed Claude
+Code, Codex and OpenCode model-turn and hook behavior also remain unvalidated.
+The POSIX PTY fixture suite still runs only on macOS/Linux.
 
-On macOS arm64, `go test ./...` and `go vet ./...` pass. Race checks pass for
-TUI, daemon, IPC and PTY packages. The real outer-PTY adapter matrix verifies
-that CSI-u Shift+Enter reaches Claude Code, Codex and OpenCode fixtures intact.
-Windows amd64 vet passes; six macOS/Linux/Windows amd64/arm64 release archives
-build locally. Native Windows CI and authenticated agent runs remain pending.
+## v0.1.0 release checks
+
+CI is green on all four jobs (ubuntu, macOS, Windows, cross-build) for the
+tagged commit. The release workflow re-ran `go test ./...` and `go vet ./...` at
+the tag before packaging. The real outer-PTY adapter matrix verifies that CSI-u
+Shift+Enter reaches Claude Code, Codex and OpenCode fixtures intact.
+
+All six published archives were re-downloaded and verified against the release
+`SHA256SUMS`: six of six match. The darwin-arm64 archive's binary reports
+`orkestar 0.1.0`, and the Windows zip contains `orkestar.exe`, `LICENSE` and
+`README.md`.
+
+Homebrew is verified on macOS arm64: `brew install martintrifunov/tap/orkestar`
+builds from source, `brew test` passes, and `brew audit --strict` reports
+nothing. The installed executable resolves on `PATH` and reports `orkestar
+0.1.0`.
+
+Authenticated live agent runs remain pending.
 
 Confirmed CLI reset is tested against both a current subprocess daemon and a
 legacy fixture without `system.reset`. The legacy fixture closes its listener,
 then delays its last metadata write. Tests verify that preview leaves it alive,
 reset waits for process exit, clears persisted records, preserves user files,
 and leaves the replacement daemon stopped.
+
+## Test reliability
+
+Several suite flakes surfaced under CI load and were fixed rather than retried.
+Parallel tests that wrote their own executable fixture could race a sibling's
+fork and fail `exec` with `ETXTBSY`; the PTY session fixture is now written once
+before any test forks. `system.shutdown` closed the connection before its
+acknowledgement was written, so a client could see `EOF` for a shutdown that
+succeeded; the server now replies first and stops second. A split-layout test
+inferred geometry from content rows, which depend on how many lines each pane's
+shell printed, and now compares columns instead.
+
+One flake remains unexplained: `internal/agent/claude` timing out after five
+seconds waiting for `StateStopped`, seen only on loaded CI runners and never
+reproduced locally across forty targeted runs, four unconstrained Linux suites
+and three pinned to two CPUs. The lifecycle wait now reports the states it did
+observe, so the next occurrence identifies whether the wrong state arrived or
+none did.

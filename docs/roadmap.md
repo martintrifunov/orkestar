@@ -128,8 +128,12 @@ Next priorities:
 - [x] Preserve Shift+Enter and make confirmed reset stop the daemon, including older versions
 - [x] Windows ConPTY, named-pipe transport and PowerShell scripts
 - [x] Release archives, checksums and Homebrew formula generation
-- [ ] Run native Windows CI and installed-agent validation
-- [ ] Publish v0.1.0 and install the formula in martintrifunov/homebrew-tap
+- [x] Run native Windows CI
+- [x] Publish v0.1.0 and install the formula in martintrifunov/homebrew-tap
+- [ ] Verify `install.ps1` end to end on real Windows hardware
+- [ ] Run the authenticated installed-agent matrix
 
-This adds Windows explicitly at the user's request. Release preparation does not
-mean the tag, binaries or Homebrew formula have already been published.
+v0.1.0 is published. Its archives and checksums are verified, and Homebrew
+installs, tests and audits clean. Windows is covered by native CI, but the
+PowerShell installer has not been run on real hardware, and no authenticated
+agent turns have been recorded for this version.

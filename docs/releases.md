@@ -1,7 +1,7 @@
 # Releases
 
-The first version is **v0.1.0**. Source builds report 0.1.0; release packaging stamps
-the tag version with `-X main.version`. Update the source default and changelog
+The first version is **v0.1.0**, published 2026-09-06. Source builds report 0.1.0;
+release packaging stamps the tag version with `-X main.version`. Update the source default and changelog
 for subsequent releases.
 
 Before publishing, run the full macOS/Linux CI and native Windows job. Windows
@@ -20,9 +20,19 @@ and builds from the tagged source. The tap owns its own updates: `update-orkesta
 in `martintrifunov/homebrew-tap` reads this repository's latest release, rewrites the
 formula's `url` and `sha256`, then runs `brew audit --strict`, a source build and
 `brew test` before committing. It runs on a schedule and on manual dispatch, so no
-cross-repository token is needed here. Dispatch it after publishing a release rather
-than waiting for the next scheduled run. The source checksum can only be computed
+cross-repository token is needed here. The source checksum can only be computed
 after the tag exists remotely.
+
+That workflow exits early when the formula already targets the released version,
+**before** it audits, builds or tests. So it validates a version bump, not a
+formula written by hand. After seeding or editing the formula directly, verify it
+yourself instead:
+
+```sh
+brew install martintrifunov/tap/orkestar
+brew test martintrifunov/tap/orkestar
+brew audit --strict martintrifunov/tap/orkestar
+```
 
 Once the release and formula are published:
 
