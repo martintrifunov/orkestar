@@ -22,9 +22,14 @@ type editorSettings struct {
 	// Syntax is a pointer so an absent key means on, and "syntax": false in
 	// tui.json is distinguishable from the zero value.
 	Syntax *bool `json:"syntax,omitempty"`
+	// Bell is the same shape as Syntax: absent means on. It rings the
+	// terminal bell when a task finishes or an agent working one stops
+	// unexpectedly, which are the two moments worth looking up for.
+	Bell *bool `json:"bell,omitempty"`
 }
 
 func (s editorSettings) syntaxEnabled() bool { return s.Syntax == nil || *s.Syntax }
+func (s editorSettings) bellEnabled() bool   { return s.Bell == nil || *s.Bell }
 
 const (
 	defaultMaxPanes = 16
@@ -335,7 +340,11 @@ func (m Model) promptView() string {
 		if !m.settings.syntaxEnabled() {
 			syntax = "off"
 		}
-		return "Editor settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\n\nCurrent: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
+		bell := "on"
+		if !m.settings.bellEnabled() {
+			bell = "off"
+		}
+		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
 	}
 	matches := m.matches()
 	var lines []string
@@ -379,6 +388,19 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, tea.Batch(cmds...)
+		}
+		if k.String() == "b" {
+			on := !m.settings.bellEnabled()
+			m.settings.Bell = &on
+			if m.err = m.settings.save(); m.err != nil {
+				return m, nil
+			}
+			m.settingsOpen = false
+			m.notice = "Bell: off"
+			if on {
+				m.notice = "Bell: on"
+			}
+			return m, nil
 		}
 		modes := map[string]string{"1": "standard", "2": "vim", "3": "nano"}
 		if mode, ok := modes[k.String()]; ok {

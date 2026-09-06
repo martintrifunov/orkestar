@@ -9,6 +9,8 @@
 - Move a task from pending to in_progress on its agent's first prompt or tool
   use, so the board follows the work instead of waiting to be told. A task that
   is already done, cancelled or blocked is left alone.
+- Ring the terminal bell when a task finishes, or when an agent stops with its
+  task still open. Turn it off with `b` in settings or `"bell": false`.
 
 ## 0.2.0
 

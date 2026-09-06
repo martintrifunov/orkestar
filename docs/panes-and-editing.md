@@ -90,6 +90,21 @@ The same hand-off from the command line:
 orkestar agent launch <workspace-id> <adapter> --task=<task-id>
 ```
 
+## The bell
+
+Orkestar rings the terminal bell twice: when a task reaches **done**, and when
+an agent stops, crashes or is interrupted while the task it was working is
+still open. The second is the one that earns it — a session that stops on its
+own announces nothing, it simply stops producing output.
+
+Nothing else rings. Starting a task, cancelling one, and an agent stopping
+after its task was finished or cancelled are all silent, and the snapshot the
+TUI loads on attach never rings, or every task finished yesterday would.
+
+What the bell does — a sound, a flash, a notification badge — is the
+terminal's business. Turn it off with `b` in settings, or `"bell": false` in
+`tui.json`.
+
 ## Selecting and copying in a terminal pane
 
 Dragging with the left button over a terminal pane selects its visible screen

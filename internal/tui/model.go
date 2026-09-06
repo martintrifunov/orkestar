@@ -113,6 +113,9 @@ type Model struct {
 	// automatically.
 	pickingAgent  bool
 	agentPickerAt int
+	// snapshotLoaded guards the first comparison: everything in the opening
+	// snapshot would otherwise look like it had just happened.
+	snapshotLoaded bool
 	// pickerTaskID is the task the agent being picked will work on, set when
 	// the picker was opened from the Tasks section. Launching with it hands
 	// the task over in one step instead of leaving the assignment to be
@@ -553,6 +556,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.err = message.err
 		if message.err == nil {
+			// Compare before replacing: the bell is about what changed, and
+			// the first snapshot has nothing to have changed from.
+			var ring tea.Cmd
+			if m.snapshotLoaded {
+				if notice := bellFor(m.snapshot, message.snapshot); notice != "" {
+					m.notice = notice
+					ring = m.ring()
+				}
+			}
+			m.snapshotLoaded = true
 			m.snapshot = message.snapshot
 			if m.selected >= len(m.snapshot.Terminals) && m.selected > 0 {
 				m.selected = max(0, len(m.snapshot.Terminals)-1)
@@ -562,6 +575,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
 				m.agentSelected = max(0, len(m.snapshot.Agents)-1)
+			}
+			if ring != nil {
+				return m, ring
 			}
 		}
 	case terminalStartedMsg:

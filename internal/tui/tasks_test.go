@@ -163,7 +163,9 @@ func TestTaskLifecycleFromTheSidebar(t *testing.T) {
 	if m.err != nil || m.snapshot.Tasks[0].Status != workflow.StatusDone {
 		t.Fatalf("task was not completed: %v %+v", m.err, m.snapshot.Tasks[0])
 	}
-	if m.taskBusy || m.notice != "Task done" {
+	// The snapshot that follows the change names the task that finished,
+	// which is the same notice the bell shows when an agent completes one.
+	if m.taskBusy || !strings.Contains(m.notice, "Task done") || !strings.Contains(m.notice, "Ship it") {
 		t.Fatalf("completion was not reported: busy=%v notice=%q", m.taskBusy, m.notice)
 	}
 
