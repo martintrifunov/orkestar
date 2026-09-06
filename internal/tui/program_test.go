@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/agent/claude"
 	"github.com/martintrifunov/orkestar/internal/agent/codex"
@@ -295,16 +297,18 @@ func TestProgramNestedSplitsWithRealKeys(t *testing.T) {
 		send("printf 'pane-%s\\n' " + suffix + "\r")
 		wait("pane-" + suffix)
 	}
-	// paneRows reports which rendered rows contain a marker, which is how the
-	// test distinguishes a side-by-side split from a stacked one.
-	paneRows := func(marker string) []int {
-		var rows []int
+	// panePositions reports the row and visual column of each marker. Column
+	// distinguishes a side-by-side split from a stacked one; row alone cannot,
+	// because a marker's row depends on how many lines its shell has printed,
+	// which differs between panes under load.
+	panePositions := func(marker string) [][2]int {
+		var positions [][2]int
 		for i, line := range strings.Split(screen.Render(), "\n") {
-			if strings.Contains(line, marker) {
-				rows = append(rows, i)
+			if column := strings.Index(ansi.Strip(line), marker); column >= 0 {
+				positions = append(positions, [2]int{i, column})
 			}
 		}
-		return rows
+		return positions
 	}
 	wait("Open a session")
 	send("n")
@@ -318,15 +322,15 @@ func TestProgramNestedSplitsWithRealKeys(t *testing.T) {
 	wait("3 panes")
 	markPane("three")
 
-	first, second, third := paneRows("pane-one"), paneRows("pane-two"), paneRows("pane-three")
+	first, second, third := panePositions("pane-one"), panePositions("pane-two"), panePositions("pane-three")
 	if len(first) != 1 || len(second) != 1 || len(third) != 1 {
-		t.Fatalf("expected three distinct panes, got rows %v %v %v:\n%s", first, second, third, screen.Render())
+		t.Fatalf("expected three distinct panes, got %v %v %v:\n%s", first, second, third, screen.Render())
 	}
-	if second[0] != third[0] {
-		t.Fatalf("v did not place the third pane beside the second: rows %v %v", second, third)
+	if third[0][1] <= second[0][1] {
+		t.Fatalf("v did not place the third pane right of the second: %v %v", second, third)
 	}
-	if first[0] >= second[0] {
-		t.Fatalf("s did not place the second pane below the first: rows %v %v", first, second)
+	if first[0][0] >= second[0][0] || first[0][0] >= third[0][0] {
+		t.Fatalf("s did not place the later panes below the first: %v %v %v", first, second, third)
 	}
 	// Cycling focus does not disturb any pane's content.
 	for i := 0; i < 3; i++ {
@@ -334,7 +338,7 @@ func TestProgramNestedSplitsWithRealKeys(t *testing.T) {
 	}
 	wait("3 panes")
 	for _, marker := range []string{"pane-one", "pane-two", "pane-three"} {
-		if len(paneRows(marker)) != 1 {
+		if len(panePositions(marker)) != 1 {
 			t.Fatalf("cycling focus disturbed %s:\n%s", marker, screen.Render())
 		}
 	}
@@ -343,12 +347,12 @@ func TestProgramNestedSplitsWithRealKeys(t *testing.T) {
 	send("\x02q")
 	wait("2 panes")
 	for _, marker := range []string{"pane-one", "pane-two"} {
-		if len(paneRows(marker)) != 1 {
+		if len(panePositions(marker)) != 1 {
 			t.Fatalf("closing a pane disturbed %s:\n%s", marker, screen.Render())
 		}
 	}
-	if rows := paneRows("pane-three"); len(rows) != 0 {
-		t.Fatalf("closed pane is still rendered at %v:\n%s", rows, screen.Render())
+	if positions := panePositions("pane-three"); len(positions) != 0 {
+		t.Fatalf("closed pane is still rendered at %v:\n%s", positions, screen.Render())
 	}
 	send("\x02\t")
 	wait("esc terminal")
