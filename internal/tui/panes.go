@@ -61,6 +61,8 @@ func (m Model) paneRects() []paneRect {
 	return rects
 }
 func (m Model) resizePanes() {
+	// A new geometry puts different cells where the highlight was drawn.
+	m.clearSelections()
 	for _, r := range m.paneRects() {
 		sendEmbeddedResize(r.terminal, max(1, r.width-4), max(1, r.height-2))
 	}
@@ -158,8 +160,9 @@ func (m Model) renderPanes() string {
 		if r.terminal == m.embedded && !m.sidebarFocused {
 			style = style.BorderForeground(lipgloss.Color("#D7A84B"))
 		}
-		content := r.terminal.emulator.Render()
-		box := style.Width(r.width).Height(r.height).Render(fitPane(content, r.width-4, r.height-2))
+		content := fitPane(r.terminal.emulator.Render(), r.width-4, r.height-2)
+		content = r.terminal.selection.highlight(content, r.width-4)
+		box := style.Width(r.width).Height(r.height).Render(content)
 		boxes[r.terminal] = withPaneTitle(box, m.paneLabel(r.terminal), r.width, style)
 	}
 	if len(rects) == 1 {
@@ -310,6 +313,11 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 			m.embedded = r.terminal
 			m.sidebarFocused = false
 			m.filesFocused = false
+			if mouse.Button == tea.MouseLeft && m.selectable(r.terminal, mouse.Mod&tea.ModShift != 0) {
+				_, x, y, _ := m.paneContentAt(mouse.X, mouse.Y)
+				r.terminal.selection.begin(x, y)
+				return m, nil
+			}
 			m.forwardMouse("click", mouse)
 			if e := r.terminal.editor; e != nil && mouse.Button == tea.MouseLeft {
 				e.click(mouse.X-r.x-2, mouse.Y-r.y-1, mouse.Mod&tea.ModShift != 0)

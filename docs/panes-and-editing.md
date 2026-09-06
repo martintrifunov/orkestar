@@ -66,6 +66,23 @@ scrolls the tree.
 The viewer shows the workspace Orkestar was started in. In a window too narrow to
 keep a usable pane beside it, it stays hidden rather than squeezing the panes.
 
+## Selecting and copying in a terminal pane
+
+Dragging with the left button over a terminal pane selects its visible screen
+and copies the selection to the system clipboard on release, reporting how many
+lines it took. The selection flows from the first cell to the last through the
+ends of the rows between them, the way a terminal selects, and it covers the
+screen rather than the scrollback, so `Ctrl+b [` is still how you reach earlier
+output.
+
+A click that does not move only focuses the pane; it leaves the clipboard
+alone. Typing into the pane, resizing it, and changing the layout all drop the
+highlight, because each of them puts different text where it was drawn.
+
+A program that has asked for mouse reporting receives the drag itself. Hold
+Shift to select past it, which is the same gesture terminals have always used
+for this.
+
 ## Scrolling and scrollback
 
 The mouse wheel scrolls whichever review or editor pane is under the pointer,

@@ -211,6 +211,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.embedded != nil && m.embedded.editor != nil && message.Mouse().Button != tea.MouseLeft {
 			m.embedded.editor.dragging = false
 		}
+		if m.extendSelection(message.Mouse()) {
+			return m, nil
+		}
 		if m.forwardMouse("motion", message.Mouse()) {
 			return m, nil
 		}
@@ -225,6 +228,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dragging != nil {
 			m.dragging = nil
 			return m, nil
+		}
+		if cmd, copied := m.finishSelection(); copied {
+			return m, cmd
 		}
 		if m.forwardMouse("release", message.Mouse()) {
 			return m, nil
@@ -948,6 +954,8 @@ func (m Model) openTerminal(id string) tea.Cmd {
 // and ordinary keys are routed here for terminal input.
 func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	term := m.embedded
+	// Typing moves the cells the highlight was drawn over, so it goes.
+	term.selection.clear()
 
 	if term.detachPending {
 		term.detachPending = false

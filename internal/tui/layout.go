@@ -70,7 +70,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
 	help := "a agent  n shell  enter open  X stop/remove  f files  tab section  q quit"
 	if m.embedded != nil && !m.sidebarFocused {
-		help = "Ctrl+b then: v/s split · o next · z zoom · arrows resize · d diff · e edit · f files · q close"
+		help = "drag to copy · Ctrl+b then: v/s split · o next · z zoom · arrows resize · d diff · e edit · q close"
 	}
 	if m.embedded != nil && m.sidebarFocused {
 		help = "enter open  X stop/remove  a agent  n shell  f files  esc terminal  q quit"

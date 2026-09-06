@@ -116,9 +116,12 @@ Next priorities:
 2. Watch the first CI runs and tighten any test whose timing is too tight for a
    shared runner. The workflow builds, vets, tests and race-tests on macOS and
    Linux, and cross-builds every supported target.
-3. Profile full-frame rendering under sustained output. Split trees, ratios,
-   drag resizing, pane titles and a zoom toggle have shipped; mouse selection
-   inside a terminal pane has not.
+3. ~~Profile full-frame rendering under sustained output.~~ Done: the daemon
+   rendered and marshalled a frame for every PTY chunk, including with no
+   subscriber attached, and the client repainted per frame. Frames are now
+   rendered at delivery and repaints are held to one per 16ms. ~~Mouse
+   selection inside a terminal pane has not shipped.~~ Dragging over a terminal
+   pane now selects and copies.
 4. Implement the MCP client registry, health checks, policy/audit and serialized
    mutation routing before introducing engine integrations.
 

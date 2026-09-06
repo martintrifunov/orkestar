@@ -32,6 +32,9 @@ type embeddedTerminal struct {
 	closeOnce     sync.Once
 	detachPending bool
 	exited        bool
+	// selection is the user's own drag over this pane's screen, which is
+	// separate from anything the program inside it does with the mouse.
+	selection paneSelection
 
 	// painted is when this pane last woke the UI, in Unix nanoseconds. Frames
 	// are applied to view the moment they arrive, so a repaint always draws

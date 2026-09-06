@@ -6,6 +6,12 @@
   ending it early. Claude Code sets the window title to "✳ <conversation>"
   when a turn finishes, and the 9C byte of U+2733 was read as a String
   Terminator, printing the rest of the title into the agent pane's input box.
+- Select text in a terminal pane by dragging, and copy it to the system
+  clipboard on release. Hold Shift to select past a program that has taken the
+  mouse over.
+- Render a screen when a client is ready for it rather than for every chunk of
+  PTY output, and hold client repaints to one per 16ms. Sustained output cost
+  the daemon 136us per chunk and now costs 18us.
 
 ## 0.1.0
 
