@@ -18,6 +18,7 @@ import (
 type Screen struct {
 	mouseModes map[ansi.Mode]bool
 	vt         *vt.Emulator
+	guard      stringGuard
 	mu         sync.Mutex
 	input      io.WriteCloser
 	once       sync.Once
@@ -60,10 +61,18 @@ func (f Frame) ANSI() string {
 	}
 	return "\x1b[H\x1b[2J" + strings.ReplaceAll(f.Content, "\n", "\r\n") + cursor
 }
+
+// Write feeds output to the emulator through stringGuard, which keeps a UTF-8
+// character inside a string sequence from ending it early. It reports the full
+// length on success because the guard may hand the emulator fewer bytes than
+// it was given, and a short write would look like an error to the caller.
 func (s *Screen) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.vt.Write(data)
+	if _, err := s.vt.Write(s.guard.filter(data)); err != nil {
+		return 0, err
+	}
+	return len(data), nil
 }
 func (s *Screen) Read(data []byte) (int, error) { return s.vt.Read(data) }
 func (s *Screen) Render() string                { return s.Frame().Content }

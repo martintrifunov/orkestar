@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Stop a UTF-8 character inside an OSC, DCS, SOS, PM or APC sequence from
+  ending it early. Claude Code sets the window title to "✳ <conversation>"
+  when a turn finishes, and the 9C byte of U+2733 was read as a String
+  Terminator, printing the rest of the title into the agent pane's input box.
+
 ## 0.1.0
 
 Initial versioned release: daemon-owned agent and shell sessions, reconnectable
