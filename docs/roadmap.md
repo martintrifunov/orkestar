@@ -72,7 +72,7 @@ Ordered by what unblocks the most. The first four deepen orchestration, which
 is what Orkestar has that a terminal multiplexer does not; the fifth makes the
 promise of walking away true; the sixth is daily-use polish.
 
-- [ ] **Task and agent event subscriptions, with a blocking wait.** Every
+- [x] **Task and agent event subscriptions, with a blocking wait.** Every
       `task.*` method is request/response today, so an agent orchestrating
       three tasks can only poll, at the cost of a model turn per check. Add a
       task event stream beside the terminal and agent ones, and
@@ -80,24 +80,24 @@ promise of walking away true; the sixth is daily-use polish.
       stopped). Expose both over MCP, not only IPC. This is what turns
       "an agent can start work" into "an agent can run a pipeline", and every
       item below composes better once it exists.
-- [ ] **Notifications that leave the terminal.** The bell only rings for
+- [x] **Notifications that leave the terminal.** The bell only rings for
       someone already attached, and the moments it detects — a task finishing,
       an agent stopping with work unfinished — are by definition the ones
       nobody is watching. The detection is written and tested; it needs a
       delivery path out of the TUI.
-- [ ] **An agent skill document for the orchestration loop.** The MCP tools
+- [x] **An agent skill document for the orchestration loop.** The MCP tools
       describe themselves one at a time and nothing teaches the shape: create a
       task, give it a worktree, start an agent on it, wait, review, complete.
       An agent will not infer it. Written after the wait primitive so it
       teaches the finished loop rather than needing a rewrite.
-- [ ] **Workflow templates.** Declare a set of tasks, their dependencies and
+- [x] **Workflow templates.** Declare a set of tasks, their dependencies and
       the agents that work them, then apply it. Worth little without the wait
       primitive and worth a lot with it, which is why it sits below.
 - [ ] **Remote daemon attachment over SSH.** The hard part is done: the daemon
       has owned every process since M1 and clients are already disposable, so
       this is a transport problem rather than an architectural one. The largest
       piece here, and nothing else depends on it.
-- [ ] **Task-scoped pane groups.** Panes already belong to a task; the sidebar
+- [x] **Task-scoped pane groups.** Panes already belong to a task; the sidebar
       does not group them that way. The affordance other multiplexers get from
       arbitrary tabs, taken from the structure Orkestar already models.
 
@@ -125,6 +125,25 @@ promise of walking away true; the sixth is daily-use polish.
   supporting the guess
 - Optional native desktop client, only if TUI and engine panels cannot support a
   validated workflow
+
+## M5 progress — 2026-09-06
+
+Five of six shipped the day M5 was written. Remote attachment is the one left,
+and it is the largest; nothing else depended on it, which is why it sits last.
+
+Three bugs surfaced from building the rest, all found by using the thing rather
+than by a test:
+
+- `workspace.create` made a new workspace on every call while its own MCP tool
+  description said "create or reuse". An agent told to call it before every
+  delegation was scattering work across duplicates.
+- Tasks and artifacts created in the same clock tick had no defined order, so a
+  sidebar the user selects by index could reorder between refreshes.
+- `agent.prompt` had never submitted anything to an interactive session, having
+  ended its text with a line feed where a terminal sends a carriage return.
+
+That is the same pattern the reassessment below describes, and it is the
+argument for running `scripts/live-agents.py` before adding more surface.
 
 ## Reassessment — 2026-09-06
 
