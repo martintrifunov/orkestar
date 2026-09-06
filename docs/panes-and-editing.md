@@ -168,6 +168,12 @@ open by design.
 Over MCP these are `task_wait` and `agent_wait`, which is what turns "an agent
 can start work" into "an agent can run a pipeline".
 
+An agent is told about them when it connects: the MCP server sends instructions
+describing the whole loop, because tool descriptions cover one call each and
+never the shape of the work, and an agent that has not been told waiting exists
+will poll instead. `orkestar mcp instructions` prints the same text for an
+agent that drives Orkestar through the CLI.
+
 ## The bell
 
 Orkestar rings the terminal bell twice: when a task reaches **done**, and when

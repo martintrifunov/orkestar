@@ -647,3 +647,54 @@ func TestMCPAgentWait(t *testing.T) {
 		"agent_id": launched.ID, "until": "whenever", "timeout_seconds": 5,
 	})
 }
+
+// A client is told how to use the server when it connects, which is the only
+// moment an agent reliably reads anything about one. Without it the tools are
+// discovered singly and the loop they form is not.
+func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
+	t.Parallel()
+
+	session := connectMCP(t, startTestDaemon(t))
+	instructions := session.InitializeResult().Instructions
+	if instructions == "" {
+		t.Fatal("the server sends no instructions")
+	}
+
+	// Every tool the loop depends on has to be named, or an agent following
+	// the instructions reaches a step it cannot take.
+	for _, tool := range []string{
+		"workspace_create", "task_create", "task_create_worktree", "task_start",
+		"task_wait", "agent_wait", "agent_prompt", "task_set_status",
+		"task_update", "task_diff", "artifact_create", "agent_list",
+		"resource_acquire",
+	} {
+		if !strings.Contains(instructions, tool) {
+			t.Errorf("the instructions never mention %s", tool)
+		}
+	}
+
+	// And the instructions must not name tools that do not exist.
+	listed, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	available := map[string]bool{}
+	for _, tool := range listed.Tools {
+		available[tool.Name] = true
+	}
+	for _, word := range strings.Fields(strings.NewReplacer(",", " ", ".", " ", "\n", " ").Replace(instructions)) {
+		if strings.HasPrefix(word, "task_") || strings.HasPrefix(word, "agent_") ||
+			strings.HasPrefix(word, "artifact_") || strings.HasPrefix(word, "workspace_") ||
+			strings.HasPrefix(word, "resource_") {
+			if !available[word] {
+				t.Errorf("the instructions name %q, which is not a tool", word)
+			}
+		}
+	}
+
+	// The point of the wait primitive is that an agent stops polling, so the
+	// instructions have to say so outright.
+	if !strings.Contains(instructions, "polling") && !strings.Contains(instructions, "in a loop") {
+		t.Error("the instructions never tell the agent to stop polling")
+	}
+}

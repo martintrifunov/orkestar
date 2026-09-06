@@ -20,11 +20,22 @@ import (
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
+// Instructions returns what a connecting client is told about how to use the
+// server, so the same text can be printed for an agent that reaches Orkestar
+// through the CLI rather than over MCP.
+func Instructions() string { return instructions }
+
 // NewServer returns an MCP server whose tools are backed by the daemon
 // reachable through client. The caller is responsible for running it over
 // a transport (see sdk.Transport implementations, such as sdk.StdioTransport).
 func NewServer(client *ipc.Client) *sdk.Server {
-	server := sdk.NewServer(&sdk.Implementation{Name: "orkestar", Version: "v0.3.0"}, nil)
+	// Instructions reach a client at connection time, which is the one moment
+	// an agent reliably reads anything about a server. Tool descriptions cover
+	// a call each and never the shape of the work.
+	server := sdk.NewServer(
+		&sdk.Implementation{Name: "orkestar", Version: "v0.3.0"},
+		&sdk.ServerOptions{Instructions: instructions},
+	)
 
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "workspace_create",

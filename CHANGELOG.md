@@ -7,6 +7,10 @@
   waited on until done, finished either way, or startable; an agent until it is
   blocked, idle or stopped. A wait that can no longer be satisfied fails rather
   than holding its connection to the deadline, and every wait is bounded.
+- Tell a connecting MCP client how the tools fit together, as server
+  instructions rather than a page nobody reads: create a task, give it a
+  worktree, start an agent on it, wait, review, complete. Also printable with
+  `orkestar mcp instructions`.
 - Post a task finishing, or an agent stopping with its work unfinished, as a
   desktop notification as well as a bell, and only while the terminal is not
   focused. `n` in settings, or `"notifications": false`. macOS and Linux only.

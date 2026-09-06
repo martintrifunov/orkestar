@@ -151,8 +151,14 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 }
 
 func runMCP(paths runtimepath.Paths, args []string) error {
+	if len(args) == 1 && args[0] == "instructions" {
+		// The same text an MCP client is sent on connect, for an agent that
+		// drives Orkestar through the CLI and never sees it.
+		_, err := fmt.Println(orkestarmcp.Instructions())
+		return err
+	}
 	if len(args) != 1 || args[0] != "serve" {
-		return errors.New("usage: orkestar mcp serve")
+		return errors.New("usage: orkestar mcp serve|instructions")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -272,6 +278,7 @@ Usage:
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
   orkestar task diff <task-id>
   orkestar mcp serve
+  orkestar mcp instructions
   orkestar help
 
 Detach from an attached terminal with ctrl+b q.
