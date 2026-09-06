@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
@@ -14,6 +15,19 @@ import (
 func configureCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 }
+
+// interruptedExit reports whether err says the process was killed by the
+// interrupt we sent it. An exit we asked for is not a crash, and only this
+// exact cause qualifies: anything else the process died of still is one.
+func interruptedExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	return ok && status.Signaled() && status.Signal() == syscall.SIGINT
+}
+
 func stopProcessGroup(process *os.Process, force bool) {
 	signal := syscall.SIGHUP
 	if force {

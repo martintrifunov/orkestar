@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -37,6 +38,10 @@ type Process struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	stopping  atomic.Bool
+	// interruptedAt is when Ctrl-C was last written to this process, in Unix
+	// nanoseconds. A process that then dies of that interrupt stopped because
+	// it was asked to, and wait must not report it as a crash.
+	interruptedAt atomic.Int64
 
 	waitMu  sync.RWMutex
 	waitErr error
@@ -100,11 +105,32 @@ func (p *Process) Read(data []byte) (int, error) {
 	return p.io.Read(data)
 }
 
+// interruptGrace is how long after a Ctrl-C an exit caused by SIGINT is still
+// read as that interrupt. Death by the signal we just sent is immediate; a
+// process that survives and dies of SIGINT much later was killed by something
+// else, and calling that a clean stop would hide a real failure.
+const interruptGrace = 5 * time.Second
+
 func (p *Process) Write(data []byte) (int, error) {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	_ = p.io.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	// Ctrl-C reaches a process two ways: Interrupt, and a user typing it into
+	// an attached pane, which arrives here as an ordinary input byte. Both are
+	// the same request, so record it here rather than in Interrupt alone.
+	if bytes.IndexByte(data, 0x03) >= 0 {
+		p.interruptedAt.Store(time.Now().UnixNano())
+	}
 	return p.io.Write(data)
+}
+
+// Interrupt sends Ctrl-C the way a user at an interactive terminal would.
+// Most agent CLIs treat it as "stop this turn" and carry on; one that exits
+// instead has still stopped because it was told to. Write records the request,
+// so typing the same byte into an attached pane counts too.
+func (p *Process) Interrupt() error {
+	_, err := p.Write([]byte{0x03})
+	return err
 }
 
 func (p *Process) Resize(columns, rows int) error {
@@ -154,11 +180,22 @@ func (p *Process) Close() error {
 	return nil
 }
 
+// recentlyInterrupted reports whether Ctrl-C was written recently enough that
+// a SIGINT death is attributable to it.
+func (p *Process) recentlyInterrupted() bool {
+	at := p.interruptedAt.Load()
+	return at != 0 && time.Since(time.Unix(0, at)) < interruptGrace
+}
+
 func (p *Process) wait(ctx context.Context) {
 	err := xpty.WaitProcess(ctx, p.cmd)
 	finishPTY(p.pty)
 	p.waitMu.Lock()
-	if p.stopping.Load() {
+	// Close sets stopping, but an interrupt reaches the process first and can
+	// kill it before Close is ever called: on Linux the shell dies of SIGINT
+	// where macOS's survives it. Both are the process ending because it was
+	// asked to.
+	if p.stopping.Load() || (p.recentlyInterrupted() && interruptedExit(err)) {
 		err = nil
 	}
 	p.waitErr = err

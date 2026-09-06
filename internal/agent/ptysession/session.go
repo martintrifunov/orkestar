@@ -101,7 +101,7 @@ func (s *Session) Prompt(ctx context.Context, text string) error {
 // Interrupt sends Ctrl-C (ETX), the same signal an interactive terminal
 // user would send to stop the current turn.
 func (s *Session) Interrupt(ctx context.Context) error {
-	if _, err := s.process.Write([]byte{0x03}); err != nil {
+	if err := s.process.Interrupt(); err != nil {
 		return fmt.Errorf("pty session: send interrupt: %w", err)
 	}
 	return nil

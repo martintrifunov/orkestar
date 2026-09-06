@@ -16,6 +16,21 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// controlCExit is what a console process reports when it ends on Ctrl-C:
+// STATUS_CONTROL_C_EXIT. Windows has no SIGINT wait status, so this is the
+// same fact the Unix build reads out of the signal.
+const controlCExit = 0xC000013A
+
+// interruptedExit reports whether err says the process ended on the Ctrl-C we
+// sent it, which is a stop rather than a crash.
+func interruptedExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	return uint32(exitErr.ExitCode()) == controlCExit
+}
+
 func configureCommand(cmd *exec.Cmd) {
 	ext := strings.ToLower(filepath.Ext(cmd.Path))
 	if ext != ".cmd" && ext != ".bat" {

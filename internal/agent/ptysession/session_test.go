@@ -134,3 +134,82 @@ func waitForState(t *testing.T, session agent.Session, want agent.State) {
 		}
 	}
 }
+
+// An agent that exits on the interrupt Orkestar sent it has stopped, not
+// crashed. The two are read very differently: a crash raises attention, and a
+// crash with an unfinished task rings the bell.
+//
+// Only the ordering makes this visible. Close marks the process as stopping,
+// but the interrupt reaches the process first and can kill it before Close is
+// ever called, which is what a loaded CI runner does. Linux shows it where
+// macOS does not: dash dies of SIGINT, macOS's sh survives it.
+func TestExitingOnOurOwnInterruptIsAStop(t *testing.T) {
+	t.Parallel()
+
+	session, err := ptysession.Launch("fixture", fixtureExecutable(t), agent.LaunchOptions{
+		Directory: t.TempDir(), Columns: 80, Rows: 24,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer session.Close()
+	waitForState(t, session, agent.StateReady)
+
+	if err := session.Interrupt(t.Context()); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	// Stand in for the scheduling delay that lets the interrupt land first.
+	time.Sleep(300 * time.Millisecond)
+	if err := session.Process().Close(); err != nil {
+		t.Fatalf("close process: %v", err)
+	}
+
+	waitForState(t, session, agent.StateStopped)
+}
+
+// A process that dies of anything else is still a crash: the classification
+// has to stay narrow, or it hides the failures it exists to report.
+func TestAnUnrequestedExitIsStillACrash(t *testing.T) {
+	t.Parallel()
+
+	executable := filepath.Join(t.TempDir(), "fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 3\n"), 0o755); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	session, err := ptysession.Launch("fixture", executable, agent.LaunchOptions{
+		Directory: t.TempDir(), Columns: 80, Rows: 24,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer session.Close()
+
+	waitForState(t, session, agent.StateCrashed)
+}
+
+// Ctrl-C reaches an agent two ways, and both are the same request. The sidebar
+// i key calls Interrupt; a user typing ^C into an attached pane sends the byte
+// as ordinary input, which is the path most people actually use.
+func TestTypedControlCCountsAsAnInterrupt(t *testing.T) {
+	t.Parallel()
+
+	session, err := ptysession.Launch("fixture", fixtureExecutable(t), agent.LaunchOptions{
+		Directory: t.TempDir(), Columns: 80, Rows: 24,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer session.Close()
+	waitForState(t, session, agent.StateReady)
+
+	// Written as input, exactly as an attached pane forwards a keystroke.
+	if _, err := session.Process().Write([]byte{0x03}); err != nil {
+		t.Fatalf("write interrupt: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if err := session.Process().Close(); err != nil {
+		t.Fatalf("close process: %v", err)
+	}
+
+	waitForState(t, session, agent.StateStopped)
+}

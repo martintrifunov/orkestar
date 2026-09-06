@@ -2,13 +2,16 @@
 
 ## Unreleased
 
-- Launch an agent for a task, from the Tasks list with `a`, from MCP-adjacent
-  callers with `task_id` on `agent.launch`, or with
+- Launch an agent for a task, from the Tasks list with `a`, with `task_id` on
+  `agent.launch`, or with
   `orkestar agent launch <workspace> <adapter> --task=<id>`. The session starts
   in the task's worktree and the assignment is recorded both ways in one call.
 - Move a task from pending to in_progress on its agent's first prompt or tool
   use, so the board follows the work instead of waiting to be told. A task that
   is already done, cancelled or blocked is left alone.
+- Report an agent that exits on an interrupt as stopped rather than crashed,
+  whether the interrupt came from the sidebar or was typed into its pane.
+  Anything else it dies of is still a crash.
 - Ring the terminal bell when a task finishes, or when an agent stops with its
   task still open. Turn it off with `b` in settings or `"bell": false`.
 
