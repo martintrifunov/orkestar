@@ -30,9 +30,11 @@ Once the release and formula are published:
 brew install martintrifunov/tap/orkestar
 ```
 
-For Windows, download `install.ps1` from the same release tag and run it in
-PowerShell. It selects amd64/arm64, verifies SHA-256, and installs without admin
-rights. `build.ps1 -Task Build|Test|Install|Uninstall` supports source development.
+For Windows, users install with
+`irm https://raw.githubusercontent.com/martintrifunov/orkestar/main/install.ps1 | iex`,
+matching thisyou. The script is served from `main`, not from a tag, so it always
+resolves `releases/latest/download`; keep it working for the newest release. It
+selects amd64/arm64, verifies SHA-256, and installs without admin rights. `build.ps1 -Task Build|Test|Install|Uninstall` supports source development.
 Uninstall removes the executable and PATH entry, retaining user data. Upgrades
 must wait until a running daemon can be deliberately stopped, since Windows may
 lock its executable.

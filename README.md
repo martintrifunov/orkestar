@@ -46,24 +46,34 @@ No account, no server, no browser. One static binary.
 
 ## Installation
 
-Version **v0.1.0** introduces Homebrew and Windows PowerShell distribution.
-These commands become available after the release and tap formula are published
-(see [release preparation](docs/releases.md)).
+On macOS or Linux, with Homebrew:
 
 ```bash
 brew install martintrifunov/tap/orkestar
 ```
 
-Windows 10 1809+ / Windows 11, from PowerShell:
+Install the latest x64 or ARM64 release from PowerShell, on Windows 10 1809+ or
+Windows 11:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/martintrifunov/orkestar/v0.1.0/install.ps1 -OutFile install.ps1
-./install.ps1
+irm https://raw.githubusercontent.com/martintrifunov/orkestar/main/install.ps1 | iex
 ```
 
-The installer verifies the checksum and adds Orkestar to your user PATH.
+The installer verifies the release checksum, places `orkestar.exe` in
+`%LOCALAPPDATA%\Programs\orkestar`, and adds that directory to your user `PATH`.
+Run the same command again to upgrade, once any running daemon can be stopped.
 Use Windows Terminal; shell panes prefer PowerShell 7, falling back to Windows
-PowerShell. Agent CLIs must be installed separately.
+PowerShell.
+
+To review the installer before running it:
+
+```powershell
+irm https://raw.githubusercontent.com/martintrifunov/orkestar/main/install.ps1 -OutFile install-orkestar.ps1
+Get-Content .\install-orkestar.ps1
+.\install-orkestar.ps1
+```
+
+Agent CLIs must be installed separately.
 
 Build from source with Go 1.27 or newer on macOS, Linux or Windows:
 
