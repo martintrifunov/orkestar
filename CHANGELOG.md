@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Right-click a pane for a menu of what it can do, listing only what applies to
+  that pane and showing the key for each.
 - Run separate daemons with `orkestar --session <name>`, each with its own
   socket, database and log. The default session is unchanged.
 - Rename the focused pane with `Ctrl+b r`, so a layout of shells is not a row

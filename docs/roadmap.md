@@ -127,7 +127,7 @@ Ordered by what stands between a new user and a working session.
       piece of work at a time. Named sessions separate projects that should not
       share a board; renaming a pane is small and makes a crowded layout
       readable.
-- [ ] **Mouse menus and right-click actions.** Discoverability for people who
+- [x] **Mouse menus and right-click actions.** Discoverability for people who
       do not read a help line. Worth doing after bindings, not before: someone
       who cannot rebind will not stay long enough to find a menu.
 

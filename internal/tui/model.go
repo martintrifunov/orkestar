@@ -82,6 +82,10 @@ type Model struct {
 	renaming *embeddedTerminal
 	renameTo string
 
+	// menu is an open right-click menu, which owns the keyboard and the mouse
+	// while it is up.
+	menu *paneMenu
+
 	// The file viewer mirrors the sidebar on the right edge. It is closed by
 	// default and reads the workspace only while open.
 	filesOpen, filesFocused, filesLoading bool
@@ -332,6 +336,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseClickMsg:
+		if m.menu != nil {
+			return m.menuClick(message.Mouse())
+		}
+		// The right button is what people try when they want to know what a
+		// thing can do, and it costs them nothing to find out.
+		if message.Mouse().Button == tea.MouseRight && !m.prompting() && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
+			if m.openMenu(message.Mouse()) {
+				return m, nil
+			}
+		}
 		return m.mouseClick(message)
 	case tea.PasteMsg:
 		if m.filePrompt {
@@ -348,6 +362,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyPressMsg:
+		if m.menu != nil {
+			return m.updateMenu(message)
+		}
 		if m.prompting() {
 			return m.updatePrompt(message)
 		}
@@ -763,7 +780,7 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) render() string {
-	return m.renderEmbedded(m.width, m.height)
+	return m.renderMenu(m.renderEmbedded(m.width, m.height))
 }
 
 func (m Model) renderAgentPicker(width int) string {

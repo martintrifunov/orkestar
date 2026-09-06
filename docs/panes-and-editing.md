@@ -143,6 +143,23 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Right-click menu
+
+Right-clicking a pane opens a menu of what that pane can do. A help line only
+reaches people who read help lines; this is how everyone else finds out, and it
+costs nothing to try.
+
+The menu offers only what would actually work on the pane under the pointer:
+zoom and cycling appear once there is more than one pane, scrollback belongs to
+a terminal rather than a document, and taking control appears only on a pane
+this client is not driving. An entry that did nothing would teach the wrong
+thing about the whole menu.
+
+Each entry shows its key, so the menu teaches the keyboard rather than
+replacing it, and it shows *your* key: rebinding is reflected here too. Arrow
+keys and `Enter` work; `Esc`, any other key, or a click away closes it without
+doing anything.
+
 ## Named sessions
 
 One daemon per machine assumes one piece of work at a time. Two projects that
