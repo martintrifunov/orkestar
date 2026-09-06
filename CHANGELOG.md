@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Order tasks and artifacts by when they were created rather than only by their
+  timestamps. Two created in the same clock tick compared equal, so the sidebar
+  could show them in a different order on each refresh.
+
 ## 0.3.0
 
 Tasks stop being a list beside the agents and start describing them: an agent

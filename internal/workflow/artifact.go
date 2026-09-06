@@ -46,11 +46,30 @@ type Artifact struct {
 type ArtifactStore struct {
 	mu        sync.Mutex
 	artifacts map[string]Artifact
+	// order records the sequence each artifact was added in. Timestamps alone
+	// do not order them: two artifacts recorded in the same clock tick compare
+	// equal, and ranging a map to build the slice means the winner changes
+	// between calls. A reviewer verdict and the diff it judged land together
+	// often enough for that to be visible.
+	order map[string]uint64
+	next  uint64
 }
 
 // NewArtifactStore returns an empty ArtifactStore.
 func NewArtifactStore() *ArtifactStore {
-	return &ArtifactStore{artifacts: make(map[string]Artifact)}
+	return &ArtifactStore{artifacts: make(map[string]Artifact), order: make(map[string]uint64)}
+}
+
+// sorted orders artifacts oldest first, breaking ties by the order they
+// arrived. Callers must hold s.mu.
+func (s *ArtifactStore) sorted(artifacts []Artifact) []Artifact {
+	sort.Slice(artifacts, func(left, right int) bool {
+		if !artifacts[left].CreatedAt.Equal(artifacts[right].CreatedAt) {
+			return artifacts[left].CreatedAt.Before(artifacts[right].CreatedAt)
+		}
+		return s.order[artifacts[left].ID] < s.order[artifacts[right].ID]
+	})
+	return artifacts
 }
 
 // Add records a new artifact for taskID. Exactly one of path or content
@@ -80,6 +99,8 @@ func (s *ArtifactStore) Add(taskID string, kind ArtifactKind, label, path, conte
 
 	s.mu.Lock()
 	s.artifacts[id] = artifact
+	s.order[id] = s.next
+	s.next++
 	s.mu.Unlock()
 	return artifact, nil
 }
@@ -103,10 +124,7 @@ func (s *ArtifactStore) List() []Artifact {
 	for _, artifact := range s.artifacts {
 		artifacts = append(artifacts, artifact)
 	}
-	sort.Slice(artifacts, func(left, right int) bool {
-		return artifacts[left].CreatedAt.Before(artifacts[right].CreatedAt)
-	})
-	return artifacts
+	return s.sorted(artifacts)
 }
 
 // ForTask returns every artifact recorded against taskID, ordered by

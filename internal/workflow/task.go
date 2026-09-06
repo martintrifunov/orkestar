@@ -59,11 +59,17 @@ type Task struct {
 type Board struct {
 	mu    sync.Mutex
 	tasks map[string]Task
+	// order records the sequence tasks were created in. Creation timestamps
+	// alone do not order them: two tasks created in the same clock tick
+	// compare equal, and ranging a map to build the list means the sidebar can
+	// show them in a different order on each refresh.
+	order map[string]uint64
+	next  uint64
 }
 
 // NewBoard returns an empty Board.
 func NewBoard() *Board {
-	return &Board{tasks: make(map[string]Task)}
+	return &Board{tasks: make(map[string]Task), order: make(map[string]uint64)}
 }
 
 // Create adds a new task. DependsOn entries must reference existing tasks;
@@ -105,6 +111,8 @@ func (b *Board) Create(workspaceID, title, description string, dependsOn []strin
 	}
 
 	b.tasks[id] = task
+	b.order[id] = b.next
+	b.next++
 	return task, nil
 }
 
@@ -289,7 +297,10 @@ func (b *Board) List() []Task {
 		tasks = append(tasks, task)
 	}
 	sort.Slice(tasks, func(left, right int) bool {
-		return tasks[left].CreatedAt.Before(tasks[right].CreatedAt)
+		if !tasks[left].CreatedAt.Equal(tasks[right].CreatedAt) {
+			return tasks[left].CreatedAt.Before(tasks[right].CreatedAt)
+		}
+		return b.order[tasks[left].ID] < b.order[tasks[right].ID]
 	})
 	return tasks
 }

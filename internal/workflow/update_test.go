@@ -180,3 +180,25 @@ func TestUpdateRejectsAnUnknownTask(t *testing.T) {
 		t.Fatal("updating a task that does not exist should fail")
 	}
 }
+
+// Tasks created in the same clock tick have equal timestamps, and building the
+// list by ranging a map means the order changes between calls unless something
+// else decides it. The sidebar reads this list, and selection is by index.
+func TestListOrderIsStableWithinATick(t *testing.T) {
+	board := workflow.NewBoard()
+	var created []string
+	for i := range 12 {
+		created = append(created, mustCreate(t, board, string(rune('a'+i))).ID)
+	}
+	for range 20 {
+		listed := board.List()
+		if len(listed) != len(created) {
+			t.Fatalf("listed %d of %d", len(listed), len(created))
+		}
+		for i, id := range created {
+			if listed[i].ID != id {
+				t.Fatalf("position %d is %q, want %q", i, listed[i].ID, id)
+			}
+		}
+	}
+}
