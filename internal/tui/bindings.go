@@ -54,6 +54,7 @@ const (
 	ActionScrollback   Action = "scrollback"
 	ActionEditFile     Action = "edit-file"
 	ActionClaimPane    Action = "claim-pane"
+	ActionRenamePane   Action = "rename-pane"
 	ActionDiscardEdit  Action = "discard-editor"
 	ActionDetachPanel  Action = "detach-panel"
 )
@@ -90,6 +91,7 @@ func defaultBindings() map[Action]string {
 		ActionScrollback:   "[",
 		ActionEditFile:     "e",
 		ActionClaimPane:    "t",
+		ActionRenamePane:   "r",
 		ActionDiscardEdit:  "x",
 		ActionDetachPanel:  "tab",
 	}
@@ -147,6 +149,7 @@ var placements = map[Action]placement{
 	ActionDetachPanel: prefixed,
 	ActionSettings:    prefixed,
 	ActionDiscardEdit: prefixed,
+	ActionRenamePane:  prefixed,
 
 	ActionNewAgent: both,
 	ActionNewShell: both,
@@ -264,7 +267,8 @@ func (m Model) helpLine() string {
 	case m.prefix:
 		return "Prefix: " + k(ActionSplitRight) + "/" + k(ActionSplitDown) + " split · " +
 			k(ActionNextPane) + " next · " + k(ActionZoom) + " zoom · arrows resize (repeat) · " +
-			k(ActionDiff) + " diff · " + k(ActionEditFile) + " edit · " + k(ActionFiles) + " files · esc done"
+			k(ActionDiff) + " diff · " + k(ActionEditFile) + " edit · " + k(ActionRenamePane) +
+			" rename · " + k(ActionFiles) + " files · esc done"
 	case len(m.paneRects()) < len(m.visiblePanes()):
 		return "Enlarge window for splits · F6 cycles hidden panes"
 	case m.viewingHistory:

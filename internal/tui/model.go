@@ -76,6 +76,12 @@ type Model struct {
 	taskField  int
 	taskEditID string
 
+	// renaming holds the pane whose name is being typed. A crowded layout is
+	// hard to read when every pane is called after the command that started
+	// it, and a name is the cheapest way to tell them apart.
+	renaming *embeddedTerminal
+	renameTo string
+
 	// The file viewer mirrors the sidebar on the right edge. It is closed by
 	// default and reads the workspace only while open.
 	filesOpen, filesFocused, filesLoading bool
@@ -180,7 +186,9 @@ func Run(client *ipc.Client, directory string) error {
 
 // prompting reports whether a modal prompt owns the keyboard and the content
 // area.
-func (m Model) prompting() bool { return m.filePrompt || m.settingsOpen || m.taskPrompt }
+func (m Model) prompting() bool {
+	return m.filePrompt || m.settingsOpen || m.taskPrompt || m.renaming != nil
+}
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.loadSnapshot(), tick())

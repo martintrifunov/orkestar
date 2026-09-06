@@ -143,6 +143,34 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Named sessions
+
+One daemon per machine assumes one piece of work at a time. Two projects that
+should not share a board — different repositories, different agents, different
+tasks — have no way to be told apart otherwise.
+
+```
+orkestar --session api
+orkestar --session api task list
+orkestar --session api daemon stop
+```
+
+A named session is a whole separate daemon: its own socket, database and log,
+under `sessions/<name>` in the runtime directory. The default session keeps the
+path it always had, so an existing daemon and everything it remembers stay
+exactly where they were.
+
+## Renaming a pane
+
+`Ctrl+b r` renames the focused pane. Every pane is otherwise named after the
+command that started it, so a layout of shells reads as a row of identical
+boxes. An empty name restores the default, since a pane with no name at all is
+harder to place than one named after its command.
+
+The name is the client's own. The daemon owns the process and has no opinion
+about what a pane is called, which is also why a rename does not follow the
+session to another client.
+
 ## Key bindings
 
 Every binding can be changed. People arrive from tmux, zellij and vim with

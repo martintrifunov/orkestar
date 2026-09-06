@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
@@ -175,5 +177,81 @@ func TestHeaderNamesTheFocusedTask(t *testing.T) {
 	m.embedded = second
 	if title := m.paneTitle(); !strings.Contains(title, "Fix the parser") {
 		t.Fatalf("the header says %q", title)
+	}
+}
+
+// Every pane is otherwise named after the command that started it, so a
+// crowded layout of shells reads as a row of identical boxes.
+func TestRenamingAPane(t *testing.T) {
+	m, first, _ := taskModel(t)
+	m.embedded = first
+
+	if _, handled := m.paneAction(m.keys.key(ActionRenamePane)); !handled {
+		t.Fatal("the rename action was not handled")
+	}
+	if m.renaming != first {
+		t.Fatal("the prompt did not open on the focused pane")
+	}
+	if !m.prompting() {
+		t.Fatal("renaming does not own the keyboard")
+	}
+	if view := m.promptView(); !strings.Contains(view, "Rename pane") {
+		t.Fatalf("unexpected prompt:\n%s", view)
+	}
+
+	m = typeText(t, m, "build")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if m.renaming != nil {
+		t.Fatal("the prompt stayed open")
+	}
+	if first.title != "build" {
+		t.Fatalf("the pane is called %q", first.title)
+	}
+	if label := m.paneLabel(first); label != "build" {
+		t.Fatalf("the border says %q", label)
+	}
+}
+
+// An empty name restores the default rather than leaving a blank border,
+// which would be worse than the command name it replaced.
+func TestAnEmptyNameRestoresTheDefault(t *testing.T) {
+	m, first, _ := taskModel(t)
+	m.embedded = first
+	first.title = "build"
+
+	m.paneAction(m.keys.key(ActionRenamePane))
+	// The prompt opens on the current name; clear it.
+	for range len("build") {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		m = updated.(Model)
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+
+	if first.title != "" {
+		t.Fatalf("the pane is still called %q", first.title)
+	}
+	if label := m.paneLabel(first); !strings.Contains(label, "Ship it") {
+		t.Fatalf("the default label did not come back: %q", label)
+	}
+}
+
+// Escape leaves the name alone.
+func TestCancellingARename(t *testing.T) {
+	m, first, _ := taskModel(t)
+	m.embedded = first
+	first.title = "build"
+
+	m.paneAction(m.keys.key(ActionRenamePane))
+	m = typeText(t, m, "xyz")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+
+	if m.renaming != nil {
+		t.Fatal("escape did not close the prompt")
+	}
+	if first.title != "build" {
+		t.Fatalf("the pane was renamed anyway: %q", first.title)
 	}
 }

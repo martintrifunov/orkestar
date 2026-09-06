@@ -39,7 +39,13 @@ func run(args []string) error {
 		fmt.Println("orkestar " + version)
 		return nil
 	}
-	paths, err := runtimepath.Resolve()
+	// --session picks which daemon everything after it talks to, so it is read
+	// before the verbs rather than by each of them.
+	session := ""
+	if len(args) >= 2 && args[0] == "--session" {
+		session, args = args[1], args[2:]
+	}
+	paths, err := runtimepath.ResolveSession(session)
 	if err != nil {
 		return err
 	}
@@ -350,6 +356,7 @@ func printUsage() {
 
 Usage:
   orkestar
+  orkestar --session <name> [command...]
   orkestar --remote <[user@]host>
   orkestar daemon serve
   orkestar daemon stop

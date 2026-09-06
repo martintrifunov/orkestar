@@ -284,6 +284,12 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 			m.removePane(m.embedded)
 		}
 		return nil, true
+	case ActionRenamePane:
+		if m.embedded != nil {
+			m.renaming = m.embedded
+			m.renameTo = m.embedded.title
+		}
+		return nil, true
 	case ActionDetachPanel:
 		m.sidebarFocused = true
 		return nil, true
@@ -346,6 +352,10 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m Model) promptView() string {
+	if m.renaming != nil {
+		return "Rename pane\n\nName: " + m.renameTo + "▏" +
+			"\n\nEnter renames · an empty name restores the default · Esc cancels"
+	}
 	if m.taskPrompt {
 		return m.taskPromptView()
 	}
@@ -382,6 +392,9 @@ func (m Model) promptView() string {
 
 }
 func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.renaming != nil {
+		return m.updateRenamePrompt(k)
+	}
 	if m.taskPrompt {
 		return m.updateTaskPrompt(k)
 	}
@@ -474,6 +487,33 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else if k.Mod == 0 && k.Code >= 32 && k.Code < 127 {
 			m.fileName += string(k.Code)
 		}
+	}
+	return m, nil
+}
+
+// updateRenamePrompt collects a pane's new name. The name is the client's own:
+// the daemon owns the process and has no opinion about what a pane is called.
+func (m Model) updateRenamePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch k.Code {
+	case tea.KeyEscape:
+		m.renaming, m.renameTo = nil, ""
+		return m, nil
+	case tea.KeyEnter:
+		// An empty name restores the default rather than leaving a blank
+		// border, since a pane with no name at all cannot be told apart.
+		m.renaming.title = strings.TrimSpace(m.renameTo)
+		m.renaming, m.renameTo = nil, ""
+		return m, nil
+	case tea.KeyBackspace:
+		if r := []rune(m.renameTo); len(r) > 0 {
+			m.renameTo = string(r[:len(r)-1])
+		}
+		return m, nil
+	}
+	if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
+		m.renameTo += k.Text
+	} else if k.Mod == 0 && k.Code >= 32 && k.Code < 127 {
+		m.renameTo += string(k.Code)
 	}
 	return m, nil
 }

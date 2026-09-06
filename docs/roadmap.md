@@ -123,7 +123,7 @@ Ordered by what stands between a new user and a working session.
 - [x] **Cursor and Grok adapters.** The adapter contract exists and the
       lifecycle work is done, so each is reach rather than depth — but it is
       the difference between "runs what I run" and "does not".
-- [ ] **Named sessions and pane renaming.** One daemon per machine assumes one
+- [x] **Named sessions and pane renaming.** One daemon per machine assumes one
       piece of work at a time. Named sessions separate projects that should not
       share a board; renaming a pane is small and makes a crowded layout
       readable.

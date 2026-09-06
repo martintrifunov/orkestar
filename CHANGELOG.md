@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Run separate daemons with `orkestar --session <name>`, each with its own
+  socket, database and log. The default session is unchanged.
+- Rename the focused pane with `Ctrl+b r`, so a layout of shells is not a row
+  of identical boxes.
 - Launch Cursor and Grok in a pane. Both claim only what has been checked:
   interactive with prompt and interrupt, no managed mode and no resume, and no
   lifecycle beyond started, stopped and crashed, since neither CLI's hook
