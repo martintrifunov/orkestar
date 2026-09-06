@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Launch Cursor and Grok in a pane. Both claim only what has been checked:
+  interactive with prompt and interrupt, no managed mode and no resume, and no
+  lifecycle beyond started, stopped and crashed, since neither CLI's hook
+  contract has been verified.
 - Install on macOS and Linux with a curl one-liner, or through mise's `ubi`
   backend. The installer verifies the release checksum before unpacking, and
   says what to add to `PATH` rather than editing a shell profile.

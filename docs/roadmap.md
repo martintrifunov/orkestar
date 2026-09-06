@@ -120,7 +120,7 @@ Ordered by what stands between a new user and a working session.
       script leave out the way most people install a terminal tool, which is a
       curl one-liner. Cheap, and it removes the first step where someone gives
       up.
-- [ ] **Cursor and Grok adapters.** The adapter contract exists and the
+- [x] **Cursor and Grok adapters.** The adapter contract exists and the
       lifecycle work is done, so each is reach rather than depth — but it is
       the difference between "runs what I run" and "does not".
 - [ ] **Named sessions and pane renaming.** One daemon per machine assumes one

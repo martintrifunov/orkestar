@@ -15,6 +15,8 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/agent/claude"
 	"github.com/martintrifunov/orkestar/internal/agent/codex"
+	"github.com/martintrifunov/orkestar/internal/agent/cursor"
+	"github.com/martintrifunov/orkestar/internal/agent/grok"
 	"github.com/martintrifunov/orkestar/internal/agent/opencode"
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -274,6 +276,10 @@ func serveDaemon(paths runtimepath.Paths) error {
 	server.RegisterAdapter(claude.New(""))
 	server.RegisterAdapter(codex.New(""))
 	server.RegisterAdapter(opencode.New("", "", nil))
+	// Registered so they can be launched; each reports only what a PTY session
+	// can see, since neither CLI's hook contract has been verified.
+	server.RegisterAdapter(cursor.New(""))
+	server.RegisterAdapter(grok.New(""))
 	// OpenCode is the reviewer adapter because its managed mode returns a
 	// structured reply; Claude Code's interactive PTY adapter has no
 	// discrete response to parse a verdict from.

@@ -82,7 +82,10 @@ Run the same command again to upgrade, once any running daemon can be stopped.
 Use Windows Terminal; shell panes prefer PowerShell 7, falling back to Windows
 PowerShell.
 
-Agent CLIs must be installed separately.
+Agent CLIs must be installed separately. Claude Code, Codex and OpenCode are
+supported with full lifecycle awareness; Cursor and Grok run in a pane but do
+not yet report when they are waiting for you, because neither CLI's hook
+contract has been verified. See [validation](docs/validation.md).
 
 Build from source with Go 1.27 or newer on macOS, Linux or Windows:
 

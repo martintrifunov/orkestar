@@ -205,6 +205,24 @@ download, checksum verification and user `PATH` update. Windows installed Claude
 Code, Codex and OpenCode model-turn and hook behavior also remain unvalidated.
 The POSIX PTY fixture suite still runs only on macOS/Linux.
 
+## Cursor and Grok — unverified
+
+Both adapters launch their CLI in a pane and claim nothing else. Neither CLI
+was installed on the machine they were written on, so their flags and any hook
+contract are unchecked, and the capabilities say so: interactive, prompt and
+interrupt, with no managed mode and no resume.
+
+What that costs in practice is attention. Claude Code and Codex report working,
+waiting for input and waiting for a permission through hooks that were verified
+against them; a Cursor or Grok session reports only started, stopped or
+crashed, so it never raises attention in the sidebar and never rings the bell
+for a permission it is waiting on.
+
+Verifying either means installing the CLI and checking three things: whether
+the executable name is right, whether it has a resume flag, and whether it has
+a hook or plugin mechanism that can report lifecycle. Until then, treat them as
+"runs in a pane" rather than as supported the way the first three are.
+
 ## v0.1.0 release checks
 
 CI is green on all four jobs (ubuntu, macOS, Windows, cross-build) for the
