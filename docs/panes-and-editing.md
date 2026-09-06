@@ -92,17 +92,23 @@ orkestar agent launch <workspace-id> <adapter> --task=<task-id>
 
 An agent can do the same through MCP, which is what makes one agent able to
 hand work to another: `agent_list` reports the running sessions and the
-adapters available to launch, `task_start` launches one for a task, and
-`agent_prompt` tells it what to do. The task already knows its workspace, so
-`task_start` takes only a task and, when more than one adapter is registered,
-which to use.
+adapters available to launch, `task_start` launches one for a task and tells it
+what to do, and `agent_prompt` follows up. The task already knows its
+workspace, so `task_start` takes only a task and, when more than one adapter is
+registered, which to use.
 
-`task_start` launches an **idle** session. In the sidebar the human types the
-first message; over MCP that is `agent_prompt`, and the task moves to
-in_progress once the agent acts on it. Give an interactive CLI a few seconds
-after `task_start` before prompting it: the daemon reports the session ready as
-soon as the process exists, which is before the agent's own interface has
-finished starting, and anything sent before then is typed into nothing.
+One call is the whole hand-off. `task_start` carries a prompt — the task's own
+title and description unless you pass one, or an empty string for a bare
+session — and the daemon holds it until the agent's session reports it has
+started, so the caller does not have to know how long a CLI takes to come up.
+
+That waiting is not politeness. An interactive agent owns its terminal from the
+moment it is spawned, but its interface is not reading keys yet: text written
+that early is buffered and shows up in the input box, while the Enter after it
+is discarded, leaving the prompt sitting there submitted by nobody. The daemon
+waits for the session's first hook, which is the agent's own runtime calling
+back, then settles briefly before typing. Without hooks the prompt still goes,
+late rather than never.
 
 Deliberately absent: MCP has no way to **stop** an agent. Starting work is
 recoverable — a session that turns out to be wrong can be closed from the

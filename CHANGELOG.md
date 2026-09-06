@@ -9,9 +9,16 @@
 - Collect a description when creating a task. `Tab` moves between the title and
   description; `Ctrl+R` toggles auto-review, which `Tab` used to do.
 - Let an agent hand work to another agent over MCP: `task_start` launches an
-  agent for a task, `agent_prompt` gives it the work, and `agent_list` reports
-  running sessions and the adapters available. There is deliberately no way to
-  stop an agent over MCP.
+  agent for a task and tells it what to do, `agent_prompt` follows up, and
+  `agent_list` reports running sessions and the adapters available. There is
+  deliberately no way to stop an agent over MCP.
+- Carry an opening prompt through `agent.launch` and deliver it once the
+  session reports it has started, so a caller need not guess how long an
+  interactive CLI takes to come up.
+- End a prompt with a carriage return rather than a line feed. Agent CLIs read
+  the terminal raw and act on carriage return, so `agent.prompt` had never
+  submitted anything to an interactive session: the text arrived and sat in the
+  input box.
 - Launch an agent for a task, from the Tasks list with `a`, with `task_id` on
   `agent.launch`, or with
   `orkestar agent launch <workspace> <adapter> --task=<id>`. The session starts

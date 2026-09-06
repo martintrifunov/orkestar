@@ -59,6 +59,13 @@ type agentSession struct {
 	metadata     Agent
 	subscribers  map[chan agentEvent]struct{}
 	permissionID string
+
+	// opening is a prompt to send once the agent is actually able to read
+	// one, and started records that it is. An interactive CLI owns a PTY the
+	// moment it is spawned but does not draw its input box for a second or
+	// two, and anything written before then is typed into nothing.
+	opening string
+	started bool
 }
 
 func newAgentSession(metadata Agent, session agent.Session) *agentSession {
@@ -160,6 +167,32 @@ func (a *agentSession) broadcast(event agentEvent) {
 	}
 }
 
+// holdOpeningPrompt stores a prompt to deliver when the session signals it has
+// started, and reports whether it must be sent now instead, because that
+// signal already arrived. Launch and the hook that marks a session started can
+// race: the agent's runtime is up early enough to call back before agent.launch
+// has returned.
+func (a *agentSession) holdOpeningPrompt(text string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.started {
+		return true
+	}
+	a.opening = text
+	return false
+}
+
+// takeOpeningPrompt marks the session started and hands back the prompt that
+// was waiting for it, if any. It returns a prompt at most once.
+func (a *agentSession) takeOpeningPrompt() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.started = true
+	text := a.opening
+	a.opening = ""
+	return text
+}
+
 func (a *agentSession) setPermissionID(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -190,6 +223,10 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		Rows            int    `json:"rows"`
 		ResumeSessionID string `json:"resume_session_id"`
 		TaskID          string `json:"task_id"`
+		// Prompt is the work the agent is being launched to do. It is held
+		// until the session signals it started, so a caller does not have to
+		// guess how long an interactive CLI takes to come up.
+		Prompt string `json:"prompt"`
 	}
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return Agent{}, fmt.Errorf("decode agent launch params: %w", err)
@@ -309,6 +346,13 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 	// session is already up and useful.
 	if params.TaskID != "" {
 		_, _ = s.tasks.Assign(params.TaskID, id)
+	}
+
+	if params.Prompt != "" {
+		// Only a PTY-backed session has an interface that has to come up
+		// before it can be typed at.
+		_, interactive := session.(agent.ProcessSession)
+		s.deliverOpeningPrompt(entry, params.Prompt, interactive)
 	}
 
 	s.agentWorkers.Add(1)
@@ -521,4 +565,85 @@ type agentConnection struct {
 	}
 	Encoder interface{ Encode(any) error }
 	Request ipc.Request
+}
+
+// openingPromptTimeout bounds the wait for a session to say it started. Hooks
+// are the reliable signal, and every adapter Orkestar launches is configured
+// with them, but hook support depends on the agent's version and the user's
+// policy. Rather than drop the work on the floor when none arrives, send it
+// late and say so: an agent that missed its prompt is a session sitting idle
+// with a task assigned to it and nobody watching.
+const openingPromptTimeout = 30 * time.Second
+
+// deliverOpeningPrompt sends text once the agent can read it. A session that
+// already signalled started is prompted immediately; otherwise the prompt
+// waits for that signal, or for openingPromptTimeout, whichever comes first.
+func (s *Server) deliverOpeningPrompt(entry *agentSession, text string, interactive bool) {
+	// A managed session takes a prompt as a structured call, so there is no
+	// interface to wait for and nothing to settle.
+	if !interactive {
+		s.sendOpeningPrompt(entry, text, false)
+		return
+	}
+	if entry.holdOpeningPrompt(text) {
+		s.sendOpeningPrompt(entry, text, true)
+		return
+	}
+	s.agentWorkers.Add(1)
+	go func() {
+		defer s.agentWorkers.Done()
+		select {
+		case <-time.After(openingPromptTimeout):
+		case <-s.stop:
+			return
+		}
+		if late := entry.takeOpeningPrompt(); late != "" {
+			s.sendOpeningPrompt(entry, late, false)
+		}
+	}()
+}
+
+// openingPromptSettle is a pause between an agent saying it started and being
+// typed at. The start signal means its runtime is up and calling back, not
+// that its terminal interface has finished drawing and is reading keys.
+//
+// Measured against Claude Code: text written the instant the process spawns is
+// buffered and appears in its input box, but the Enter after it is discarded,
+// and the prompt sits there unsubmitted. Two seconds in, the same write both
+// lands and submits. This is an empirical number covering the gap after the
+// signal, which is why it is not the mechanism; the signal is.
+const openingPromptSettle = 1500 * time.Millisecond
+
+// sendOpeningPrompt prompts the session, off the caller's goroutine. Both
+// callers need that: the hook path is holding an agent's own hook request
+// open, so writing to that agent's PTY from it risks stalling on a buffer the
+// agent cannot drain until it gets its reply.
+//
+// A failure is recorded on the agent rather than returned. The launch it
+// belongs to has already succeeded, and a caller holding that agent needs to
+// find out there.
+func (s *Server) sendOpeningPrompt(entry *agentSession, text string, settle bool) {
+	s.agentWorkers.Add(1)
+	go func() {
+		defer s.agentWorkers.Done()
+		if settle {
+			select {
+			case <-time.After(openingPromptSettle):
+			case <-s.stop:
+				return
+			}
+		}
+		session := entry.liveSession()
+		if session == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := session.Prompt(ctx, text); err != nil {
+			entry.mu.Lock()
+			entry.metadata.AttentionReason = "opening prompt failed: " + err.Error()
+			entry.mu.Unlock()
+		}
+		_ = s.persist()
+	}()
 }

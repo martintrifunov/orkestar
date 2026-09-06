@@ -82,6 +82,13 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 	if p.Event == "UserPromptSubmit" || p.Event == "PreToolUse" {
 		s.startAgentTask(taskID)
 	}
+	// Any hook proves the agent's runtime is up and reading its own PTY, which
+	// is what an opening prompt was waiting for. SessionStart is the usual one;
+	// the rest are here so a session that somehow missed it is not left idle
+	// with work assigned to it.
+	if text := entry.takeOpeningPrompt(); text != "" {
+		s.sendOpeningPrompt(entry, text, true)
+	}
 	if p.Event == "Stop" || p.Event == "Interrupt" || p.Event == "SessionEnd" {
 		s.cancelHookPermissions(p.AgentID, "")
 	}

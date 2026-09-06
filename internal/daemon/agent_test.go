@@ -12,6 +12,7 @@ import (
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/pty"
 )
 
 // controllableAdapter and controllableSession let a test drive an agent
@@ -20,6 +21,9 @@ import (
 type controllableAdapter struct {
 	capabilities agent.Capabilities
 	sessions     chan *controllableSession
+	// executable, when set, makes each session own a real PTY process so it
+	// satisfies agent.ProcessSession.
+	executable string
 }
 
 func newControllableAdapter(name string) *controllableAdapter {
@@ -34,6 +38,20 @@ func newControllableAdapter(name string) *controllableAdapter {
 	}
 }
 
+// newPTYControllableAdapter hands out sessions backed by a real process, so
+// they satisfy agent.ProcessSession. The daemon treats those differently from
+// managed ones — they own a terminal whose interface has to come up before it
+// can be typed at — and that difference is the thing under test.
+func newPTYControllableAdapter(t *testing.T, name string) *controllableAdapter {
+	t.Helper()
+	adapter := newControllableAdapter(name)
+	adapter.executable = filepath.Join(t.TempDir(), "fixture")
+	if err := os.WriteFile(adapter.executable, []byte("#!/bin/sh\ncat >/dev/null\n"), 0o755); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return adapter
+}
+
 func (a *controllableAdapter) Capabilities() agent.Capabilities { return a.capabilities }
 
 func (a *controllableAdapter) Launch(ctx context.Context, options agent.LaunchOptions) (agent.Session, error) {
@@ -45,6 +63,20 @@ func (a *controllableAdapter) Launch(ctx context.Context, options agent.LaunchOp
 		// Recording what the daemon asked for is how a test can check where an
 		// agent was started and reach the hook token it was handed.
 		options: options,
+	}
+	if a.executable != "" {
+		process, err := pty.Start(pty.StartOptions{
+			Command: a.executable, Directory: options.Directory, Columns: 80, Rows: 24,
+		})
+		if err != nil {
+			return nil, err
+		}
+		session.process = process
+		a.sessions <- session
+		// Only this wrapper satisfies agent.ProcessSession. Declaring Process
+		// on controllableSession itself would make every session look
+		// PTY-backed, since Go decides that statically.
+		return &ptyControllableSession{session}, nil
 	}
 	a.sessions <- session
 	return session, nil
@@ -69,7 +101,14 @@ type controllableSession struct {
 	events  chan agent.LifecycleEvent
 	prompts chan string
 	options agent.LaunchOptions
+	process *pty.Process
 }
+
+// ptyControllableSession is a controllable session that owns a real process,
+// which is what makes it an agent.ProcessSession.
+type ptyControllableSession struct{ *controllableSession }
+
+func (s *ptyControllableSession) Process() *pty.Process { return s.process }
 
 // hookToken is the token the daemon generated for this session's hook bridge.
 // A hook is only accepted when it carries it.
@@ -100,6 +139,9 @@ func (s *controllableSession) Prompt(ctx context.Context, text string) error {
 func (s *controllableSession) Interrupt(ctx context.Context) error { return nil }
 func (s *controllableSession) Events() <-chan agent.LifecycleEvent { return s.events }
 func (s *controllableSession) Close() error {
+	if s.process != nil {
+		_ = s.process.Close()
+	}
 	close(s.events)
 	return nil
 }

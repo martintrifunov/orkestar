@@ -52,12 +52,12 @@ func NewServer(client *ipc.Client) *sdk.Server {
 
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_start",
-		Description: "Launch an agent to work a task, in the task's git worktree when it has one, and assign the task to it. The agent starts idle: send it the work with agent_prompt, after which the task moves to in_progress on its own. Use agent_list to see which adapters are available and what is already running.",
+		Description: "Launch an agent to work a task, in the task's git worktree when it has one, assign the task to it, and tell it what to do. The prompt defaults to the task's own title and description, and is held until the agent's session reports it has started, so there is no need to wait before calling this. The task moves to in_progress once the agent acts on it. Use agent_list to see which adapters are available and what is already running.",
 	}, taskStart(client))
 
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "agent_prompt",
-		Description: "Send a prompt to a running agent, as a user typing into its session would. An interactive agent needs a few seconds after task_start before its CLI accepts input.",
+		Description: "Send a prompt to a running agent, as a user typing into its session would. task_start already sends an opening prompt, so this is for following up.",
 	}, agentPrompt(client))
 
 	sdk.AddTool(server, &sdk.Tool{
@@ -204,8 +204,9 @@ func taskUpdate(client *ipc.Client) sdk.ToolHandlerFor[taskUpdateInput, workflow
 }
 
 type taskStartInput struct {
-	TaskID  string `json:"task_id"`
-	Adapter string `json:"adapter,omitempty" jsonschema:"which agent to launch; may be omitted when exactly one adapter is available"`
+	TaskID  string  `json:"task_id"`
+	Adapter string  `json:"adapter,omitempty" jsonschema:"which agent to launch; may be omitted when exactly one adapter is available"`
+	Prompt  *string `json:"prompt,omitempty" jsonschema:"what to tell the agent; omit to send the task's own title and description, or pass an empty string to launch it idle"`
 }
 
 // taskStart launches an agent for a task. It resolves the workspace and the
@@ -219,13 +220,13 @@ func taskStart(client *ipc.Client) sdk.ToolHandlerFor[taskStartInput, daemon.Age
 			return nil, daemon.Agent{}, fmt.Errorf("system.snapshot: %w", err)
 		}
 
-		workspaceID := ""
+		var target workflow.Task
 		for _, task := range snapshot.Tasks {
 			if task.ID == in.TaskID {
-				workspaceID = task.WorkspaceID
+				target = task
 			}
 		}
-		if workspaceID == "" {
+		if target.ID == "" {
 			return nil, daemon.Agent{}, fmt.Errorf("task %q does not exist", in.TaskID)
 		}
 
@@ -233,13 +234,29 @@ func taskStart(client *ipc.Client) sdk.ToolHandlerFor[taskStartInput, daemon.Age
 		if err != nil {
 			return nil, daemon.Agent{}, err
 		}
+		prompt := briefing(target)
+		if in.Prompt != nil {
+			prompt = *in.Prompt
+		}
 		return callIPC[daemon.Agent](ctx, client, "agent.launch", map[string]any{
-			"workspace_id": workspaceID,
+			"workspace_id": target.WorkspaceID,
 			"adapter":      adapter,
 			"mode":         mode,
 			"task_id":      in.TaskID,
+			"prompt":       prompt,
 		})
 	}
+}
+
+// briefing is what an agent is told when the caller does not say. A task's
+// title and description are what it was written to convey, so repeating them
+// is better than inventing instructions the orchestrator did not give.
+func briefing(task workflow.Task) string {
+	text := "You have been assigned this task: " + task.Title
+	if task.Description != "" {
+		text += "\n\n" + task.Description
+	}
+	return text
 }
 
 // chooseAdapter resolves a requested adapter name, or picks the only one when

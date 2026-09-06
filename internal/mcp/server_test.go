@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -355,9 +356,66 @@ func TestMCPTaskStartHandsWorkToAnAgent(t *testing.T) {
 	}
 }
 
-// Launching is only half a hand-off: the agent starts idle and has to be told
-// what to do, which is the step that then moves the task to in_progress.
-func TestMCPAgentPromptBriefsALaunchedAgent(t *testing.T) {
+// One call has to be a whole hand-off. An orchestrating agent cannot watch a
+// session come up and type into it at the right moment, so task_start carries
+// the work and the daemon delivers it when the agent is ready for it.
+func TestMCPTaskStartTellsTheAgentWhatToDo(t *testing.T) {
+	t.Parallel()
+
+	adapter := stubAdapter{agent.Capabilities{Name: "stub", SupportsInteractive: true, SupportsPrompt: true}, &stubSessions{}}
+	daemonClient := startTestDaemonWithAdapters(t, adapter)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{"directory": t.TempDir()})
+	task := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "Fix the parser",
+		"description": "it drops the last token", "auto_review": false,
+	})
+
+	callTool[daemon.Agent](t, session, "task_start", map[string]any{"task_id": task.ID})
+
+	// The default briefing is the task itself: repeating what it says beats
+	// inventing instructions the orchestrator never gave.
+	got := adapter.prompts()
+	if len(got) != 1 {
+		t.Fatalf("prompts: %v", got)
+	}
+	if !strings.Contains(got[0], "Fix the parser") || !strings.Contains(got[0], "drops the last token") {
+		t.Fatalf("the briefing does not carry the task: %q", got[0])
+	}
+}
+
+// A caller with its own instructions sends them, and one that wants a bare
+// session asks for that explicitly.
+func TestMCPTaskStartHonoursAnExplicitPrompt(t *testing.T) {
+	t.Parallel()
+
+	adapter := stubAdapter{agent.Capabilities{Name: "stub", SupportsInteractive: true, SupportsPrompt: true}, &stubSessions{}}
+	daemonClient := startTestDaemonWithAdapters(t, adapter)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{"directory": t.TempDir()})
+	first := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "First", "auto_review": false,
+	})
+	second := callTool[workflow.Task](t, session, "task_create", map[string]any{
+		"workspace_id": workspace.ID, "title": "Second", "auto_review": false,
+	})
+
+	callTool[daemon.Agent](t, session, "task_start", map[string]any{
+		"task_id": first.ID, "prompt": "read the tests first",
+	})
+	callTool[daemon.Agent](t, session, "task_start", map[string]any{
+		"task_id": second.ID, "prompt": "",
+	})
+
+	got := adapter.prompts()
+	if len(got) != 1 || got[0] != "read the tests first" {
+		t.Fatalf("prompts: %v", got)
+	}
+}
+
+func TestMCPAgentPromptFollowsUp(t *testing.T) {
 	t.Parallel()
 
 	adapter := stubAdapter{agent.Capabilities{Name: "stub", SupportsInteractive: true, SupportsPrompt: true}, &stubSessions{}}
@@ -368,13 +426,15 @@ func TestMCPAgentPromptBriefsALaunchedAgent(t *testing.T) {
 	task := callTool[workflow.Task](t, session, "task_create", map[string]any{
 		"workspace_id": workspace.ID, "title": "hand this over", "auto_review": false,
 	})
-	launched := callTool[daemon.Agent](t, session, "task_start", map[string]any{"task_id": task.ID})
+	launched := callTool[daemon.Agent](t, session, "task_start", map[string]any{
+		"task_id": task.ID, "prompt": "",
+	})
 
 	callTool[map[string]string](t, session, "agent_prompt", map[string]any{
-		"agent_id": launched.ID, "text": "start on the task",
+		"agent_id": launched.ID, "text": "one more thing",
 	})
-	if got := adapter.prompts(); len(got) != 1 || got[0] != "start on the task" {
-		t.Fatalf("the agent was not briefed: %v", got)
+	if got := adapter.prompts(); len(got) != 1 || got[0] != "one more thing" {
+		t.Fatalf("the follow-up did not reach the agent: %v", got)
 	}
 
 	callToolExpectError(t, session, "agent_prompt", map[string]any{

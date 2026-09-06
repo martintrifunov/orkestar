@@ -22,6 +22,16 @@ type taskAgentFixture struct {
 }
 
 func newTaskAgentFixture(t *testing.T) taskAgentFixture {
+	return newTaskAgentFixtureWith(t, newControllableAdapter("fake-agent"))
+}
+
+// newInteractiveTaskAgentFixture gives out PTY-backed sessions, which is what
+// an agent CLI actually is.
+func newInteractiveTaskAgentFixture(t *testing.T) taskAgentFixture {
+	return newTaskAgentFixtureWith(t, newPTYControllableAdapter(t, "fake-agent"))
+}
+
+func newTaskAgentFixtureWith(t *testing.T, adapter *controllableAdapter) taskAgentFixture {
 	t.Helper()
 
 	directory := initRepo(t)
@@ -32,7 +42,6 @@ func newTaskAgentFixture(t *testing.T) taskAgentFixture {
 	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
 
 	server := daemon.NewServer(filepath.Join(socketDirectory, "orkestar.sock"))
-	adapter := newControllableAdapter("fake-agent")
 	server.RegisterAdapter(adapter)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -332,5 +341,135 @@ func TestTaskUpdateRefusesACycleOverIPC(t *testing.T) {
 	}
 	if after := fixture.task(t, first.ID); len(after.DependsOn) != 0 {
 		t.Fatalf("the rejected edit was stored anyway: %v", after.DependsOn)
+	}
+}
+
+// waitForPrompt waits for the session to have been told something, since
+// delivery is deliberately off the launching goroutine.
+func waitForPrompt(t *testing.T, session *controllableSession) string {
+	t.Helper()
+	select {
+	case text := <-session.prompts:
+		return text
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent was never prompted")
+		return ""
+	}
+}
+
+// A launch that carries work must hand it over. Sending it from the caller
+// would mean guessing how long the agent's interface takes to come up, so the
+// daemon holds it until the session's own hook says it started.
+func TestOpeningPromptWaitsForTheSessionToStart(t *testing.T) {
+	t.Parallel()
+
+	fixture := newInteractiveTaskAgentFixture(t)
+	task := fixture.createTask(t, "do the thing")
+
+	var launched daemon.Agent
+	fixture.mustCall(t, "agent.launch", map[string]any{
+		"workspace_id": fixture.workspace.ID, "adapter": "fake-agent",
+		"task_id": task.ID, "prompt": "get started",
+	}, &launched)
+
+	session := fixture.adapter.launched(t)
+	// Nothing before the agent says it is up.
+	select {
+	case text := <-session.prompts:
+		t.Fatalf("prompted %q before the session started", text)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	fixture.hook(t, session, launched.ID, "SessionStart")
+	if text := waitForPrompt(t, session); text != "get started" {
+		t.Fatalf("prompted %q", text)
+	}
+}
+
+// The hook can arrive while agent.launch is still running, because the agent's
+// runtime calls back as soon as it is up. The prompt must not be left waiting
+// for a signal that has already been and gone.
+func TestOpeningPromptSurvivesAnEarlyStart(t *testing.T) {
+	t.Parallel()
+
+	fixture := newInteractiveTaskAgentFixture(t)
+	var launched daemon.Agent
+	fixture.mustCall(t, "agent.launch", map[string]any{
+		"workspace_id": fixture.workspace.ID, "adapter": "fake-agent",
+	}, &launched)
+	session := fixture.adapter.launched(t)
+
+	// Mark the session started before any prompt is held for it.
+	fixture.hook(t, session, launched.ID, "SessionStart")
+
+	var second daemon.Agent
+	fixture.mustCall(t, "agent.launch", map[string]any{
+		"workspace_id": fixture.workspace.ID, "adapter": "fake-agent",
+		"prompt": "late arrival",
+	}, &second)
+	secondSession := fixture.adapter.launched(t)
+	fixture.hook(t, secondSession, second.ID, "SessionStart")
+	if text := waitForPrompt(t, secondSession); text != "late arrival" {
+		t.Fatalf("prompted %q", text)
+	}
+}
+
+// A prompt is delivered once, not on every hook the agent then sends.
+func TestOpeningPromptIsSentOnlyOnce(t *testing.T) {
+	t.Parallel()
+
+	fixture := newInteractiveTaskAgentFixture(t)
+	var launched daemon.Agent
+	fixture.mustCall(t, "agent.launch", map[string]any{
+		"workspace_id": fixture.workspace.ID, "adapter": "fake-agent", "prompt": "once",
+	}, &launched)
+	session := fixture.adapter.launched(t)
+
+	fixture.hook(t, session, launched.ID, "SessionStart")
+	if text := waitForPrompt(t, session); text != "once" {
+		t.Fatalf("prompted %q", text)
+	}
+	fixture.hook(t, session, launched.ID, "UserPromptSubmit")
+	fixture.hook(t, session, launched.ID, "PreToolUse")
+	select {
+	case text := <-session.prompts:
+		t.Fatalf("prompted %q a second time", text)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// A launch with no work to hand over must not prompt at all.
+func TestLaunchWithoutAPromptSaysNothing(t *testing.T) {
+	t.Parallel()
+
+	fixture := newInteractiveTaskAgentFixture(t)
+	var launched daemon.Agent
+	fixture.mustCall(t, "agent.launch", map[string]any{
+		"workspace_id": fixture.workspace.ID, "adapter": "fake-agent",
+	}, &launched)
+	session := fixture.adapter.launched(t)
+
+	fixture.hook(t, session, launched.ID, "SessionStart")
+	select {
+	case text := <-session.prompts:
+		t.Fatalf("an unprompted launch said %q", text)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// A managed session takes a prompt as a structured call, so there is no
+// interface to wait for: holding its work back for a signal it may never send
+// would strand it.
+func TestAManagedSessionIsPromptedImmediately(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTaskAgentFixture(t)
+	var launched daemon.Agent
+	fixture.mustCall(t, "agent.launch", map[string]any{
+		"workspace_id": fixture.workspace.ID, "adapter": "fake-agent", "prompt": "go",
+	}, &launched)
+
+	if text := waitForPrompt(t, fixture.adapter.launched(t)); text != "go" {
+		t.Fatalf("prompted %q", text)
 	}
 }
