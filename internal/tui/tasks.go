@@ -87,8 +87,12 @@ func (m Model) taskDetail(task workflow.Task) string {
 	if task.AutoReview {
 		parts = append(parts, "review before done")
 	}
-	if task.AssigneeAgentID != "" {
+	if adapter := m.agentAdapterOf(task.AssigneeAgentID); adapter != "" {
+		parts = append(parts, adapter+" "+m.agentStateOf(task.AssigneeAgentID))
+	} else if task.AssigneeAgentID != "" {
 		parts = append(parts, "agent "+task.AssigneeAgentID)
+	} else {
+		parts = append(parts, "unstarted (a)")
 	}
 	if task.WorktreePath == "" {
 		parts = append(parts, "no worktree (w)")
@@ -252,4 +256,53 @@ func (m Model) updateTaskPrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.taskTitle += string(k.Code)
 	}
 	return m, nil
+}
+
+// pickerTask is the task the agent picker was opened for, if it was opened
+// from a task rather than from the general "launch an agent" key.
+func (m Model) pickerTask() (workflow.Task, bool) {
+	if m.pickerTaskID == "" {
+		return workflow.Task{}, false
+	}
+	for _, task := range m.snapshot.Tasks {
+		if task.ID == m.pickerTaskID {
+			return task, true
+		}
+	}
+	return workflow.Task{}, false
+}
+
+// taskTitleOf names a task for a line that is about something else, such as
+// the agent working it.
+func (m Model) taskTitleOf(taskID string) string {
+	if taskID == "" {
+		return ""
+	}
+	for _, task := range m.snapshot.Tasks {
+		if task.ID == taskID {
+			return task.Title
+		}
+	}
+	return ""
+}
+
+// agentAdapterOf and agentStateOf describe a task's assignee in the terms the
+// Agents list uses, so the same session reads the same way in both places. An
+// assignee the daemon no longer knows about returns empty.
+func (m Model) agentAdapterOf(agentID string) string {
+	for _, agent := range m.snapshot.Agents {
+		if agent.ID == agentID {
+			return agent.Adapter
+		}
+	}
+	return ""
+}
+
+func (m Model) agentStateOf(agentID string) string {
+	for _, agent := range m.snapshot.Agents {
+		if agent.ID == agentID {
+			return agent.State
+		}
+	}
+	return ""
 }

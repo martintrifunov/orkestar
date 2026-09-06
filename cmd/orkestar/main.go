@@ -257,7 +257,7 @@ Usage:
   orkestar terminal stop <terminal-id>
   orkestar terminal remove <terminal-id>
   orkestar agent list
-  orkestar agent launch <workspace-id> <claude-code|codex|opencode>
+  orkestar agent launch <workspace-id> <claude-code|codex|opencode> [--task=<task-id>]
   orkestar agent resume <agent-id>
   orkestar agent stop <agent-id>
   orkestar agent remove <agent-id>

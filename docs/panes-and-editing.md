@@ -66,6 +66,30 @@ scrolls the tree.
 The viewer shows the workspace Orkestar was started in. In a window too narrow to
 keep a usable pane beside it, it stays hidden rather than squeezing the panes.
 
+## Handing a task to an agent
+
+Pressing `a` with a task selected launches an agent **for that task**. The
+daemon starts the session in the task's worktree when it has one, so the
+agent's changes land on the task's branch and `d` shows them, and it records
+the agent on the task and the task on the agent in the same call, so the two
+can never disagree about who owns the work. Pressing `a` anywhere else still
+launches a free-standing session.
+
+From then on the board follows the session. The first prompt or tool use moves
+a **pending** task to **in_progress**; a task that is already in progress, done
+or cancelled is left alone, because a prompt says work is happening, not that
+someone was wrong to have decided otherwise. A task blocked on an unfinished
+dependency stays pending, and the agent is never stalled over it.
+
+The Tasks list names the agent working each task and its state, the Agents list
+names the task each session is on, and a task nobody has started says so.
+
+The same hand-off from the command line:
+
+```
+orkestar agent launch <workspace-id> <adapter> --task=<task-id>
+```
+
 ## Selecting and copying in a terminal pane
 
 Dragging with the left button over a terminal pane selects its visible screen

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Launch an agent for a task, from the Tasks list with `a`, from MCP-adjacent
+  callers with `task_id` on `agent.launch`, or with
+  `orkestar agent launch <workspace> <adapter> --task=<id>`. The session starts
+  in the task's worktree and the assignment is recorded both ways in one call.
+- Move a task from pending to in_progress on its agent's first prompt or tool
+  use, so the board follows the work instead of waiting to be told. A task that
+  is already done, cancelled or blocked is left alone.
+
 ## 0.2.0
 
 Terminal correctness and throughput: a leaked window title no longer lands in an

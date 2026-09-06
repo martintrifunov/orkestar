@@ -23,6 +23,11 @@ type Agent struct {
 	State           string `json:"state"`
 	SignalSource    string `json:"signal_source,omitempty"`
 	AttentionReason string `json:"attention_reason,omitempty"`
+	// TaskID is the task this session was launched to work on, if any. It is
+	// what makes an agent's activity mean something on the board: the daemon
+	// starts the session in the task's worktree, assigns the task to it, and
+	// moves the task to in_progress on the session's first prompt.
+	TaskID string `json:"task_id,omitempty"`
 	// TerminalID is set for interactive, PTY-backed agent sessions
 	// (agent.Session implementing agent.ProcessSession): the daemon bridges
 	// the underlying PTY into the same terminal buffer/subscriber machinery
@@ -184,6 +189,7 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		Columns         int    `json:"columns"`
 		Rows            int    `json:"rows"`
 		ResumeSessionID string `json:"resume_session_id"`
+		TaskID          string `json:"task_id"`
 	}
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return Agent{}, fmt.Errorf("decode agent launch params: %w", err)
@@ -205,6 +211,23 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		mode = agent.ModeInteractive
 	}
 
+	// An agent launched for a task works in that task's worktree when it has
+	// one, so its changes land on the task's branch rather than in the
+	// workspace's primary checkout.
+	directory := workspace.Directory
+	if params.TaskID != "" {
+		task, terr := s.tasks.Get(params.TaskID)
+		if terr != nil {
+			return Agent{}, terr
+		}
+		if task.WorkspaceID != params.WorkspaceID {
+			return Agent{}, fmt.Errorf("task %q belongs to workspace %q, not %q", task.ID, task.WorkspaceID, params.WorkspaceID)
+		}
+		if task.WorktreePath != "" {
+			directory = task.WorktreePath
+		}
+	}
+
 	id, err := newID("agent")
 	if err != nil {
 		return Agent{}, err
@@ -217,12 +240,12 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 	if err != nil {
 		return Agent{}, err
 	}
-	starting := newAgentSession(Agent{ID: id, WorkspaceID: params.WorkspaceID, Adapter: params.Adapter, Mode: string(mode), State: "starting", CreatedAt: time.Now().UTC()}, nil)
+	starting := newAgentSession(Agent{ID: id, WorkspaceID: params.WorkspaceID, Adapter: params.Adapter, Mode: string(mode), TaskID: params.TaskID, State: "starting", CreatedAt: time.Now().UTC()}, nil)
 	s.mu.Lock()
 	s.agents[id] = starting
 	s.hookTokens[id] = token
 	s.mu.Unlock()
-	session, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: mode, Directory: workspace.Directory, Columns: params.Columns, Rows: params.Rows, ResumeSessionID: params.ResumeSessionID, HookCommand: hookCommand, Environment: env})
+	session, err := adapter.Launch(ctx, agent.LaunchOptions{Mode: mode, Directory: directory, Columns: params.Columns, Rows: params.Rows, ResumeSessionID: params.ResumeSessionID, HookCommand: hookCommand, Environment: env})
 	if err != nil {
 		s.mu.Lock()
 		delete(s.agents, id)
@@ -235,6 +258,7 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 		WorkspaceID:     params.WorkspaceID,
 		Adapter:         params.Adapter,
 		Mode:            string(mode),
+		TaskID:          params.TaskID,
 		NativeSessionID: session.NativeSessionID(),
 		State:           string(session.State()),
 		CreatedAt:       time.Now().UTC(),
@@ -250,7 +274,7 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 			ID:          terminalID,
 			WorkspaceID: params.WorkspaceID,
 			Command:     []string{"agent:" + params.Adapter},
-			Directory:   workspace.Directory,
+			Directory:   directory,
 			State:       "running",
 			CreatedAt:   metadata.CreatedAt,
 			Columns:     params.Columns, Rows: params.Rows,
@@ -278,6 +302,14 @@ func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Ag
 	s.mu.Lock()
 	s.agents[id] = entry
 	s.mu.Unlock()
+
+	// Assigning here rather than making the caller do it in a second call
+	// means the board and the session can never disagree about who owns the
+	// task. A launch that raced a task removal is not worth failing over: the
+	// session is already up and useful.
+	if params.TaskID != "" {
+		_, _ = s.tasks.Assign(params.TaskID, id)
+	}
 
 	s.agentWorkers.Add(1)
 	go func() { defer s.agentWorkers.Done(); s.watchAgent(id, entry) }()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,9 +42,25 @@ func (a *controllableAdapter) Launch(ctx context.Context, options agent.LaunchOp
 		state:   agent.StateReady,
 		events:  make(chan agent.LifecycleEvent, 16),
 		prompts: make(chan string, 16),
+		// Recording what the daemon asked for is how a test can check where an
+		// agent was started and reach the hook token it was handed.
+		options: options,
 	}
 	a.sessions <- session
 	return session, nil
+}
+
+// launched returns the session from the most recent Launch, waiting briefly
+// because the daemon returns from agent.launch before the test observes it.
+func (a *controllableAdapter) launched(t *testing.T) *controllableSession {
+	t.Helper()
+	select {
+	case session := <-a.sessions:
+		return session
+	case <-time.After(3 * time.Second):
+		t.Fatal("adapter was never asked to launch a session")
+		return nil
+	}
 }
 
 type controllableSession struct {
@@ -51,6 +68,23 @@ type controllableSession struct {
 	state   agent.State
 	events  chan agent.LifecycleEvent
 	prompts chan string
+	options agent.LaunchOptions
+}
+
+// hookToken is the token the daemon generated for this session's hook bridge.
+// A hook is only accepted when it carries it.
+//
+// The last entry wins, the way it does at exec time. The daemon appends its
+// variables to os.Environ(), so a test run from inside an Orkestar agent pane
+// sees the outer session's token first and would otherwise use it.
+func (s *controllableSession) hookToken() string {
+	token := ""
+	for _, entry := range s.options.Environment {
+		if value, ok := strings.CutPrefix(entry, "ORKESTAR_HOOK_TOKEN="); ok {
+			token = value
+		}
+	}
+	return token
 }
 
 func (s *controllableSession) ID() string              { return s.id }

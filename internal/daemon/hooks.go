@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
+	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
 type hookPermission struct {
@@ -73,9 +74,13 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 	}
 	entry.metadata.SignalSource = "hooks"
 	stopped := entry.metadata.State == "stopped" || entry.metadata.State == "crashed"
+	taskID := entry.metadata.TaskID
 	entry.mu.Unlock()
 	if stopped {
 		return map[string]string{}, nil
+	}
+	if p.Event == "UserPromptSubmit" || p.Event == "PreToolUse" {
+		s.startAgentTask(taskID)
 	}
 	if p.Event == "Stop" || p.Event == "Interrupt" || p.Event == "SessionEnd" {
 		s.cancelHookPermissions(p.AgentID, "")
@@ -166,4 +171,23 @@ func (s *Server) hookOptions(id, token, adapter string) (string, []string, error
 		env = append(env, "OPENCODE_CONFIG_CONTENT="+string(b))
 	}
 	return quoteShell(exe) + " hook", env, nil
+}
+
+// startAgentTask moves an agent's task out of pending the first time that
+// session does any work. Only a pending task moves: a task already in
+// progress, done or cancelled means someone has said something about it that
+// a prompt should not overrule.
+//
+// Every failure here is ignored on purpose. The task may have been removed,
+// or it may be blocked on an unfinished dependency, and neither is a reason to
+// fail the hook and stall the agent that sent it.
+func (s *Server) startAgentTask(taskID string) {
+	if taskID == "" {
+		return
+	}
+	task, err := s.tasks.Get(taskID)
+	if err != nil || task.Status != workflow.StatusPending {
+		return
+	}
+	_, _ = s.tasks.SetStatus(taskID, workflow.StatusInProgress)
 }

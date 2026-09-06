@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -62,11 +63,21 @@ func runAgent(paths runtimepath.Paths, args []string) error {
 		}
 		result = state.Agents
 	case "launch":
-		if len(args) != 3 {
-			return fmt.Errorf("usage: agent launch <workspace-id> <adapter>")
+		if len(args) < 3 || len(args) > 4 {
+			return fmt.Errorf("usage: agent launch <workspace-id> <adapter> [--task=<task-id>]")
+		}
+		params := map[string]string{"workspace_id": args[1], "adapter": args[2], "mode": "interactive"}
+		if len(args) == 4 {
+			taskID, ok := strings.CutPrefix(args[3], "--task=")
+			if !ok || taskID == "" {
+				return fmt.Errorf("usage: agent launch <workspace-id> <adapter> [--task=<task-id>]")
+			}
+			// The daemon starts the session in the task's worktree and assigns
+			// the task to it, so this is the whole hand-off.
+			params["task_id"] = taskID
 		}
 		var a daemon.Agent
-		if err := client.Call(ctx, "agent.launch", map[string]string{"workspace_id": args[1], "adapter": args[2], "mode": "interactive"}, &a); err != nil {
+		if err := client.Call(ctx, "agent.launch", params, &a); err != nil {
 			return err
 		}
 		result = a

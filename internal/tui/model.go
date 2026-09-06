@@ -113,6 +113,11 @@ type Model struct {
 	// automatically.
 	pickingAgent  bool
 	agentPickerAt int
+	// pickerTaskID is the task the agent being picked will work on, set when
+	// the picker was opened from the Tasks section. Launching with it hands
+	// the task over in one step instead of leaving the assignment to be
+	// remembered afterwards.
+	pickerTaskID string
 
 	// The sidebar stays usable while a terminal attachment is visible.
 	embedded       *embeddedTerminal
@@ -360,7 +365,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pickingAgent {
 			switch message.String() {
 			case "esc", "q":
-				m.pickingAgent = false
+				m.pickingAgent, m.pickerTaskID = false, ""
 			case "up", "k":
 				if m.agentPickerAt > 0 {
 					m.agentPickerAt--
@@ -372,10 +377,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.pickingAgent = false
 				if m.opening || len(m.snapshot.Adapters) == 0 || !m.roomForPane() {
+					m.pickerTaskID = ""
 					return m, nil
 				}
 				m.opening = true
-				return m, m.launchPickedAgent()
+				command := m.launchPickedAgent()
+				m.pickerTaskID = ""
+				return m, command
 			}
 			return m, nil
 		}
@@ -456,6 +464,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startTerminal([]string{defaultShell()})
 		case "a":
 			m.pickingAgent = true
+			// Pressing a with a task selected launches the agent for that
+			// task; anywhere else it launches a free-standing session.
+			m.pickerTaskID = ""
+			if task, ok := m.selectedTask(); ok {
+				m.pickerTaskID = task.ID
+			}
 			if m.agentPickerAt >= len(m.snapshot.Adapters) {
 				m.agentPickerAt = 0
 			}
@@ -676,6 +690,9 @@ func (m Model) render() string {
 
 func (m Model) renderAgentPicker(width int) string {
 	header := accentStyle.Render("New agent") + dimStyle.Render("  choose which agent to launch")
+	if task, ok := m.pickerTask(); ok {
+		header = accentStyle.Render("Start task") + dimStyle.Render("  "+task.Title+" · runs in its worktree and takes the assignment")
+	}
 
 	lines := []string{}
 	if len(m.snapshot.Adapters) == 0 {
@@ -712,6 +729,11 @@ func (m Model) renderAgents() string {
 			line = "  " + line
 		}
 		lines = append(lines, line)
+		// An agent's task is the most useful thing to know about it after its
+		// state: it says what the session is for, not just that it exists.
+		if title := m.taskTitleOf(agent.TaskID); title != "" {
+			lines = append(lines, dimStyle.Render("    on "+title))
+		}
 		if agent.AttentionReason != "" {
 			lines = append(lines, errorStyle.Render("    "+agent.AttentionReason))
 		}
@@ -870,6 +892,7 @@ func (m Model) launchPickedAgent() tea.Cmd {
 	if capabilities.SupportsInteractive {
 		mode = "interactive"
 	}
+	taskID := m.pickerTaskID
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -880,14 +903,18 @@ func (m Model) launchPickedAgent() tea.Cmd {
 			return agentLaunchedMsg{err: err}
 		}
 
-		var launched daemon.Agent
-		err = m.client.Call(ctx, "agent.launch", map[string]any{
+		params := map[string]any{
 			"workspace_id": workspaceID,
 			"adapter":      capabilities.Name,
 			"mode":         mode,
 			"columns":      max(m.width, 80),
 			"rows":         max(m.height, 24),
-		}, &launched)
+		}
+		if taskID != "" {
+			params["task_id"] = taskID
+		}
+		var launched daemon.Agent
+		err = m.client.Call(ctx, "agent.launch", params, &launched)
 		return agentLaunchedMsg{agent: launched, err: err}
 	}
 }

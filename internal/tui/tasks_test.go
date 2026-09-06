@@ -300,3 +300,67 @@ func TestTaskPromptCancelsAndIgnoresAnEmptyTitle(t *testing.T) {
 		t.Fatal("quit key was not captured by the prompt")
 	}
 }
+
+// Pressing a with a task selected hands that task to the agent being picked,
+// rather than opening an unrelated session beside it.
+func TestLaunchingAnAgentFromATask(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusTasks}
+	m.snapshot.Tasks = []workflow.Task{{ID: "task_1", Title: "Ship it", Status: workflow.StatusPending}}
+
+	m, _ = press(t, m, 'a')
+	if !m.pickingAgent {
+		t.Fatal("the agent picker did not open")
+	}
+	if m.pickerTaskID != "task_1" {
+		t.Fatalf("the picker is for task %q, want task_1", m.pickerTaskID)
+	}
+	if out := m.renderAgentPicker(100); !strings.Contains(out, "Start task") || !strings.Contains(out, "Ship it") {
+		t.Fatalf("the picker does not say which task it will start:\n%s", out)
+	}
+
+	// Cancelling must not leave the task attached to the next launch.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.pickerTaskID != "" {
+		t.Fatalf("cancelling left task %q on the picker", m.pickerTaskID)
+	}
+}
+
+// The same key away from the Tasks section still launches a free-standing
+// agent, which is what it has always done.
+func TestLaunchingAnAgentOutsideTheTaskList(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusSessions}
+	m.snapshot.Tasks = []workflow.Task{{ID: "task_1", Title: "Ship it", Status: workflow.StatusPending}}
+
+	m, _ = press(t, m, 'a')
+	if !m.pickingAgent {
+		t.Fatal("the agent picker did not open")
+	}
+	if m.pickerTaskID != "" {
+		t.Fatalf("the picker picked up task %q from another section", m.pickerTaskID)
+	}
+	if out := m.renderAgentPicker(100); !strings.Contains(out, "New agent") {
+		t.Fatalf("the picker is not the plain one:\n%s", out)
+	}
+}
+
+// A task nobody is working shows how to start one; a task with a live agent
+// shows which one, so the sidebar answers "what is happening" on its own.
+func TestTaskDetailNamesItsAgent(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusTasks}
+	m.snapshot.Tasks = []workflow.Task{{ID: "task_1", Title: "Ship it", Status: workflow.StatusPending}}
+
+	if detail := m.taskDetail(m.snapshot.Tasks[0]); !strings.Contains(detail, "unstarted") {
+		t.Fatalf("an unstarted task does not say so: %q", detail)
+	}
+
+	m.snapshot.Tasks[0].AssigneeAgentID = "agent_1"
+	m.snapshot.Agents = []daemon.Agent{{ID: "agent_1", Adapter: "claude-code", TaskID: "task_1", State: "working"}}
+	detail := m.taskDetail(m.snapshot.Tasks[0])
+	if !strings.Contains(detail, "claude-code") || !strings.Contains(detail, "working") {
+		t.Fatalf("the task does not name its agent: %q", detail)
+	}
+	if out := m.renderAgents(); !strings.Contains(out, "on Ship it") {
+		t.Fatalf("the agent does not name its task:\n%s", out)
+	}
+}

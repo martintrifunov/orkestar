@@ -76,7 +76,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		help = "enter open  X stop/remove  a agent  n shell  f files  esc terminal  q quit"
 	}
 	if m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused) {
-		help = "c new  d diff  m done  x cancel  w worktree  t assign  tab section"
+		help = "c new  a start  d diff  m done  x cancel  w worktree  tab section"
 	}
 	if m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused) {
 		help = "enter open  u resume  i interrupt  X stop/remove  y/x allow/deny  tab section"
