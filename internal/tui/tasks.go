@@ -68,6 +68,15 @@ func (m Model) renderTasks() string {
 		}
 		// The detail lines are only worth their rows for the task being acted
 		// on. The description is why the task exists, so it comes first.
+		// An open pane is marked on every row, not just the selected one: it is
+		// how the list answers "which of this is on screen".
+		if group := m.panesForTask(task.ID); len(group) > 0 {
+			mark := "    on screen"
+			if len(group) > 1 {
+				mark = fmt.Sprintf("    on screen · %d panes", len(group))
+			}
+			lines = append(lines, accentStyle.Render(mark))
+		}
 		if selected {
 			if task.Description != "" {
 				lines = append(lines, dimStyle.Render("    "+task.Description))

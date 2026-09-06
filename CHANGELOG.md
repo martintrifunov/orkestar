@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Name the task a pane is working on its border and in the header, mark the
+  tasks something is showing in the Tasks list, and make `Enter` on a task
+  focus, open or cycle its panes.
 - Declare a pipeline once in `.orkestar/templates/<name>.json` and apply it:
   its tasks, their dependencies, their worktrees, and the agents that work
   them. `orkestar template list|apply`, or `template_list`/`template_apply`

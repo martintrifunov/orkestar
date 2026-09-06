@@ -127,7 +127,7 @@ func TestSelectableRespectsMouseReporting(t *testing.T) {
 // clipboard.
 func TestDragOverAPaneCopiesToTheClipboard(t *testing.T) {
 	pane := &embeddedTerminal{terminalID: "t", title: "shell", emulator: &staticScreen{content: "first line\nsecond line"}, done: make(chan struct{})}
-	model := Model{width: 120, height: 40, layout: (&splitNode{}).insert(nil, pane, false), embedded: pane}
+	model := Model{width: 120, height: 40, layout: (*splitNode)(nil).insert(nil, pane, false), embedded: pane}
 
 	rects := model.paneRects()
 	if len(rects) != 1 {
@@ -164,7 +164,7 @@ func TestDragOverAPaneCopiesToTheClipboard(t *testing.T) {
 // Clicking to focus a pane must leave the clipboard alone.
 func TestClickWithoutDraggingCopiesNothing(t *testing.T) {
 	pane := &embeddedTerminal{terminalID: "t", emulator: &staticScreen{content: "first line"}, done: make(chan struct{})}
-	model := Model{width: 120, height: 40, layout: (&splitNode{}).insert(nil, pane, false), embedded: pane}
+	model := Model{width: 120, height: 40, layout: (*splitNode)(nil).insert(nil, pane, false), embedded: pane}
 	origin := model.paneRects()[0]
 
 	next, _ := model.Update(tea.MouseClickMsg{X: origin.x + 2, Y: origin.y + 1, Button: tea.MouseLeft})
@@ -188,7 +188,7 @@ func TestClickWithoutDraggingCopiesNothing(t *testing.T) {
 func TestTypingClearsTheSelection(t *testing.T) {
 	pane := &embeddedTerminal{terminalID: "t", emulator: &staticScreen{content: "first line"}, done: make(chan struct{})}
 	pane.selection = selectionOver(0, 0, 4, 0)
-	model := Model{width: 120, height: 40, layout: (&splitNode{}).insert(nil, pane, false), embedded: pane}
+	model := Model{width: 120, height: 40, layout: (*splitNode)(nil).insert(nil, pane, false), embedded: pane}
 
 	if _, _ = model.updateEmbedded(tea.KeyPressMsg{Code: 'x', Text: "x"}); pane.selection.present {
 		t.Fatal("selection survived a keystroke")

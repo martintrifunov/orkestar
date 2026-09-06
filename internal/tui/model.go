@@ -509,6 +509,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.opening {
 				return m, nil
 			}
+			// On a task this shows the work being done on it, cycling through
+			// its panes when more than one is open.
+			if m.focus == focusTasks {
+				return m, m.openSelectedTask()
+			}
 			id := m.selectedTerminalID()
 			if id == "" {
 				return m, nil

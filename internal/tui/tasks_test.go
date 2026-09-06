@@ -472,7 +472,7 @@ func TestEditingWithNoTasksDoesNothing(t *testing.T) {
 // whatever task happened to be selected.
 func TestPaneKeystrokesAreNotStolenByTaskEditing(t *testing.T) {
 	pane := &embeddedTerminal{terminalID: "t", title: "shell", emulator: &staticScreen{}, done: make(chan struct{})}
-	m := Model{width: 140, height: 40, focus: focusTasks, layout: (&splitNode{}).insert(nil, pane, false), embedded: pane}
+	m := Model{width: 140, height: 40, focus: focusTasks, layout: (*splitNode)(nil).insert(nil, pane, false), embedded: pane}
 	m.snapshot.Tasks = []workflow.Task{{ID: "task_1", Title: "Ship it", Status: workflow.StatusPending}}
 
 	m, _ = press(t, m, 'e')

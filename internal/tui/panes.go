@@ -182,12 +182,20 @@ func (m Model) paneLabel(p *embeddedTerminal) string {
 	case p.title != "":
 		return p.title
 	}
+	name := p.terminalID
 	for _, terminal := range m.snapshot.Terminals {
 		if terminal.ID == p.terminalID && len(terminal.Command) > 0 {
-			return filepath.Base(terminal.Command[0])
+			// An agent terminal's command is "agent:<adapter>", which is how
+			// the daemon marks it and not something worth a border.
+			name = strings.TrimPrefix(filepath.Base(terminal.Command[0]), "agent:")
 		}
 	}
-	return p.terminalID
+	// Three agent panes otherwise read identically. What separates them is the
+	// work, so the border says which task the pane is doing.
+	if task, ok := m.taskOfPane(p); ok {
+		return name + " · " + task.Title
+	}
+	return name
 }
 
 // withPaneTitle draws the name into the pane's top border, the way a tiling
@@ -383,13 +391,9 @@ func (m Model) paneTitle() string {
 	if m.embedded == nil {
 		return ""
 	}
-	name := m.embedded.terminalID
-	if m.embedded.title != "" {
-		name = m.embedded.title
-	}
-	if m.embedded.editor != nil {
-		name = m.embedded.editor.title()
-	}
+	// The same label the pane's own border carries, so the header names the
+	// task too rather than falling back to an ID.
+	name := m.paneLabel(m.embedded)
 	label := fmt.Sprintf("  %d panes · %s", len(m.visiblePanes()), name)
 	if m.zoomed && len(m.visiblePanes()) > 1 {
 		label += " · zoomed (ctrl+b z)"

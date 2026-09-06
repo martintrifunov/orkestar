@@ -143,6 +143,25 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Finding the work on screen
+
+Panes already belong to tasks — an agent is launched for one and its terminal
+is the pane — but nothing said so. Three agent panes running the same CLI read
+identically, and getting from a task on the board to the pane doing it meant
+guessing.
+
+A pane's border now names the task it is working, and so does the header for
+the focused one. The Tasks list marks every task something is showing, with a
+count when more than one pane is on it.
+
+`Enter` on a task shows that work: it focuses the pane if one is open, opens it
+if the agent is running but its pane was closed, and cycles within the task
+when several panes are on it — the one place a task's panes act as a group. A
+task nobody has started says so instead.
+
+This is the grouping other multiplexers get from arbitrary tabs, taken from the
+structure Orkestar already models rather than a second one laid beside it.
+
 ## Workflow templates
 
 A piece of work that happens the same way every time is declared once, in
