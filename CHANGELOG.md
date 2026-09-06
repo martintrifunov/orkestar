@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Two milestones: agents can now coordinate rather than only run, and somebody
+other than the author can install and drive the thing. An agent waits on
+another agent's work instead of polling for it, a pipeline is declared once in
+a file, and a daemon on another machine is reachable over ssh. Keys rebind, a
+right-click says what a pane can do, and a curl one-liner installs it.
 
 - Right-click a pane for a menu of what it can do, listing only what applies to
   that pane and showing the key for each.
