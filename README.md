@@ -65,14 +65,6 @@ Run the same command again to upgrade, once any running daemon can be stopped.
 Use Windows Terminal; shell panes prefer PowerShell 7, falling back to Windows
 PowerShell.
 
-To review the installer before running it:
-
-```powershell
-irm https://raw.githubusercontent.com/martintrifunov/orkestar/main/install.ps1 -OutFile install-orkestar.ps1
-Get-Content .\install-orkestar.ps1
-.\install-orkestar.ps1
-```
-
 Agent CLIs must be installed separately.
 
 Build from source with Go 1.27 or newer on macOS, Linux or Windows:
