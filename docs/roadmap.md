@@ -131,6 +131,23 @@ Ordered by what stands between a new user and a working session.
       do not read a help line. Worth doing after bindings, not before: someone
       who cannot rebind will not stay long enough to find a menu.
 
+## M6 progress — 2026-09-06
+
+All five shipped. What each cost was mostly honesty rather than code:
+
+- The installer verifies a checksum before unpacking and tells the user what to
+  add to PATH rather than editing a shell profile. mise needs nothing from us,
+  which does tie three installers to the release archive naming; that is now
+  written down where the release process is.
+- Cursor and Grok claim only what has been checked. Neither CLI was installed
+  on the machine they were written on, so they run in a pane and report started,
+  stopped or crashed, and nothing about attention. `docs/validation.md` says
+  what finishing them would take.
+- Configurable bindings forced the key map to be written out, which turned up
+  two conflations in the old code: the prefixed x discards an editor and has
+  nothing to do with cancelling a task, and deny and cancel were always one
+  binding whose meaning follows the focus.
+
 ## M7: Game engines
 
 - [ ] Unreal Engine MCP detection and routing
