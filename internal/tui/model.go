@@ -69,7 +69,12 @@ type Model struct {
 	// mutation while one is in flight, because completing a task can run a
 	// reviewer agent and take a while.
 	taskPrompt, taskReview, taskBusy bool
-	taskTitle                        string
+	taskTitle, taskDescription       string
+	// taskField is which line of the prompt typing goes to, and taskEditID
+	// names the task being edited. An empty taskEditID means the prompt is
+	// creating one.
+	taskField  int
+	taskEditID string
 
 	// The file viewer mirrors the sidebar on the right edge. It is closed by
 	// default and reads the workspace only while open.
@@ -446,6 +451,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			cmd, _ := m.paneAction(message.String())
 			return m, cmd
 		case "e":
+			// On a task this edits it, the way d shows that task's diff.
+			// Elsewhere it opens the editor pane.
+			if m.focus == focusTasks && len(m.snapshot.Tasks) > 0 {
+				// Same interlock as m, w and t: a second mutation while one is
+				// in flight would race it and its reply would go unreported.
+				if !m.taskBusy {
+					m.startTaskEdit()
+				}
+				return m, nil
+			}
 			cmd, _ := m.paneAction("e")
 			return m, cmd
 		case "u":
@@ -507,6 +522,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.startTaskPrompt()
 			}
 			return m, nil
+
 		case "d":
 			// On a task this is the task's own diff and reviewer verdict.
 			// Elsewhere it is the workspace review pane.

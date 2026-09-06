@@ -264,6 +264,7 @@ Usage:
   orkestar agent interrupt <agent-id>
   orkestar task create <workspace-id> <title> [--depends-on id1,id2] [--no-review]
   orkestar task list [workspace-id]
+  orkestar task edit <task-id> [--title=…] [--description=…] [--depends-on=id1,id2]
   orkestar task status <task-id> <pending|in_progress|done|cancelled>
   orkestar task assign <task-id> <agent-id>
   orkestar task worktree create <task-id> [branch]

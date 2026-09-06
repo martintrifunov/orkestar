@@ -23,6 +23,8 @@ func runTask(paths runtimepath.Paths, args []string) error {
 		return taskCreate(paths, args[1:])
 	case "list":
 		return taskList(paths, args[1:])
+	case "edit":
+		return taskEdit(paths, args[1:])
 	case "status":
 		return taskStatus(paths, args[1:])
 	case "assign":
@@ -39,6 +41,7 @@ func runTask(paths runtimepath.Paths, args []string) error {
 var errTaskUsage = errors.New(`usage:
   orkestar task create <workspace-id> <title> [--depends-on id1,id2] [--no-review]
   orkestar task list [workspace-id]
+  orkestar task edit <task-id> [--title=…] [--description=…] [--depends-on=id1,id2]
   orkestar task status <task-id> <pending|in_progress|done|cancelled>
   orkestar task assign <task-id> <agent-id>
   orkestar task worktree create <task-id> [branch]
@@ -77,6 +80,42 @@ func taskCreate(paths runtimepath.Paths, args []string) error {
 		"depends_on":   dependsOn,
 		"auto_review":  &autoReview,
 	}, &task); err != nil {
+		return err
+	}
+	printTask(task)
+	return nil
+}
+
+// taskEdit changes a task after it was created. Only the flags given are
+// sent, so editing a title cannot blank a description; --depends-on replaces
+// the whole list, and an empty value clears it.
+func taskEdit(paths runtimepath.Paths, args []string) error {
+	if len(args) < 2 {
+		return errTaskUsage
+	}
+	params := map[string]any{"task_id": args[0]}
+	for _, flag := range args[1:] {
+		switch {
+		case strings.HasPrefix(flag, "--title="):
+			params["title"] = strings.TrimPrefix(flag, "--title=")
+		case strings.HasPrefix(flag, "--description="):
+			params["description"] = strings.TrimPrefix(flag, "--description=")
+		case strings.HasPrefix(flag, "--depends-on="):
+			value := strings.TrimPrefix(flag, "--depends-on=")
+			dependsOn := []string{}
+			if value != "" {
+				dependsOn = strings.Split(value, ",")
+			}
+			params["depends_on"] = dependsOn
+		default:
+			return fmt.Errorf("unknown flag %q\n\n%s", flag, errTaskUsage.Error())
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var task workflow.Task
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "task.update", params, &task); err != nil {
 		return err
 	}
 	printTask(task)

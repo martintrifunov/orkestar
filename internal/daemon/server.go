@@ -262,6 +262,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.resolvePermission(context.Background(), request.Params)
 	case "task.create":
 		result, err = s.createTask(request.Params)
+	case "task.update":
+		result, err = s.updateTask(request.Params)
 	case "task.setStatus":
 		result, err = s.setTaskStatus(context.Background(), request.Params)
 	case "task.assign":

@@ -280,3 +280,57 @@ func (f taskAgentFixture) hook(t *testing.T, session *controllableSession, agent
 		t.Fatalf("hook %s: %v", event, err)
 	}
 }
+
+// Editing over IPC has to preserve the fields it was not given: JSON makes an
+// absent key and an empty string easy to confuse, and confusing them here
+// silently destroys a description.
+func TestTaskUpdateLeavesAbsentFieldsAlone(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTaskAgentFixture(t)
+	var created workflow.Task
+	fixture.mustCall(t, "task.create", map[string]any{
+		"workspace_id": fixture.workspace.ID, "title": "First",
+		"description": "as written", "auto_review": false,
+	}, &created)
+
+	var renamed workflow.Task
+	fixture.mustCall(t, "task.update", map[string]any{"task_id": created.ID, "title": "Renamed"}, &renamed)
+	if renamed.Title != "Renamed" || renamed.Description != "as written" {
+		t.Fatalf("unexpected task: %+v", renamed)
+	}
+
+	var cleared workflow.Task
+	fixture.mustCall(t, "task.update", map[string]any{"task_id": created.ID, "description": ""}, &cleared)
+	if cleared.Description != "" {
+		t.Fatalf("an explicit empty description was ignored: %q", cleared.Description)
+	}
+	if cleared.Title != "Renamed" {
+		t.Fatalf("the title was lost: %q", cleared.Title)
+	}
+}
+
+// A dependency added after the fact can close a loop that Create could never
+// build, and the daemon must refuse it rather than store an unstartable board.
+func TestTaskUpdateRefusesACycleOverIPC(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTaskAgentFixture(t)
+	first := fixture.createTask(t, "First")
+	var second workflow.Task
+	fixture.mustCall(t, "task.create", map[string]any{
+		"workspace_id": fixture.workspace.ID, "title": "Second",
+		"depends_on": []string{first.ID}, "auto_review": false,
+	}, &second)
+
+	var updated workflow.Task
+	err := fixture.call(t, "task.update", map[string]any{
+		"task_id": first.ID, "depends_on": []string{second.ID},
+	}, &updated)
+	if err == nil {
+		t.Fatal("a cycle was accepted")
+	}
+	if after := fixture.task(t, first.ID); len(after.DependsOn) != 0 {
+		t.Fatalf("the rejected edit was stored anyway: %v", after.DependsOn)
+	}
+}

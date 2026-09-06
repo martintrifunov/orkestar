@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -77,10 +78,13 @@ func (b *Board) Create(workspaceID, title, description string, dependsOn []strin
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for _, dependencyID := range dependsOn {
-		if _, ok := b.tasks[dependencyID]; !ok {
-			return Task{}, fmt.Errorf("dependency %q does not exist", dependencyID)
-		}
+	// The task has no ID yet, so it cannot be its own dependency and no edge
+	// can point back to it: the cycle and self checks are no-ops here, and
+	// what is left is the existence check Create has always done, plus the
+	// same deduplication an edit gets.
+	dependsOn, err := b.validDependencies("", dependsOn)
+	if err != nil {
+		return Task{}, err
 	}
 
 	id, err := newID("task")
@@ -102,6 +106,104 @@ func (b *Board) Create(workspaceID, title, description string, dependsOn []strin
 
 	b.tasks[id] = task
 	return task, nil
+}
+
+// TaskEdit is a partial change to a task. A nil field is left as it was, so a
+// caller changing a title cannot blank a description it never sent.
+type TaskEdit struct {
+	Title       *string
+	Description *string
+	DependsOn   *[]string
+}
+
+// Update applies an edit to a task.
+//
+// Dependencies are the part that needs care. Create could not build a cycle:
+// a task may only depend on tasks that already exist, so edges always point
+// backwards in time. An edit has no such guarantee, and a cycle would make
+// every task in it permanently unstartable, each waiting on the next. Reject
+// one rather than let the board reach that state.
+func (b *Board) Update(taskID string, edit TaskEdit) (Task, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	task, ok := b.tasks[taskID]
+	if !ok {
+		return Task{}, fmt.Errorf("task %q does not exist", taskID)
+	}
+
+	if edit.Title != nil {
+		if *edit.Title == "" {
+			return Task{}, errors.New("task title is required")
+		}
+		task.Title = *edit.Title
+	}
+	if edit.Description != nil {
+		task.Description = *edit.Description
+	}
+	if edit.DependsOn != nil {
+		dependsOn, err := b.validDependencies(taskID, *edit.DependsOn)
+		if err != nil {
+			return Task{}, err
+		}
+		task.DependsOn = dependsOn
+	}
+
+	task.UpdatedAt = time.Now().UTC()
+	b.tasks[taskID] = task
+	return task, nil
+}
+
+// validDependencies checks a proposed dependency list and returns it
+// deduplicated. Callers must hold b.mu.
+func (b *Board) validDependencies(taskID string, dependsOn []string) ([]string, error) {
+	seen := make(map[string]bool, len(dependsOn))
+	unique := make([]string, 0, len(dependsOn))
+	for _, dependencyID := range dependsOn {
+		if dependencyID == taskID {
+			return nil, fmt.Errorf("task %q cannot depend on itself", taskID)
+		}
+		if _, ok := b.tasks[dependencyID]; !ok {
+			return nil, fmt.Errorf("dependency %q does not exist", dependencyID)
+		}
+		if seen[dependencyID] {
+			continue
+		}
+		seen[dependencyID] = true
+		unique = append(unique, dependencyID)
+	}
+	if path := b.cycleThrough(taskID, unique); path != "" {
+		return nil, fmt.Errorf("task %q cannot depend on %s: it would never be startable", taskID, path)
+	}
+	return unique, nil
+}
+
+// cycleThrough reports the path back to taskID that the proposed dependencies
+// would create, or empty if there is none. Callers must hold b.mu.
+func (b *Board) cycleThrough(taskID string, dependsOn []string) string {
+	visited := make(map[string]bool, len(b.tasks))
+	var walk func(id string, path []string) string
+	walk = func(id string, path []string) string {
+		if id == taskID {
+			return strings.Join(path, " → ")
+		}
+		if visited[id] {
+			return ""
+		}
+		visited[id] = true
+		for _, next := range b.tasks[id].DependsOn {
+			if found := walk(next, append(path, next)); found != "" {
+				return found
+			}
+		}
+		return ""
+	}
+	for _, dependencyID := range dependsOn {
+		if found := walk(dependencyID, []string{dependencyID}); found != "" {
+			return found
+		}
+	}
+	return ""
 }
 
 // SetStatus transitions a task to the given status. Moving to

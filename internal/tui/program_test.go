@@ -427,16 +427,29 @@ func TestProgramCreatesATaskWithRealKeys(t *testing.T) {
 	send("c")
 	wait("New task")
 	wait("Auto-review: on")
-	// Tab inside the prompt toggles the reviewer gate rather than changing
-	// the sidebar section.
-	send("\t")
+	// Ctrl+R inside the prompt toggles the reviewer gate. Tab moves between
+	// the title and description rather than changing the sidebar section.
+	send("\x12")
 	wait("Auto-review: off")
-	send("Ship it\r")
+	send("Ship it")
+	send("\t")
+	send("before the release")
+	wait("before the release")
+	send("\r")
 	wait("Task created")
 	wait("Ship it")
 	wait("pending")
-	// The detail line explains what still has to happen for this task.
+	// The selected task shows why it exists, then what still has to happen.
+	wait("before the release")
 	wait("no worktree")
+
+	// The same prompt reopens over the task to correct it.
+	send("e")
+	wait("Edit task")
+	send("\x7f\x7f")
+	wait("Ship")
+	send("\r")
+	wait("Task updated")
 	send("q")
 	select {
 	case <-process.Done():

@@ -90,6 +90,33 @@ The same hand-off from the command line:
 orkestar agent launch <workspace-id> <adapter> --task=<task-id>
 ```
 
+## Editing a task
+
+`e` on a selected task reopens the prompt over it, filled in with what is
+already there. `Tab` moves between the title and the description; `Enter`
+saves. The same prompt creates tasks with `c`, where `Ctrl+R` toggles
+auto-review — `Tab` no longer does, because it now moves between fields.
+
+Auto-review is missing from the edit prompt on purpose. It describes the gate
+the task was created under, and offering it here would make it easy to drop a
+review someone deliberately asked for.
+
+From the command line, only the flags you pass change:
+
+```
+orkestar task edit <task-id> [--title=…] [--description=…] [--depends-on=id1,id2]
+```
+
+`--depends-on` replaces the whole list, and an empty value clears it.
+
+### Dependencies added later
+
+`task create` cannot build a dependency cycle: a task may only depend on tasks
+that already exist, so its edges always point backwards in time. An edit has no
+such guarantee, and a cycle would leave every task in it permanently
+unstartable, each waiting on the next. Orkestar rejects one and names the path
+it would have closed, rather than storing a board that can never move.
+
 ## The bell
 
 Orkestar rings the terminal bell twice: when a task reaches **done**, and when

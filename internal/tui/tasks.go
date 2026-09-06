@@ -66,8 +66,12 @@ func (m Model) renderTasks() string {
 		if task.WorktreePath != "" {
 			lines = append(lines, dimStyle.Render("    branch "+task.WorktreeBranch))
 		}
-		// The detail line is only worth its row for the task being acted on.
+		// The detail lines are only worth their rows for the task being acted
+		// on. The description is why the task exists, so it comes first.
 		if selected {
+			if task.Description != "" {
+				lines = append(lines, dimStyle.Render("    "+task.Description))
+			}
 			if detail := m.taskDetail(task); detail != "" {
 				lines = append(lines, dimStyle.Render("    "+detail))
 			}
@@ -117,12 +121,35 @@ func (m Model) taskCall(method string, params map[string]any, notice string, tim
 // the daemon and CLI default, and the prompt says what that means.
 func (m *Model) startTaskPrompt() {
 	m.taskPrompt = true
-	m.taskTitle = ""
+	m.taskTitle, m.taskDescription, m.taskEditID, m.taskField = "", "", "", 0
 	m.taskReview = true
 	m.focus = focusTasks
 }
 
-func (m Model) createTask(title string, autoReview bool) tea.Cmd {
+// startTaskEdit opens the same prompt over an existing task. What a task is
+// for changes as it is worked on, and until now the only way to correct a
+// title was to cancel the task and make another one.
+func (m *Model) startTaskEdit() {
+	task, ok := m.selectedTask()
+	if !ok {
+		return
+	}
+	m.taskPrompt = true
+	m.taskTitle, m.taskDescription = task.Title, task.Description
+	m.taskEditID, m.taskField = task.ID, 0
+	m.taskReview = task.AutoReview
+}
+
+// editTask saves the prompt over the task it was opened on. Auto-review is not
+// sent: it is a property of how the task was created, and changing it here
+// would silently drop a review gate someone asked for.
+func (m Model) editTask(taskID, title, description string) tea.Cmd {
+	return m.taskCall("task.update", map[string]any{
+		"task_id": taskID, "title": title, "description": description,
+	}, "Task updated", 15*time.Second)
+}
+
+func (m Model) createTask(title, description string, autoReview bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -134,6 +161,7 @@ func (m Model) createTask(title string, autoReview bool) tea.Cmd {
 		err = m.client.Call(ctx, "task.create", map[string]any{
 			"workspace_id": workspaceID,
 			"title":        title,
+			"description":  description,
 			"auto_review":  autoReview,
 		}, &task)
 		return taskActionMsg{task: task, notice: "Task created", err: err}
@@ -216,46 +244,91 @@ func (m *Model) loadDiff() tea.Cmd {
 	}
 }
 
+// cursorOn marks the field typing goes to, so two editable lines can be told
+// apart at a glance.
+func (m Model) cursorOn(field int, value string) string {
+	if m.taskField == field {
+		return value + "▏"
+	}
+	return value
+}
+
 func (m Model) taskPromptView() string {
 	review := "on — a reviewer agent must approve before this task can be done"
 	if !m.taskReview {
 		review = "off — the task can be completed without a review"
 	}
-	return "New task\n\nWorkspace: " + m.directory +
-		"\n\nTitle: " + m.taskTitle + "▏" +
+	description := m.cursorOn(1, m.taskDescription)
+	if description == "" {
+		description = dimStyle.Render("what done looks like, or why this exists")
+	}
+	body := "New task\n\nWorkspace: " + m.directory +
+		"\n\nTitle: " + m.cursorOn(0, m.taskTitle) +
+		"\nDescription: " + description +
 		"\n\nAuto-review: " + review +
-		"\n\nEnter creates · Tab toggles auto-review · Esc cancels"
+		"\n\nEnter creates · Tab switches field · Ctrl+R toggles auto-review · Esc cancels"
+	if m.taskEditID != "" {
+		// Auto-review is left out: editing does not change it.
+		body = "Edit task\n\nTitle: " + m.cursorOn(0, m.taskTitle) +
+			"\nDescription: " + description +
+			"\n\nEnter saves · Tab switches field · Esc cancels"
+	}
+	return body
 }
 
 func (m Model) updateTaskPrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Ctrl+R rather than Tab, which now moves between the two fields.
+	if k.Mod&tea.ModCtrl != 0 && k.Code == 'r' && m.taskEditID == "" {
+		m.taskReview = !m.taskReview
+		return m, nil
+	}
 	switch k.Code {
 	case tea.KeyEscape:
 		m.taskPrompt = false
 		return m, nil
 	case tea.KeyTab:
-		m.taskReview = !m.taskReview
+		m.taskField = (m.taskField + 1) % 2
 		return m, nil
 	case tea.KeyEnter:
 		title := strings.TrimSpace(m.taskTitle)
-		m.taskPrompt = false
+		description := strings.TrimSpace(m.taskDescription)
 		if title == "" {
+			// Keep the prompt open. Closing it would throw away a description
+			// the user may have just written, with nothing said about why.
+			m.taskField = 0
+			m.notice = "A task needs a title."
 			return m, nil
 		}
+		m.taskPrompt = false
 		m.taskBusy = true
+		if m.taskEditID != "" {
+			m.notice = "Saving task…"
+			return m, m.editTask(m.taskEditID, title, description)
+		}
 		m.notice = "Creating task…"
-		return m, m.createTask(title, m.taskReview)
+		return m, m.createTask(title, description, m.taskReview)
 	case tea.KeyBackspace:
-		if r := []rune(m.taskTitle); len(r) > 0 {
-			m.taskTitle = string(r[:len(r)-1])
+		field := m.field()
+		if r := []rune(*field); len(r) > 0 {
+			*field = string(r[:len(r)-1])
 		}
 		return m, nil
 	}
+	field := m.field()
 	if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
-		m.taskTitle += k.Text
+		*field += k.Text
 	} else if k.Mod == 0 && k.Code >= 32 && k.Code < 127 {
-		m.taskTitle += string(k.Code)
+		*field += string(k.Code)
 	}
 	return m, nil
+}
+
+// field is the prompt line typing currently goes to.
+func (m *Model) field() *string {
+	if m.taskField == 1 {
+		return &m.taskDescription
+	}
+	return &m.taskTitle
 }
 
 // pickerTask is the task the agent picker was opened for, if it was opened

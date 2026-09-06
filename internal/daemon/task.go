@@ -64,6 +64,26 @@ func (s *Server) setTaskStatus(ctx context.Context, rawParams json.RawMessage) (
 	return s.tasks.SetStatus(params.TaskID, workflow.Status(params.Status))
 }
 
+// updateTask edits a task's title, description or dependencies. Every field is
+// a pointer so an absent one means "leave it alone": a caller fixing a typo in
+// a title must not blank the description it never sent.
+func (s *Server) updateTask(rawParams json.RawMessage) (workflow.Task, error) {
+	var params struct {
+		TaskID      string    `json:"task_id"`
+		Title       *string   `json:"title"`
+		Description *string   `json:"description"`
+		DependsOn   *[]string `json:"depends_on"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return workflow.Task{}, fmt.Errorf("decode task update params: %w", err)
+	}
+	return s.tasks.Update(params.TaskID, workflow.TaskEdit{
+		Title:       params.Title,
+		Description: params.Description,
+		DependsOn:   params.DependsOn,
+	})
+}
+
 func (s *Server) assignTask(rawParams json.RawMessage) (workflow.Task, error) {
 	var params struct {
 		TaskID  string `json:"task_id"`

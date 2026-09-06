@@ -83,12 +83,13 @@ func TestTaskLifecycleFromTheSidebar(t *testing.T) {
 	if view := m.promptView(); !strings.Contains(view, "New task") || !strings.Contains(view, "Auto-review: on") {
 		t.Fatalf("prompt does not explain itself:\n%s", view)
 	}
-	// Tab opts out of the reviewer gate so this test can complete the task
-	// without an adapter, and proves the toggle works.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	// Ctrl+R opts out of the reviewer gate so this test can complete the task
+	// without an adapter, and proves the toggle works. Tab now moves between
+	// the title and description fields.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if m.taskReview || !strings.Contains(m.promptView(), "Auto-review: off") {
-		t.Fatal("tab did not toggle auto-review")
+		t.Fatal("ctrl+r did not toggle auto-review")
 	}
 	m = typeText(t, m, "Ship it")
 	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -171,7 +172,7 @@ func TestTaskLifecycleFromTheSidebar(t *testing.T) {
 
 	// A second task can be abandoned rather than completed.
 	m, _ = press(t, m, 'c')
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	m = typeText(t, m, "Drop it")
 	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -290,11 +291,27 @@ func TestTaskPromptCancelsAndIgnoresAnEmptyTitle(t *testing.T) {
 	if m.taskTitle != "" {
 		t.Fatal("the cancelled draft came back")
 	}
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// An empty title creates nothing, and the prompt stays open saying why:
+	// closing it would silently discard a description already typed.
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = updated.(Model)
-	if cmd != nil || m.taskPrompt {
+	m = typeText(t, m, "why this exists")
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil {
 		t.Fatal("an empty title created a task")
 	}
+	if !m.taskPrompt {
+		t.Fatal("the prompt closed on an empty title, discarding the draft")
+	}
+	if m.taskDescription != "why this exists" {
+		t.Fatalf("the description was lost: %q", m.taskDescription)
+	}
+	if !strings.Contains(m.notice, "needs a title") {
+		t.Fatalf("nothing explained the refusal: %q", m.notice)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
 	// The prompt owns the keyboard while it is open.
 	m, _ = press(t, m, 'c')
 	m = typeText(t, m, "q")
@@ -364,5 +381,109 @@ func TestTaskDetailNamesItsAgent(t *testing.T) {
 	}
 	if out := m.renderAgents(); !strings.Contains(out, "on Ship it") {
 		t.Fatalf("the agent does not name its task:\n%s", out)
+	}
+}
+
+// A task's title and description change as work on it does. Until now the
+// only way to correct either was to cancel the task and create another.
+func TestEditingATaskFromTheSidebar(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusTasks}
+	m.snapshot.Tasks = []workflow.Task{{
+		ID: "task_1", Title: "Ship it", Description: "before the release",
+		AutoReview: true, Status: workflow.StatusPending,
+	}}
+
+	m, _ = press(t, m, 'e')
+	if !m.taskPrompt || m.taskEditID != "task_1" {
+		t.Fatalf("e did not open the edit prompt: prompt=%v id=%q", m.taskPrompt, m.taskEditID)
+	}
+	// The prompt opens over what is already there rather than making the user
+	// retype it.
+	if m.taskTitle != "Ship it" || m.taskDescription != "before the release" {
+		t.Fatalf("the prompt is empty: %q / %q", m.taskTitle, m.taskDescription)
+	}
+	view := m.promptView()
+	if !strings.Contains(view, "Edit task") || !strings.Contains(view, "Ship it") {
+		t.Fatalf("prompt does not show the task:\n%s", view)
+	}
+	// Auto-review belongs to how the task was created; editing must not offer
+	// to drop a review gate someone asked for.
+	if strings.Contains(view, "Auto-review") {
+		t.Fatalf("the edit prompt offers auto-review:\n%s", view)
+	}
+
+	// Tab moves to the description, and typing lands there.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updated.(Model)
+	m = typeText(t, m, "!")
+	if m.taskDescription != "before the release!" {
+		t.Fatalf("typing did not reach the description: %q", m.taskDescription)
+	}
+	if m.taskTitle != "Ship it" {
+		t.Fatalf("typing changed the title: %q", m.taskTitle)
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if m.taskPrompt || cmd == nil {
+		t.Fatal("enter did not submit the edit")
+	}
+	if !m.taskBusy || m.notice != "Saving task…" {
+		t.Fatalf("the save is invisible: busy=%v notice=%q", m.taskBusy, m.notice)
+	}
+}
+
+// The create prompt collects a description too, which had no way in at all.
+func TestCreatingATaskWithADescription(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusTasks}
+	m, _ = press(t, m, 'c')
+	if m.taskEditID != "" {
+		t.Fatalf("c opened an edit of %q", m.taskEditID)
+	}
+	m = typeText(t, m, "Ship it")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updated.(Model)
+	m = typeText(t, m, "why")
+
+	if m.taskTitle != "Ship it" || m.taskDescription != "why" {
+		t.Fatalf("fields are %q / %q", m.taskTitle, m.taskDescription)
+	}
+	// Tab wraps back to the title rather than trapping the cursor.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updated.(Model)
+	m = typeText(t, m, "!")
+	if m.taskTitle != "Ship it!" {
+		t.Fatalf("tab did not return to the title: %q", m.taskTitle)
+	}
+}
+
+// An edit prompt over no task at all must not open, or enter would submit a
+// change to nothing.
+func TestEditingWithNoTasksDoesNothing(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusTasks}
+	m, _ = press(t, m, 'e')
+	if m.taskPrompt {
+		t.Fatal("the edit prompt opened with no task selected")
+	}
+}
+
+// e means "edit this task" only in the sidebar. A focused pane takes every
+// keystroke, or typing the letter into an agent would open a prompt over
+// whatever task happened to be selected.
+func TestPaneKeystrokesAreNotStolenByTaskEditing(t *testing.T) {
+	pane := &embeddedTerminal{terminalID: "t", title: "shell", emulator: &staticScreen{}, done: make(chan struct{})}
+	m := Model{width: 140, height: 40, focus: focusTasks, layout: (&splitNode{}).insert(nil, pane, false), embedded: pane}
+	m.snapshot.Tasks = []workflow.Task{{ID: "task_1", Title: "Ship it", Status: workflow.StatusPending}}
+
+	m, _ = press(t, m, 'e')
+	if m.taskPrompt {
+		t.Fatal("e opened the task prompt while a pane was focused")
+	}
+
+	// With the sidebar focused it edits, as the Tasks help line says.
+	m.sidebarFocused = true
+	m, _ = press(t, m, 'e')
+	if !m.taskPrompt || m.taskEditID != "task_1" {
+		t.Fatalf("e did not edit from the sidebar: prompt=%v id=%q", m.taskPrompt, m.taskEditID)
 	}
 }
