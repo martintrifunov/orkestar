@@ -72,6 +72,8 @@ func run(args []string) error {
 		return runTerminal(paths, args[1:])
 	case "task":
 		return runTask(paths, args[1:])
+	case "template":
+		return runTemplate(paths, args[1:])
 	case "mcp":
 		return runMCP(paths, args[1:])
 	case "help", "-h", "--help":
@@ -277,6 +279,8 @@ Usage:
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
   orkestar task diff <task-id>
+  orkestar template list <workspace-id>
+  orkestar template apply <workspace-id> <name> [--start]
   orkestar mcp serve
   orkestar mcp instructions
   orkestar help

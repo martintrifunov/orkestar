@@ -10,6 +10,7 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
 // Agent is the daemon's view of a running or recently-stopped agent
@@ -215,23 +216,53 @@ func (s *Server) RegisterAdapter(adapter agent.Adapter) {
 	s.adapters[adapter.Capabilities().Name] = adapter
 }
 
+// launchParams is everything a launch needs. It is a named type because a
+// template applies one without an IPC request to decode.
+type launchParams struct {
+	WorkspaceID     string `json:"workspace_id"`
+	Adapter         string `json:"adapter"`
+	Mode            string `json:"mode"`
+	Columns         int    `json:"columns"`
+	Rows            int    `json:"rows"`
+	ResumeSessionID string `json:"resume_session_id"`
+	TaskID          string `json:"task_id"`
+	// Prompt is the work the agent is being launched to do. It is held
+	// until the session signals it started, so a caller does not have to
+	// guess how long an interactive CLI takes to come up.
+	Prompt string `json:"prompt"`
+}
+
 func (s *Server) launchAgent(ctx context.Context, rawParams json.RawMessage) (Agent, error) {
-	var params struct {
-		WorkspaceID     string `json:"workspace_id"`
-		Adapter         string `json:"adapter"`
-		Mode            string `json:"mode"`
-		Columns         int    `json:"columns"`
-		Rows            int    `json:"rows"`
-		ResumeSessionID string `json:"resume_session_id"`
-		TaskID          string `json:"task_id"`
-		// Prompt is the work the agent is being launched to do. It is held
-		// until the session signals it started, so a caller does not have to
-		// guess how long an interactive CLI takes to come up.
-		Prompt string `json:"prompt"`
-	}
+	var params launchParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return Agent{}, fmt.Errorf("decode agent launch params: %w", err)
 	}
+	return s.launch(ctx, params)
+}
+
+// launchForTask starts an agent on a task, choosing the mode from what the
+// adapter supports. Applying a template goes through here.
+func (s *Server) launchForTask(ctx context.Context, task workflow.Task, adapterName, prompt string) (Agent, error) {
+	s.mu.RLock()
+	adapter, ok := s.adapters[adapterName]
+	s.mu.RUnlock()
+	if !ok {
+		return Agent{}, fmt.Errorf("adapter %q is not registered", adapterName)
+	}
+	mode := string(agent.ModeManaged)
+	if adapter.Capabilities().SupportsInteractive {
+		mode = string(agent.ModeInteractive)
+	}
+	return s.launch(ctx, launchParams{
+		WorkspaceID: task.WorkspaceID,
+		Adapter:     adapterName,
+		Mode:        mode,
+		TaskID:      task.ID,
+		Prompt:      prompt,
+	})
+}
+
+func (s *Server) launch(ctx context.Context, params launchParams) (Agent, error) {
 
 	s.mu.RLock()
 	workspace, workspaceOK := s.workspaces[params.WorkspaceID]

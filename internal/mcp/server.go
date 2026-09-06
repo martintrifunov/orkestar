@@ -68,6 +68,16 @@ func NewServer(client *ipc.Client) *sdk.Server {
 	}, taskStart(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "template_list",
+		Description: "List the workflow templates a workspace defines, in .orkestar/templates. A template declares a set of tasks, what depends on what, and which agent does each.",
+	}, templateList(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "template_apply",
+		Description: "Create every task a template declares, with their dependencies and worktrees. With start set, it also launches the agents the template names, for the tasks nothing is blocking; the rest come back in 'waiting' and are picked up with task_wait until startable.",
+	}, templateApply(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_wait",
 		Description: "Block until a task reaches a state, instead of polling task_list. 'done' waits for completion and fails if the task is cancelled instead; 'finished' accepts either; 'startable' waits until nothing blocks it, which is what to use when holding a dependency. Returns the task.",
 	}, taskWait(client))
@@ -319,6 +329,40 @@ func chooseAdapter(available []agent.Capabilities, requested string) (string, st
 // deadline on the call itself: the client sets its connection deadline from
 // the context, so a context shorter than the wait would cut it off early.
 const waitSeconds = 300
+
+type templateListInput struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type templateListOutput struct {
+	Templates []workflow.Template `json:"templates"`
+}
+
+func templateList(client *ipc.Client) sdk.ToolHandlerFor[templateListInput, templateListOutput] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in templateListInput) (*sdk.CallToolResult, templateListOutput, error) {
+		return callIPC[templateListOutput](ctx, client, "template.list", map[string]any{
+			"workspace_id": in.WorkspaceID,
+		})
+	}
+}
+
+type templateApplyInput struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Start       bool   `json:"start,omitempty" jsonschema:"also launch the agents the template names, for the tasks nothing is blocking"`
+}
+
+func templateApply(client *ipc.Client) sdk.ToolHandlerFor[templateApplyInput, daemon.AppliedTemplate] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in templateApplyInput) (*sdk.CallToolResult, daemon.AppliedTemplate, error) {
+		// Applying can create worktrees and launch agents, so it needs more
+		// than the default call budget.
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		return callIPC[daemon.AppliedTemplate](ctx, client, "template.apply", map[string]any{
+			"workspace_id": in.WorkspaceID, "name": in.Name, "start": in.Start,
+		})
+	}
+}
 
 type taskWaitInput struct {
 	TaskID         string `json:"task_id"`

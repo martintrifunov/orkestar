@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Declare a pipeline once in `.orkestar/templates/<name>.json` and apply it:
+  its tasks, their dependencies, their worktrees, and the agents that work
+  them. `orkestar template list|apply`, or `template_list`/`template_apply`
+  over MCP. With starting enabled, only the tasks nothing is blocking are
+  launched; the rest are reported as waiting.
+- Reuse the workspace already rooted at a directory instead of creating
+  another. The MCP tool has always described itself as "create or reuse", and
+  an agent that calls it before every task was scattering work across
+  duplicates.
 - Wait for work instead of polling it: `task.wait` and `agent.wait` over IPC,
   `task_wait` and `agent_wait` over MCP, and `orkestar task wait`. A task can be
   waited on until done, finished either way, or startable; an agent until it is

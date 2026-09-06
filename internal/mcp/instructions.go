@@ -53,6 +53,15 @@ Finishing:
 - task_update corrects a title, a description or dependencies afterwards.
   Dependencies discovered mid-flight belong here rather than in a new task.
 
+Work that is done the same way repeatedly:
+
+- template_list shows what the workspace has declared in .orkestar/templates.
+  A template is a pipeline someone committed beside the code: its tasks, what
+  depends on what, and which agent does each.
+- template_apply creates all of it at once. With start, it launches the agents
+  for the tasks nothing is blocking, and returns the rest in "waiting"; take
+  those with task_wait until startable, then task_start.
+
 Two things worth knowing:
 
 - There is no way to stop another agent from here. That is deliberate: ending a

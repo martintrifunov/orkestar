@@ -196,15 +196,18 @@ func (s *Server) createTaskWorktree(ctx context.Context, rawParams json.RawMessa
 	if err != nil {
 		return workflow.Task{}, err
 	}
+	return s.createWorktreeFor(ctx, task, params.Branch)
+}
 
+// createWorktreeFor gives a task its own checkout. Applying a template goes
+// through here rather than building an IPC request to call itself with.
+func (s *Server) createWorktreeFor(ctx context.Context, task workflow.Task, branch string) (workflow.Task, error) {
 	s.mu.RLock()
 	workspace, ok := s.workspaces[task.WorkspaceID]
 	s.mu.RUnlock()
 	if !ok {
 		return workflow.Task{}, fmt.Errorf("workspace %q does not exist", task.WorkspaceID)
 	}
-
-	branch := params.Branch
 	if branch == "" {
 		branch = "task/" + task.ID
 	}

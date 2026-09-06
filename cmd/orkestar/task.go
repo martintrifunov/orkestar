@@ -14,6 +14,67 @@ import (
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
+// runTemplate handles the template verbs, which sit beside tasks because that
+// is what a template is: a set of them, declared in a file.
+func runTemplate(paths runtimepath.Paths, args []string) error {
+	if len(args) == 0 {
+		return errTemplateUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	client := ipc.NewClient(paths.Socket)
+
+	switch args[0] {
+	case "list":
+		if len(args) != 2 {
+			return errTemplateUsage
+		}
+		var listed struct {
+			Templates []workflow.Template `json:"templates"`
+		}
+		if err := client.Call(ctx, "template.list", map[string]any{"workspace_id": args[1]}, &listed); err != nil {
+			return err
+		}
+		for _, template := range listed.Templates {
+			fmt.Printf("%s\t%d tasks\t%s\n", template.Name, len(template.Tasks), template.Description)
+		}
+		return nil
+	case "apply":
+		if len(args) < 3 || len(args) > 4 {
+			return errTemplateUsage
+		}
+		start := false
+		if len(args) == 4 {
+			if args[3] != "--start" {
+				return errTemplateUsage
+			}
+			start = true
+		}
+		var applied daemon.AppliedTemplate
+		if err := client.Call(ctx, "template.apply", map[string]any{
+			"workspace_id": args[1], "name": args[2], "start": start,
+		}, &applied); err != nil {
+			return err
+		}
+		for _, task := range applied.Tasks {
+			printTask(task)
+		}
+		for _, launched := range applied.Agents {
+			fmt.Printf("started\t%s\t%s\n", launched.Adapter, launched.TaskID)
+		}
+		for _, waiting := range applied.Waiting {
+			fmt.Printf("waiting\t%s\n", waiting)
+		}
+		return nil
+	default:
+		return errTemplateUsage
+	}
+}
+
+var errTemplateUsage = errors.New(`usage:
+  orkestar template list <workspace-id>
+  orkestar template apply <workspace-id> <name> [--start]`)
+
 func runTask(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
 		return errTaskUsage

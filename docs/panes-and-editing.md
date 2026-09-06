@@ -143,6 +143,40 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Workflow templates
+
+A piece of work that happens the same way every time is declared once, in
+`.orkestar/templates/<name>.json` inside the workspace, so it is committed
+beside the code it describes. A pipeline that only exists in someone's shell
+history is not one the next person can run.
+
+```json
+{
+  "name": "release",
+  "tasks": [
+    {"key": "tests", "title": "Run the suite", "worktree": true, "agent": "claude-code"},
+    {"key": "notes", "title": "Write the release notes", "depends_on": ["tests"]}
+  ]
+}
+```
+
+`key` names a task for the others to depend on and never leaves the file:
+applying resolves the keys to real task IDs. Tasks are created in dependency
+order, since a task can only depend on tasks that already exist, and a template
+whose tasks depend on each other in a loop is refused before anything is
+created rather than failing halfway through.
+
+```
+orkestar template list <workspace-id>
+orkestar template apply <workspace-id> <name> [--start]
+```
+
+With `--start`, the agents the template names are launched — but only on the
+tasks nothing is blocking. Starting the rest would mean agents sitting idle
+against work they cannot begin, so they come back under `waiting`, and
+`task wait <id> startable` is how they are picked up. Over MCP these are
+`template_list` and `template_apply`.
+
 ## Waiting on work
 
 Every other method answers immediately, which is fine for a person watching a
