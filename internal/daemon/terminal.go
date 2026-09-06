@@ -38,6 +38,9 @@ type terminalEvent struct {
 type terminalSubscriber struct {
 	events chan terminalEvent
 	screen bool
+	// lastPublish is when this subscriber was last offered a frame, which
+	// bounds how often one crosses a transport that charges for it.
+	lastPublish time.Time
 }
 type terminalSession struct {
 	process     *pty.Process
@@ -145,9 +148,30 @@ func (s *terminalSession) subscribe(screen, observe bool) (terminal.Frame, *term
 // publish tells every subscriber the screen moved. It renders nothing: the
 // PTY hands over one chunk per line of sustained output, and a render for each
 // of them was thrown away as soon as the next chunk arrived.
+// minFramePublish is the shortest gap between frames a subscriber is offered.
+//
+// A frame is the whole screen, not a diff: a 120x40 pane encodes to about
+// 12KB and a 200x50 one to 27KB. Over a local socket that is free and the
+// client's own repaint throttle is enough. Over a link with a cost — remote
+// attachment, where an ssh session carries it — an agent printing steadily
+// would push hundreds of kilobytes a second per pane at the rate a PTY
+// produces chunks.
+//
+// Sixty a second is far more than a person can read and far less than a build
+// log produces. Coalescing already means a subscriber that misses frames sees
+// the state they left behind, so holding one back costs nothing.
+const minFramePublish = 16 * time.Millisecond
+
 func (s *terminalSession) publish() {
 	s.revision++
+	// Held back rather than dropped: a subscriber with a frame already waiting
+	// will render the newest screen when it takes it, because the payload is
+	// resolved at delivery. What this skips is the enqueue, not the change.
+	now := time.Now()
 	for sub := range s.subscribers {
+		if !sub.lastPublish.IsZero() && now.Sub(sub.lastPublish) < minFramePublish && len(sub.events) > 0 {
+			continue
+		}
 		name := "terminal.output"
 		if sub.screen {
 			name = "terminal.screen"
@@ -157,6 +181,7 @@ func (s *terminalSession) publish() {
 		default:
 		}
 		sub.events <- terminalEvent{Name: name, frame: true}
+		sub.lastPublish = now
 	}
 }
 func (s *terminalSession) input(encoded string) error {

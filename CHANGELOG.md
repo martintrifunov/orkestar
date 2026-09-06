@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Attach to a daemon on another machine with `orkestar --remote user@host`,
+  which runs the interface locally over an ssh session to
+  `orkestar daemon proxy`. Authentication is ssh's; the daemon still listens
+  only on its owner-only local socket.
+- Reuse IPC connections across calls rather than dialling one per request, and
+  bound how often a screen frame is offered to a subscriber. A frame is the
+  whole screen, which costs nothing locally and a great deal over a link.
 - Name the task a pane is working on its border and in the header, mark the
   tasks something is showing in the Tasks list, and make `Enter` on a task
   focus, open or cycle its panes.

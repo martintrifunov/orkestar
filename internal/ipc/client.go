@@ -40,6 +40,13 @@ type conversation struct {
 type Client struct {
 	socketPath string
 	timeout    time.Duration
+	// dialer opens one connection to the daemon. It is a field so a remote
+	// client can reach a daemon over ssh without the rest of the client
+	// knowing anything about transports.
+	dialer func(ctx context.Context, timeout time.Duration) (net.Conn, error)
+	// describe names where this client is pointed, for errors that would
+	// otherwise say only "connect to daemon" while talking to another machine.
+	describe string
 
 	mu   sync.Mutex
 	idle []*conversation
@@ -47,6 +54,13 @@ type Client struct {
 
 func NewClient(socketPath string) *Client {
 	return &Client{socketPath: socketPath, timeout: 2 * time.Second}
+}
+
+// NewClientWithDialer returns a client that reaches the daemon however dial
+// says. describe names the far end for errors, which otherwise say only
+// "connect to daemon" while talking to another machine.
+func NewClientWithDialer(describe string, dial func(context.Context, time.Duration) (net.Conn, error)) *Client {
+	return &Client{timeout: 2 * time.Second, dialer: dial, describe: describe}
 }
 
 // Close releases pooled connections. A client is usually as long-lived as the
@@ -94,9 +108,19 @@ func (c *Client) keep(held *conversation) {
 }
 
 func (c *Client) dial(ctx context.Context) (*conversation, error) {
-	conn, err := Dial(ctx, c.socketPath, c.timeout)
+	open := c.dialer
+	if open == nil {
+		open = func(ctx context.Context, timeout time.Duration) (net.Conn, error) {
+			return Dial(ctx, c.socketPath, timeout)
+		}
+	}
+	conn, err := open(ctx, c.timeout)
 	if err != nil {
-		return nil, fmt.Errorf("connect to daemon: %w", err)
+		where := "daemon"
+		if c.describe != "" {
+			where = c.describe
+		}
+		return nil, fmt.Errorf("connect to %s: %w", where, err)
 	}
 	return &conversation{
 		conn:    conn,

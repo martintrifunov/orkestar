@@ -143,6 +143,32 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Attaching to a daemon on another machine
+
+`orkestar --remote user@host` runs the interface here and the daemon there.
+That is the point of it: notifications, the clipboard and the terminal belong
+to the machine you are sitting at, while the agents keep running on the one
+with the work. Sitting in an ssh session and running `orkestar` has always
+worked and still does; what it cannot do is tell your laptop that a task
+finished.
+
+**The transport is ssh and so is the authentication.** Each connection is
+`ssh <host> orkestar daemon proxy`, whose stdio is the far end's socket. Your
+keys, agent, `~/.ssh/config`, jump hosts and second factors all apply, and
+Orkestar has no credential of its own to get wrong. The daemon keeps its
+owner-only local socket and never listens on a network — there is nothing to
+expose, and nothing to configure. A daemon that is not running on the far side
+is started, exactly as it is locally.
+
+Two things make it affordable. The client reuses connections, so the
+once-a-second snapshot does not open an ssh session each time, and ssh's own
+connection sharing means the sessions that are opened skip the handshake.
+
+A version mismatch is refused up front, naming both sides. Locally the client
+and daemon are the same binary; across machines they are two installs, and
+two builds agreeing on the protocol by accident is not something to find out
+halfway through a session.
+
 ## Finding the work on screen
 
 Panes already belong to tasks — an agent is launched for one and its terminal

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -41,6 +42,16 @@ func run(args []string) error {
 		return err
 	}
 
+	// --remote runs the interface here and the daemon there. It is checked
+	// before the verbs because it changes which daemon every one of them
+	// talks to, not what they do.
+	if len(args) >= 1 && args[0] == "--remote" {
+		if len(args) != 2 {
+			return errors.New("usage: orkestar --remote <[user@]host>")
+		}
+		return runRemoteTUI(args[1])
+	}
+
 	if len(args) == 0 {
 		return runTUI(paths)
 	}
@@ -52,15 +63,17 @@ func run(args []string) error {
 		return runAgent(paths, args[1:])
 	case "daemon":
 		if len(args) != 2 {
-			return errors.New("usage: orkestar daemon serve|stop")
+			return errors.New("usage: orkestar daemon serve|stop|proxy")
 		}
 		switch args[1] {
 		case "serve":
 			return serveDaemon(paths)
 		case "stop":
 			return stopDaemon(paths)
+		case "proxy":
+			return proxyDaemon(paths)
 		default:
-			return errors.New("usage: orkestar daemon serve|stop")
+			return errors.New("usage: orkestar daemon serve|stop|proxy")
 		}
 	case "reset":
 		return runReset(paths, args[1:])
@@ -95,6 +108,38 @@ func runTUI(paths runtimepath.Paths) error {
 		return fmt.Errorf("get current directory: %w", err)
 	}
 	return tui.Run(ipc.NewClient(paths.Socket), directory)
+}
+
+// runRemoteTUI attaches to a daemon on another machine. The interface runs
+// here, which is the point: notifications, the clipboard and the terminal all
+// belong to the machine the person is sitting at, while the agents keep
+// running on the one that has the work.
+func runRemoteTUI(host string) error {
+	remote, err := ipc.ParseRemote(host)
+	if err != nil {
+		return err
+	}
+	client := ipc.NewRemoteClient(remote)
+	defer client.Close()
+
+	// Reached before anything else so a version mismatch, an unreachable host
+	// or a missing binary is reported plainly rather than as a failed snapshot
+	// once the interface is already up.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var status map[string]string
+	if err := client.Call(ctx, "system.ping", nil, &status); err != nil {
+		return err
+	}
+	if remoteVersion := status["version"]; remoteVersion != "" && remoteVersion != version {
+		return fmt.Errorf(
+			"this is orkestar %s and %s runs %s; the two speak the same protocol only by accident, so upgrade one of them",
+			version, remote.Host, remoteVersion)
+	}
+
+	// The working directory is the remote's business, and it is the only thing
+	// the interface cannot ask for over the wire yet.
+	return tui.Run(client, "")
 }
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
@@ -150,6 +195,50 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 	default:
 		return fmt.Errorf("unknown terminal command %q", args[0])
 	}
+}
+
+// proxyDaemon joins this process's stdin and stdout to the local daemon
+// socket. It is the far half of remote attachment: a client elsewhere runs
+// `ssh <host> orkestar daemon proxy` and talks to the daemon through it.
+//
+// The daemon keeps its owner-only socket and never listens on a network. What
+// crosses machines is an ssh session, authenticated by ssh, which is why
+// Orkestar has no credential of its own to get wrong.
+func proxyDaemon(paths runtimepath.Paths) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Started on demand, so attaching to a machine where nothing is running
+	// works the same way it does locally.
+	if err := daemonclient.Ensure(ctx, paths); err != nil {
+		return err
+	}
+
+	conn, err := ipc.Dial(context.Background(), paths.Socket, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer conn.Close()
+
+	// Either direction ending ends the session: a closed stdin means the
+	// client hung up, and a closed socket means the daemon did.
+	done := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(conn, os.Stdin)
+		// Tell the daemon no more requests are coming, so it can finish the
+		// one it has rather than waiting on a reader that is gone.
+		if closer, ok := conn.(interface{ CloseWrite() error }); ok {
+			_ = closer.CloseWrite()
+		}
+		done <- err
+	}()
+	go func() {
+		_, err := io.Copy(os.Stdout, conn)
+		done <- err
+	}()
+	if err := <-done; err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func runMCP(paths runtimepath.Paths, args []string) error {
@@ -255,8 +344,10 @@ func printUsage() {
 
 Usage:
   orkestar
+  orkestar --remote <[user@]host>
   orkestar daemon serve
   orkestar daemon stop
+  orkestar daemon proxy
   orkestar status
   orkestar reset [--yes]
   orkestar workspace create [directory]

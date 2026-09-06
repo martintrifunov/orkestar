@@ -241,3 +241,64 @@ func TestAMissingDaemonIsStillUnavailable(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// The remote form is passed to ssh untouched, since ssh already knows how to
+// read its own config. The one thing that cannot be allowed through is
+// anything ssh would take as an option.
+func TestParseRemote(t *testing.T) {
+	for _, host := range []string{"box", "user@box", "build-server", "user@10.0.0.1"} {
+		remote, err := ipc.ParseRemote(host)
+		if err != nil {
+			t.Fatalf("%q was rejected: %v", host, err)
+		}
+		if remote.Host != host {
+			t.Fatalf("%q was rewritten to %q", host, remote.Host)
+		}
+		if remote.Executable != "orkestar" {
+			t.Fatalf("unexpected executable %q", remote.Executable)
+		}
+	}
+	for _, host := range []string{"", "   ", "-oProxyCommand=touch /tmp/pwned", "-v"} {
+		if _, err := ipc.ParseRemote(host); err == nil {
+			t.Fatalf("%q was accepted", host)
+		}
+	}
+}
+
+// The ssh command line is where a missing option costs a handshake per call
+// and a missing -- lets a host name become an ssh option.
+func TestSSHArguments(t *testing.T) {
+	arguments := ipc.SSHArguments("user@box", "orkestar")
+	joined := strings.Join(arguments, " ")
+
+	for _, required := range []string{
+		"BatchMode=yes",
+		"ControlMaster=auto",
+		"ControlPersist=60",
+		"daemon proxy",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("the command line is missing %q: %v", required, arguments)
+		}
+	}
+
+	// Everything after -- is the host and the command, so nothing there can be
+	// read as an option however it is spelled.
+	separator := -1
+	for index, argument := range arguments {
+		if argument == "--" {
+			separator = index
+		}
+	}
+	if separator < 0 {
+		t.Fatalf("the command line has no -- guard: %v", arguments)
+	}
+	if arguments[separator+1] != "user@box" {
+		t.Fatalf("the host is not immediately after --: %v", arguments)
+	}
+	for _, option := range arguments[:separator] {
+		if strings.Contains(option, "user@box") {
+			t.Fatalf("the host leaked into the options: %v", arguments)
+		}
+	}
+}

@@ -1,7 +1,6 @@
 package ipc
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,10 +18,11 @@ type Stream struct {
 }
 
 func (c *Client) OpenStream(ctx context.Context, method string, params, result any) (*Stream, error) {
-	connection, err := Dial(ctx, c.socketPath, c.timeout)
+	held, err := c.dial(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("connect to daemon: %w", err)
+		return nil, err
 	}
+	connection := held.conn
 	// Context cancellation must also interrupt the handshake after dialing.
 	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
 	defer stop()
@@ -45,10 +45,12 @@ func (c *Client) OpenStream(ctx context.Context, method string, params, result a
 		}
 	}
 
+	// The dialled conversation's reader is the only one on this connection.
+	// A second would race it for buffered bytes.
 	stream := &Stream{
 		connection: connection,
-		decoder:    json.NewDecoder(bufio.NewReader(connection)),
-		encoder:    json.NewEncoder(connection),
+		decoder:    held.decoder,
+		encoder:    held.encoder,
 		timeout:    c.timeout,
 	}
 	if err := stream.encoder.Encode(request); err != nil {
