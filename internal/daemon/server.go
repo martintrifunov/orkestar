@@ -262,6 +262,10 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.resolvePermission(context.Background(), request.Params)
 	case "task.create":
 		result, err = s.createTask(request.Params)
+	case "template.list":
+		result, err = s.listTemplates(request.Params)
+	case "template.apply":
+		result, err = s.applyTemplate(context.Background(), request.Params)
 	case "task.wait":
 		result, err = s.waitForTask(context.Background(), request.Params)
 	case "agent.wait":
@@ -309,7 +313,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 // reason: one can sit for minutes and then persist state it never touched.
 func readOnlyMethod(method string) bool {
 	switch method {
-	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history", "task.wait", "agent.wait":
+	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
+		"task.wait", "agent.wait", "template.list":
 		return true
 	default:
 		return false
@@ -406,6 +411,20 @@ func (s *Server) createWorkspace(rawParams json.RawMessage) (Workspace, error) {
 	if params.Name == "" {
 		params.Name = filepath.Base(directory)
 	}
+
+	// Reuse the workspace already rooted here. A caller cannot know whether
+	// one exists — an agent delegating work calls this before every task — and
+	// creating a second would scatter that work across two workspaces that
+	// mean the same directory. The name of the existing one stands: it is
+	// where the tasks already are.
+	s.mu.RLock()
+	for _, existing := range s.workspaces {
+		if existing.Directory == directory {
+			s.mu.RUnlock()
+			return existing, nil
+		}
+	}
+	s.mu.RUnlock()
 
 	id, err := newID("w")
 	if err != nil {
