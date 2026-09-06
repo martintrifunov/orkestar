@@ -101,30 +101,71 @@ promise of walking away true; the sixth is daily-use polish.
       does not group them that way. The affordance other multiplexers get from
       arbitrary tabs, taken from the structure Orkestar already models.
 
-## M6: Game engines
+## M6: Adoption and reach
+
+M0 through M5 made Orkestar do the work. This milestone is about somebody
+other than its author being able to use it: arriving with the wrong muscle
+memory, installing it the way they install everything else, and running the
+agent they already run.
+
+Ordered by what stands between a new user and a working session.
+
+- [ ] **Configurable key bindings.** Every binding is currently fixed, and
+      people arrive from tmux, zellij and vim with fingers that expect
+      something else. This is the first thing a new user hits and the least
+      negotiable: a tool that cannot be rebound is a tool they have to think
+      about. Themes come after, and only because the palette is already
+      consistent enough not to be the problem.
+- [ ] **`install.sh` and mise distribution.** A Homebrew tap and a PowerShell
+      script leave out the way most people install a terminal tool, which is a
+      curl one-liner. Cheap, and it removes the first step where someone gives
+      up.
+- [ ] **Cursor and Grok adapters.** The adapter contract exists and the
+      lifecycle work is done, so each is reach rather than depth — but it is
+      the difference between "runs what I run" and "does not".
+- [ ] **Named sessions and pane renaming.** One daemon per machine assumes one
+      piece of work at a time. Named sessions separate projects that should not
+      share a board; renaming a pane is small and makes a crowded layout
+      readable.
+- [ ] **Mouse menus and right-click actions.** Discoverability for people who
+      do not read a help line. Worth doing after bindings, not before: someone
+      who cannot rebind will not stay long enough to find a menu.
+
+## M7: Game engines
 
 - [ ] Unreal Engine MCP detection and routing
 - [ ] Unreal editor lease and automation artifacts
 - [ ] Unity MCP instance routing
 - [ ] Godot adapter evaluation and integration
 - [ ] Screenshot and play/test result workflows
+- [ ] **Inline image protocols.** Promoted here rather than to M6 because this
+      is where it earns its place: a screenshot of an engine viewport is the
+      artifact the workflow produces, and a path to a PNG in a task's artifact
+      list is not the same as seeing it.
 - [ ] Thin engine-native status panels if they prove useful
 
 ## Later possibilities
 
-- Mouse menus and right-click actions
-- Configurable key bindings and themes; people arrive with muscle memory, so
-  bindings matter more than colours
-- Inline image protocols — revisit with M6, where a screenshot of an engine
-  viewport is the artifact the workflow produces
-- Additional agent adapters (Cursor, Grok); the contract exists, each is reach
-  rather than depth
-- Named sessions, pane renaming, `install.sh` and mise distribution
 - Plugin distribution. Deliberately not before there are users: designing
   extension points against zero real extensions means guessing wrong and then
   supporting the guess
 - Optional native desktop client, only if TUI and engine panels cannot support a
   validated workflow
+
+## M6 — 2026-09-06
+
+The five items promoted out of "Later possibilities" are all adoption rather
+than capability, which is why they are one milestone and not scattered. M0
+through M5 made Orkestar do the work; none of it made Orkestar something a
+second person could pick up.
+
+Ordering is by what stands between a new user and a working session, so
+bindings come first and mouse menus last: someone who cannot rebind will not
+stay long enough to find a menu. Inline images went to M7 instead, since a
+screenshot only becomes the point once an engine is producing them.
+
+M4 remains unstarted and still blocks M7. It is a gateway to other MCP
+servers, which is a different job from the tools Orkestar serves itself.
 
 ## M5 progress — 2026-09-06
 
