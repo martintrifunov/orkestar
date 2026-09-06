@@ -7,6 +7,9 @@
   waited on until done, finished either way, or startable; an agent until it is
   blocked, idle or stopped. A wait that can no longer be satisfied fails rather
   than holding its connection to the deadline, and every wait is bounded.
+- Post a task finishing, or an agent stopping with its work unfinished, as a
+  desktop notification as well as a bell, and only while the terminal is not
+  focused. `n` in settings, or `"notifications": false`. macOS and Linux only.
 - Order tasks and artifacts by when they were created rather than only by their
   timestamps. Two created in the same clock tick compared equal, so the sidebar
   could show them in a different order on each refresh.

@@ -137,6 +137,27 @@ func TestBellStaysQuiet(t *testing.T) {
 	}
 }
 
+// bellIn digs the BEL out of whatever announce produced. It is a batch now
+// that a notification may travel beside the bell, and a batch does not say
+// what it holds without running it.
+func bellIn(cmd tea.Cmd) (string, bool) {
+	if cmd == nil {
+		return "", false
+	}
+	switch message := cmd().(type) {
+	case tea.RawMsg:
+		text, ok := message.Msg.(string)
+		return text, ok
+	case tea.BatchMsg:
+		for _, inner := range message {
+			if text, ok := bellIn(inner); ok {
+				return text, true
+			}
+		}
+	}
+	return "", false
+}
+
 func TestBellCanBeTurnedOff(t *testing.T) {
 	var m Model
 	if cmd := m.ring(); cmd == nil {
@@ -183,14 +204,72 @@ func TestASnapshotThatFinishesATaskRings(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("a finished task did not ring")
 	}
-	raw, ok := cmd().(tea.RawMsg)
-	if !ok {
-		t.Fatalf("ring produced %T, want a raw write", cmd())
-	}
-	if text, ok := raw.Msg.(string); !ok || !strings.Contains(text, "\a") {
-		t.Fatalf("the raw write was %#v, want a BEL", raw.Msg)
+	if text, ok := bellIn(cmd); !ok || !strings.Contains(text, "\a") {
+		t.Fatalf("no BEL was written: %q", text)
 	}
 	if !strings.Contains(m.notice, "Ship it") {
 		t.Fatalf("the notice does not name the task: %q", m.notice)
+	}
+}
+
+// The bell is for someone present; a notification is for someone who is not.
+// Posting one while the user is reading the pane it is about is noise.
+func TestNotificationsOnlyWhenUnfocused(t *testing.T) {
+	if !notificationsSupported() {
+		t.Skip("this system cannot post notifications")
+	}
+	off := false
+	for _, test := range []struct {
+		name  string
+		model Model
+		want  bool
+	}{
+		{"looking at it", Model{focused: true}, false},
+		{"looking elsewhere", Model{focused: false}, true},
+		{"turned off", Model{focused: false, settings: editorSettings{Notifications: &off}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.model.shouldNotify(); got != test.want {
+				t.Fatalf("shouldNotify = %v, want %v", got, test.want)
+			}
+		})
+	}
+
+	// The bell is unconditional either way.
+	if (Model{focused: true}).ring() == nil {
+		t.Fatal("the bell did not ring for a focused terminal")
+	}
+	if (Model{focused: false}).ring() == nil {
+		t.Fatal("the bell did not ring for an unfocused terminal")
+	}
+}
+
+// A model that never hears about focus must behave as if the user is present,
+// or every notification fires while they are looking at the screen.
+func TestFocusDefaultsToPresent(t *testing.T) {
+	m := New(nil, t.TempDir())
+	if !m.focused {
+		t.Fatal("a new model starts unfocused")
+	}
+
+	updated, _ := m.Update(tea.BlurMsg{})
+	if updated.(Model).focused {
+		t.Fatal("blur did not register")
+	}
+	updated, _ = updated.(Model).Update(tea.FocusMsg{})
+	if !updated.(Model).focused {
+		t.Fatal("focus did not register")
+	}
+}
+
+// Turning notifications off must stop them without touching the bell.
+func TestNotificationsCanBeTurnedOffSeparatelyFromTheBell(t *testing.T) {
+	off := false
+	m := Model{settings: editorSettings{Notifications: &off}}
+	if !m.settings.bellEnabled() {
+		t.Fatal("turning notifications off turned the bell off too")
+	}
+	if m.settings.notificationsEnabled() {
+		t.Fatal("notifications are still on")
 	}
 }

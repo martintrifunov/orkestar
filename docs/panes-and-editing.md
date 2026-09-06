@@ -183,6 +183,23 @@ What the bell does — a sound, a flash, a notification badge — is the
 terminal's business. Turn it off with `b` in settings, or `"bell": false` in
 `tui.json`.
 
+Those same two moments are also posted as a desktop notification, but only
+while the terminal does **not** have focus. The bell is for someone sitting in
+front of it and says "glance up"; a notification is for someone in another
+window, and firing one every time while they are reading the pane it is about
+is just noise. A terminal that does not report focus is treated as focused, so
+the worst case is a missing notification rather than a stream of them.
+
+Turn them off with `n` in settings, or `"notifications": false`. macOS posts
+through `osascript` and Linux through `notify-send`, if it is installed;
+Windows has none, because a toast needs a registered application identity or a
+PowerShell module that is not there by default, and the settings screen says so
+rather than offering a switch that does nothing.
+
+This still needs a client running. Detaching entirely leaves nothing to notice
+the change, and closing that gap means the daemon reaching a device rather than
+a desktop, which belongs with remote access.
+
 ## Selecting and copying in a terminal pane
 
 Dragging with the left button over a terminal pane selects its visible screen

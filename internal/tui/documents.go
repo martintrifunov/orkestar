@@ -26,10 +26,16 @@ type editorSettings struct {
 	// terminal bell when a task finishes or an agent working one stops
 	// unexpectedly, which are the two moments worth looking up for.
 	Bell *bool `json:"bell,omitempty"`
+	// Notifications posts those same two moments to the desktop, and only
+	// while the terminal is not focused.
+	Notifications *bool `json:"notifications,omitempty"`
 }
 
 func (s editorSettings) syntaxEnabled() bool { return s.Syntax == nil || *s.Syntax }
 func (s editorSettings) bellEnabled() bool   { return s.Bell == nil || *s.Bell }
+func (s editorSettings) notificationsEnabled() bool {
+	return s.Notifications == nil || *s.Notifications
+}
 
 const (
 	defaultMaxPanes = 16
@@ -344,7 +350,14 @@ func (m Model) promptView() string {
 		if !m.settings.bellEnabled() {
 			bell = "off"
 		}
-		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
+		notifications := "on"
+		if !m.settings.notificationsEnabled() {
+			notifications = "off"
+		}
+		if !notificationsSupported() {
+			notifications = "unavailable on this system"
+		}
+		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
 	}
 	matches := m.matches()
 	var lines []string
@@ -388,6 +401,19 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, tea.Batch(cmds...)
+		}
+		if k.String() == "n" {
+			on := !m.settings.notificationsEnabled()
+			m.settings.Notifications = &on
+			if m.err = m.settings.save(); m.err != nil {
+				return m, nil
+			}
+			m.settingsOpen = false
+			m.notice = "Notifications: off"
+			if on {
+				m.notice = "Notifications: on"
+			}
+			return m, nil
 		}
 		if k.String() == "b" {
 			on := !m.settings.bellEnabled()

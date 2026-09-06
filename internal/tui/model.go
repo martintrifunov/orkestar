@@ -121,6 +121,11 @@ type Model struct {
 	// snapshotLoaded guards the first comparison: everything in the opening
 	// snapshot would otherwise look like it had just happened.
 	snapshotLoaded bool
+	// focused tracks whether the terminal has focus, so a notification is only
+	// posted to someone who is not already looking at the thing it is about.
+	// Terminals that do not report focus leave this true, and the bell still
+	// rings either way.
+	focused bool
 	// pickerTaskID is the task the agent being picked will work on, set when
 	// the picker was opened from the Tasks section. Launching with it hands
 	// the task over in one step instead of leaving the assignment to be
@@ -142,6 +147,10 @@ func New(client *ipc.Client, directory string) Model {
 		client:    client,
 		directory: directory,
 		loading:   true,
+		// Focused until the terminal says otherwise. A terminal that never
+		// reports focus would otherwise look permanently unfocused, and every
+		// notification would fire while the user was looking straight at it.
+		focused: true,
 	}
 }
 
@@ -165,6 +174,10 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
+	case tea.FocusMsg:
+		m.focused = true
+	case tea.BlurMsg:
+		m.focused = false
 	case tea.WindowSizeMsg:
 		m.width = message.Width
 		m.height = message.Height
@@ -578,7 +591,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.snapshotLoaded {
 				if notice := bellFor(m.snapshot, message.snapshot); notice != "" {
 					m.notice = notice
-					ring = m.ring()
+					ring = m.announce(notice)
 				}
 			}
 			m.snapshotLoaded = true
@@ -703,6 +716,9 @@ func (m Model) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "Orkestar"
 	view.MouseMode = tea.MouseModeCellMotion
+	// Focus reporting is what lets a notification stay quiet while the user is
+	// already looking at the pane it would be about.
+	view.ReportFocus = true
 	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
 		x, y, visible := m.embedded.emulator.Cursor()
 		if visible {
