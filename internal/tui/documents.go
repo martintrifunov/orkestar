@@ -22,6 +22,9 @@ type editorSettings struct {
 	// Syntax is a pointer so an absent key means on, and "syntax": false in
 	// tui.json is distinguishable from the zero value.
 	Syntax *bool `json:"syntax,omitempty"`
+	// Keys rebinds actions by name. Anything absent keeps its default, so a
+	// user changes only what their fingers already expect.
+	Keys map[string]string `json:"keys,omitempty"`
 	// Bell is the same shape as Syntax: absent means on. It rings the
 	// terminal bell when a task finishes or an agent working one stops
 	// unexpectedly, which are the two moments worth looking up for.
@@ -206,8 +209,15 @@ func (m *Model) canClose(p *embeddedTerminal) bool {
 	return true
 }
 func (m *Model) paneAction(key string) (tea.Cmd, bool) {
+	// Resizing is the arrows, which are not rebindable: a user who wants a
+	// divider moved by other keys is not served by a map.
 	switch key {
-	case "o":
+	case "left", "right", "up", "down":
+		m.resizeSplit(key)
+		return nil, true
+	}
+	switch m.keys.prefixAction(key) {
+	case ActionNextPane:
 		if len(m.visiblePanes()) < 2 {
 			m.notice = "Only one pane. Ctrl+b v/s splits it."
 		} else {
@@ -215,8 +225,8 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 			m.notice = ""
 		}
 		return nil, true
-	case "v", "s":
-		// Every split opens a new daemon-owned shell beside (v) or below (s)
+	case ActionSplitRight, ActionSplitDown:
+		// Every split opens a new daemon-owned shell beside or below
 		// the focused pane. The target is captured now so a focus change while
 		// the shell starts cannot move the new pane elsewhere.
 		if m.opening {
@@ -226,11 +236,11 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 		if !m.roomForPane() {
 			return nil, true
 		}
-		m.pendingSplit = &splitRequest{target: m.embedded, stacked: key == "s"}
+		m.pendingSplit = &splitRequest{target: m.embedded, stacked: m.keys.prefixAction(key) == ActionSplitDown}
 		m.opening = true
 		m.notice = ""
 		return m.startTerminal([]string{defaultShell()}), true
-	case "z":
+	case ActionZoom:
 		if len(m.visiblePanes()) < 2 {
 			m.notice = "Only one pane. Ctrl+b v/s splits it."
 			return nil, true
@@ -239,48 +249,46 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 		m.notice = ""
 		m.resizePanes()
 		return nil, true
-	case "left", "right", "up", "down":
-		m.resizeSplit(key)
-		return nil, true
-	case "f":
+	case ActionFiles:
 		return m.toggleFiles(), true
-	case "d":
+	case ActionDiff:
 		return m.openReview(), true
-	case "e":
+	case ActionEditFile:
 		if m.roomForPane() {
 			return m.startFilePicker(m.paneRoot()), true
 		}
 		return nil, true
-	case "n":
+	case ActionNewShell:
 		if !m.opening && m.roomForPane() {
 			m.opening = true
 			return m.startTerminal([]string{defaultShell()}), true
 		}
 		return nil, true
-	case "[":
+	case ActionScrollback:
 		if m.embedded != nil && m.embedded.stream == nil {
 			m.notice = "Use the mouse wheel or Page Up/Down to scroll this pane."
 			return nil, true
 		}
 		return m.loadHistory(), true
-	case ",":
+	case ActionSettings:
 		m.settingsOpen = true
 		return nil, true
-	case "x":
+	case ActionDiscardEdit:
 		if m.embedded != nil && m.embedded.editor != nil {
 			m.removePane(m.embedded)
 			m.notice = "Editor discarded"
 		}
 		return nil, true
-	case "q":
+	case ActionClosePane:
 		if m.embedded != nil && m.canClose(m.embedded) {
 			m.removePane(m.embedded)
 		}
 		return nil, true
-	case "tab":
+	case ActionDetachPanel:
 		m.sidebarFocused = true
 		return nil, true
-	case "esc":
+	}
+	if key == "esc" {
 		// Ends a repeating resize without the key reaching the terminal.
 		return nil, true
 	}
@@ -357,7 +365,7 @@ func (m Model) promptView() string {
 		if !notificationsSupported() {
 			notifications = "unavailable on this system"
 		}
-		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Custom terminal command and max_panes (default 16): edit tui.json."
+		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Key bindings, custom terminal command and max_panes: edit tui.json.\nBindings are \"keys\": {\"prefix\": \"ctrl+a\", \"new-task\": \"N\"} and so on."
 	}
 	matches := m.matches()
 	var lines []string

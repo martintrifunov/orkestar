@@ -68,40 +68,7 @@ func (m Model) renderEmbedded(width, height int) string {
 		title = "  " + errorStyle.Render(m.err.Error())
 	}
 	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
-	help := "a agent  n shell  enter open  X stop/remove  f files  tab section  q quit"
-	if m.embedded != nil && !m.sidebarFocused {
-		help = "drag to copy · Ctrl+b then: v/s split · o next · z zoom · arrows resize · d diff · e edit · q close"
-	}
-	if m.embedded != nil && m.sidebarFocused {
-		help = "enter open  X stop/remove  a agent  n shell  f files  esc terminal  q quit"
-	}
-	if m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused) {
-		help = "enter show  c new  e edit  a start  d diff  m done  x cancel  w worktree"
-	}
-	if m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused) {
-		help = "enter open  u resume  i interrupt  X stop/remove  y/x allow/deny  tab section"
-	}
-	if m.pickingAgent {
-		help = "up/down select  enter launch  esc cancel"
-	}
-	if m.viewingHistory {
-		help = "Scrollback · pgup/pgdown or wheel · esc return"
-	}
-	if len(m.paneRects()) < len(m.visiblePanes()) {
-		help = "Enlarge window for splits · F6 cycles hidden panes"
-	}
-	if m.prefix {
-		help = "Prefix: v/s split · o next · z zoom · arrows resize (repeat) · d diff · e edit · f files · esc done"
-	}
-	if m.filesFocused {
-		help = "↑/↓ select · enter open · ←/→ collapse/expand · r refresh · esc back"
-	}
-	if m.prompting() {
-		help = "Enter confirm · Esc cancel"
-	}
-	if m.viewingDiff {
-		help = "esc close diff"
-	}
+	help := m.helpLine()
 	body := []string{sidebar, " ", pane}
 	if files := m.renderFiles(); files != "" {
 		body = append(body, " ", files)

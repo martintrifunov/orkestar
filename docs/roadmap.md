@@ -110,7 +110,7 @@ agent they already run.
 
 Ordered by what stands between a new user and a working session.
 
-- [ ] **Configurable key bindings.** Every binding is currently fixed, and
+- [x] **Configurable key bindings.** Every binding is currently fixed, and
       people arrive from tmux, zellij and vim with fingers that expect
       something else. This is the first thing a new user hits and the least
       negotiable: a tool that cannot be rebound is a tool they have to think

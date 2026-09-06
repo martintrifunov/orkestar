@@ -121,6 +121,10 @@ type Model struct {
 	// snapshotLoaded guards the first comparison: everything in the opening
 	// snapshot would otherwise look like it had just happened.
 	snapshotLoaded bool
+	// keys resolves a keystroke to an action. Dispatch switches on the action
+	// so a rebinding changes one map rather than every switch.
+	keys bindings
+
 	// focused tracks whether the terminal has focus, so a notification is only
 	// posted to someone who is not already looking at the thing it is about.
 	// Terminals that do not report focus leave this true, and the bell still
@@ -142,8 +146,18 @@ type Model struct {
 }
 
 func New(client *ipc.Client, directory string) Model {
+	settings := readSettings()
+	keys, complaints := newBindings(settings.Keys)
+	notice := ""
+	if len(complaints) > 0 {
+		// Said once, on the way in. A binding that was refused has to be
+		// visible or the user only finds out by pressing the key.
+		notice = "Key bindings: " + strings.Join(complaints, "; ")
+	}
 	return Model{
-		settings:  readSettings(),
+		settings:  settings,
+		keys:      keys,
+		notice:    notice,
 		client:    client,
 		directory: directory,
 		loading:   true,
@@ -350,7 +364,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if message.String() == "ctrl+b" && !m.viewingHistory && !m.viewingDiff {
+		if message.String() == m.keys.key(ActionPrefix) && !m.viewingHistory && !m.viewingDiff {
 			m.prefix = true
 			return m, nil
 		}
@@ -408,8 +422,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		switch message.String() {
-		case "q", "ctrl+c":
+		// A boolean switch so the rebindable actions and the fixed navigation
+		// keys can sit in one ordered list, as they did when all of them were
+		// literals.
+		switch key := message.String(); {
+		case m.keys.is(key, ActionQuit) || key == "ctrl+c":
 			for _, p := range m.visiblePanes() {
 				if !m.canClose(p) {
 					return m, nil
@@ -417,11 +434,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.closePanes()
 			return m, tea.Quit
-		case "esc":
+		case key == "esc":
 			if m.embedded != nil {
 				m.sidebarFocused = false
 			}
-		case "tab":
+		case m.keys.is(key, ActionSection):
 			switch m.focus {
 			case focusSessions:
 				m.focus = focusTasks
@@ -430,7 +447,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.focus = focusSessions
 			}
-		case "up", "k":
+		case key == "up" || key == "k":
 			switch m.focus {
 			case focusTasks:
 				if m.taskSelected > 0 {
@@ -445,7 +462,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.selected--
 				}
 			}
-		case "down", "j":
+		case key == "down" || key == "j":
 			switch m.focus {
 			case focusTasks:
 				if m.taskSelected+1 < len(m.snapshot.Tasks) {
@@ -460,10 +477,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.selected++
 				}
 			}
-		case "v", "s", "o":
+		case m.keys.prefixAction(key) == ActionSplitRight || m.keys.prefixAction(key) == ActionSplitDown || m.keys.prefixAction(key) == ActionNextPane:
 			cmd, _ := m.paneAction(message.String())
 			return m, cmd
-		case "e":
+		case m.keys.is(key, ActionEditTask):
 			// On a task this edits it, the way d shows that task's diff.
 			// Elsewhere it opens the editor pane.
 			if m.focus == focusTasks && len(m.snapshot.Tasks) > 0 {
@@ -476,7 +493,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmd, _ := m.paneAction("e")
 			return m, cmd
-		case "u":
+		case m.keys.is(key, ActionResume):
 			if !m.roomForPane() {
 				return m, nil
 			}
@@ -484,16 +501,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.opening = true
 				return m, cmd
 			}
-		case "r":
+		case m.keys.is(key, ActionRefresh):
 			m.loading = true
 			return m, m.loadSnapshot()
-		case "n":
+		case m.keys.is(key, ActionNewShell):
 			if m.opening || !m.roomForPane() {
 				return m, nil
 			}
 			m.opening = true
 			return m, m.startTerminal([]string{defaultShell()})
-		case "a":
+		case m.keys.is(key, ActionNewAgent):
 			m.pickingAgent = true
 			// Pressing a with a task selected launches the agent for that
 			// task; anywhere else it launches a free-standing session.
@@ -505,7 +522,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.agentPickerAt = 0
 			}
 			return m, nil
-		case "enter":
+		case m.keys.is(key, ActionOpen):
 			if m.opening {
 				return m, nil
 			}
@@ -529,26 +546,26 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.opening = true
 			return m, m.openTerminal(id)
-		case "X", "shift+x":
+		case m.keys.is(key, ActionStopRemove) || key == "shift+x":
 			return m, m.stopOrRemoveSelected()
-		case "i":
+		case m.keys.is(key, ActionInterrupt):
 			return m, m.interruptSelected()
-		case "f":
+		case m.keys.is(key, ActionFiles):
 			return m, m.toggleFiles()
-		case "c":
+		case m.keys.is(key, ActionNewTask):
 			if m.focus == focusTasks || len(m.snapshot.Tasks) == 0 {
 				m.startTaskPrompt()
 			}
 			return m, nil
 
-		case "d":
+		case m.keys.is(key, ActionDiff):
 			// On a task this is the task's own diff and reviewer verdict.
 			// Elsewhere it is the workspace review pane.
 			if m.focus == focusTasks {
 				return m, m.loadDiff()
 			}
 			return m, m.openReview()
-		case "m":
+		case m.keys.is(key, ActionTaskDone):
 			if task, ok := m.selectedTask(); ok && !m.taskBusy {
 				m.taskBusy = true
 				m.notice = "Marking done…"
@@ -558,7 +575,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.markSelectedTaskDone()
 			}
 			return m, nil
-		case "w":
+		case m.keys.is(key, ActionWorktree):
 			if !m.taskBusy {
 				if cmd := m.toggleSelectedWorktree(); cmd != nil {
 					m.taskBusy = true
@@ -567,14 +584,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "t":
+		case m.keys.is(key, ActionAssign):
 			if !m.taskBusy {
 				return m, m.assignSelectedTask()
 			}
 			return m, nil
-		case "y":
+		case m.keys.is(key, ActionAllow):
 			return m, m.resolveSelectedPermission("allow")
-		case "x":
+		case m.keys.is(key, ActionDenyOrCancel):
 			// Deny is for a permission request; with Tasks focused the same
 			// key cancels the selected task.
 			if m.focus == focusTasks {
@@ -1039,33 +1056,31 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if term.detachPending {
 		term.detachPending = false
-		if msg.String() == "q" {
+		// The same prefixed actions the sidebar offers, since a prefix that
+		// means different things depending on what has focus is not a prefix.
+		switch m.keys.prefixAction(msg.String()) {
+		case ActionClosePane:
 			debugf("updateEmbedded: detaching terminalID=%s", term.terminalID)
 			m.removePane(term)
 			m.loading = true
 			return m, m.loadSnapshot()
-		}
-		if msg.String() == "[" {
+		case ActionScrollback:
 			return m, m.loadHistory()
-		}
-		if msg.String() == "o" {
+		case ActionNextPane:
 			m.nextPane()
 			return m, nil
-		}
-		if msg.String() == "t" {
+		case ActionClaimPane:
 			m.claimPane()
 			return m, nil
-		}
-		if msg.String() == "a" {
+		case ActionNewAgent:
 			m.sidebarFocused = true
 			m.pickingAgent = true
 			return m, nil
-		}
-		if msg.String() == "tab" {
+		case ActionDetachPanel:
 			m.sidebarFocused = true
 			return m, nil
 		}
-		if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'b' {
+		if msg.String() == m.keys.key(ActionPrefix) {
 			term.emulator.Input([]byte{0x02})
 			return m, nil
 		}
@@ -1078,8 +1093,8 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'b' {
-		debugf("updateEmbedded: ctrl+b seen, arming detach")
+	if msg.String() == m.keys.key(ActionPrefix) {
+		debugf("updateEmbedded: prefix seen, arming detach")
 		term.detachPending = true
 		return m, nil
 	}

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Rebind any key with a `keys` map in `tui.json`, including the prefix.
+  Dispatch and the help line both read from it, so a rebinding cannot leave the
+  help describing a keyboard that no longer exists. Unknown actions and keys
+  bound twice are reported on startup.
 - Attach to a daemon on another machine with `orkestar --remote user@host`,
   which runs the interface locally over an ssh session to
   `orkestar daemon proxy`. Authentication is ssh's; the daemon still listens

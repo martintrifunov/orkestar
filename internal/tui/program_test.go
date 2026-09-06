@@ -553,3 +553,112 @@ func TestProgramFileViewerOpensAndFollowsTheWorkspace(t *testing.T) {
 		t.Fatal("TUI did not quit")
 	}
 }
+
+// Rebinding has to work in the real interface, not only in the map: the
+// dispatch, the prefix and the help line all read from it, and a unit test
+// proves none of that reached the keyboard.
+func TestProgramHonoursRebedKeys(t *testing.T) {
+	dir := t.TempDir()
+	_, socket := startEmbeddedTestDaemonWithSocket(t)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A tmux user's prefix, and a new-task key their fingers already know.
+	config := filepath.Join(t.TempDir(), "tui.json")
+	settings := `{"editor":"standard","keys":{"prefix":"ctrl+a","new-task":"N"}}`
+	if err := os.WriteFile(config, []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	process, err := pty.Start(pty.StartOptions{
+		Command: executable, Arguments: []string{"-test.run=^TestTUIProcess$"},
+		Columns: 150, Rows: 40,
+		Env: append(os.Environ(), "TERM=xterm-256color", "ORKESTAR_TEST_TUI=1",
+			"ORKESTAR_TEST_SOCKET="+socket, "ORKESTAR_TEST_DIRECTORY="+dir,
+			"ORKESTAR_TUI_CONFIG="+config),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := terminal.NewScreen(150, 40)
+	inputDone, outputDone := make(chan struct{}), make(chan struct{})
+	go func() { defer close(inputDone); _, _ = io.Copy(process, screen) }()
+	go func() { defer close(outputDone); _, _ = io.Copy(screen, process) }()
+	// The screen has to be closed too, or the copy out of it never returns
+	// and the cleanup blocks until the whole package times out.
+	t.Cleanup(func() {
+		_ = screen.Close()
+		_ = process.Close()
+		for _, done := range []chan struct{}{inputDone, outputDone} {
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Error("TUI worker did not stop")
+			}
+		}
+	})
+
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(screen.Render(), want) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("missing %q:\n%s", want, screen.Render())
+	}
+	send := func(text string) {
+		t.Helper()
+		if _, err := process.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	wait("Open a session")
+	// The help line names the rebound key rather than the default.
+	send("\t")
+	wait("N new")
+
+	// And the key itself does the thing.
+	send("N")
+	wait("New task")
+
+	// Escape closes it, and the screen has to actually repaint before the next
+	// assertion means anything.
+	send("\x1b")
+	gone := func(what string) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if !strings.Contains(screen.Render(), what) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%q never went away:\n%s", what, screen.Render())
+	}
+	gone("New task")
+
+	// The old key is now just a keystroke, not a second way in.
+	send("c")
+	time.Sleep(300 * time.Millisecond)
+	if strings.Contains(screen.Render(), "New task") {
+		t.Fatalf("the default key still opens the prompt:\n%s", screen.Render())
+	}
+
+	// The rebound prefix arms the pane actions; the old one does not.
+	send("\x01")
+	wait("Prefix:")
+	send("\x1b")
+	gone("Prefix:")
+	send("q")
+	select {
+	case <-process.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatalf("TUI did not quit:\n%s", screen.Render())
+	}
+}

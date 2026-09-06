@@ -143,6 +143,40 @@ such guarantee, and a cycle would leave every task in it permanently
 unstartable, each waiting on the next. Orkestar rejects one and names the path
 it would have closed, rather than storing a board that can never move.
 
+## Key bindings
+
+Every binding can be changed. People arrive from tmux, zellij and vim with
+fingers that expect something else, and a tool that cannot be rebound is one
+they have to think about while using it.
+
+```json
+{
+  "keys": {
+    "prefix": "ctrl+a",
+    "new-task": "N",
+    "next-pane": "ctrl+n"
+  }
+}
+```
+
+Anything absent keeps its default, so only what your fingers already expect
+needs writing down. An action that does not exist, or a key bound to two
+actions, is reported in the notice line when the interface starts rather than
+silently doing nothing.
+
+The help line along the bottom is built from the same map, so it describes the
+keyboard you actually have.
+
+A few keys are deliberately fixed: the arrows and their vim equivalents for
+moving a selection, `esc`, and the editor's own `Ctrl+S`/`Ctrl+Z` and friends,
+which follow conventions from outside Orkestar.
+
+Some actions live behind the prefix and some do not, and a few do both. `n`
+opens a shell from the sidebar and so does the prefix; `e` edits a task in the
+sidebar while the prefix opens a file; `q` quits from the sidebar while the
+prefix closes a pane. Rebinding one does not disturb the other, because they
+are separate actions rather than the same letter twice.
+
 ## Attaching to a daemon on another machine
 
 `orkestar --remote user@host` runs the interface here and the daemon there.
