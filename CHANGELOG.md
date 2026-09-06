@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-- Edit a task after creating it: `e` on a task in the sidebar, or
-  `orkestar task edit` with `--title`, `--description` and `--depends-on`. Only the fields given change. A dependency added later is
+- Edit a task after creating it: `e` on a task in the sidebar, `task_update`
+  over MCP, or `orkestar task edit` with `--title`, `--description` and
+  `--depends-on`. Only the fields given change. A dependency added later is
   rejected if it would close a cycle, which `task create` could never build.
 - Collect a description when creating a task. `Tab` moves between the title and
   description; `Ctrl+R` toggles auto-review, which `Tab` used to do.
+- Let an agent hand work to another agent over MCP: `task_start` launches an
+  agent for a task, `agent_prompt` gives it the work, and `agent_list` reports
+  running sessions and the adapters available. There is deliberately no way to
+  stop an agent over MCP.
 - Launch an agent for a task, from the Tasks list with `a`, with `task_id` on
   `agent.launch`, or with
   `orkestar agent launch <workspace> <adapter> --task=<id>`. The session starts

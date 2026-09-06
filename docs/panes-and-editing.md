@@ -90,6 +90,26 @@ The same hand-off from the command line:
 orkestar agent launch <workspace-id> <adapter> --task=<task-id>
 ```
 
+An agent can do the same through MCP, which is what makes one agent able to
+hand work to another: `agent_list` reports the running sessions and the
+adapters available to launch, `task_start` launches one for a task, and
+`agent_prompt` tells it what to do. The task already knows its workspace, so
+`task_start` takes only a task and, when more than one adapter is registered,
+which to use.
+
+`task_start` launches an **idle** session. In the sidebar the human types the
+first message; over MCP that is `agent_prompt`, and the task moves to
+in_progress once the agent acts on it. Give an interactive CLI a few seconds
+after `task_start` before prompting it: the daemon reports the session ready as
+soon as the process exists, which is before the agent's own interface has
+finished starting, and anything sent before then is typed into nothing.
+
+Deliberately absent: MCP has no way to **stop** an agent. Starting work is
+recoverable — a session that turns out to be wrong can be closed from the
+sidebar — while an agent ending another agent's session destroys work in
+progress with nobody watching. Stopping stays a human action, from the TUI or
+the CLI.
+
 ## Editing a task
 
 `e` on a selected task reopens the prompt over it, filled in with what is
