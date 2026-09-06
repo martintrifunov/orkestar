@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
+
+Terminal correctness and throughput: a leaked window title no longer lands in an
+agent's prompt, sustained output costs a fraction of what it did, and a terminal
+pane's text can be selected and copied.
 
 - Stop a UTF-8 character inside an OSC, DCS, SOS, PM or APC sequence from
   ending it early. Claude Code sets the window title to "✳ <conversation>"

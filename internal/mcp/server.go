@@ -20,7 +20,7 @@ import (
 // reachable through client. The caller is responsible for running it over
 // a transport (see sdk.Transport implementations, such as sdk.StdioTransport).
 func NewServer(client *ipc.Client) *sdk.Server {
-	server := sdk.NewServer(&sdk.Implementation{Name: "orkestar", Version: "v0.1.0"}, nil)
+	server := sdk.NewServer(&sdk.Implementation{Name: "orkestar", Version: "v0.2.0"}, nil)
 
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "workspace_create",

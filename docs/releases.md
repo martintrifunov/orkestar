@@ -1,15 +1,16 @@
 # Releases
 
-The first version is **v0.1.0**, published 2026-09-06. Source builds report 0.1.0;
-release packaging stamps the tag version with `-X main.version`. Update the source default and changelog
-for subsequent releases.
+The current version is **v0.2.0**, following v0.1.0 of 2026-09-06. Source builds
+report the source default; release packaging stamps the tag version with
+`-X main.version`. Update the source default and changelog for each release.
 
 Before publishing, run the full macOS/Linux CI and native Windows job. Windows
 checks include ConPTY final output, bounded writes, PowerShell session reattachment
 and reset over named pipes. Installed agent model-turn/hook validation remains in
 [validation.md](validation.md); fixtures do not establish that coverage.
 
-Commit and push the reviewed project changes, then tag that commit `v0.1.0` and
+Commit and push the reviewed project changes, then tag that commit (`v0.2.0` for
+the current release) and
 publish a GitHub release. `.github/workflows/release.yml` checks out that exact tag,
 tests it, builds six archives, and uploads them with SHA256SUMS. The workflow can
 be rerun with an existing release tag. A tag push alone does not publish a release
