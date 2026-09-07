@@ -121,14 +121,14 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.listener = listener
 	s.mu.Unlock()
 
-	go func() {
+	go guard("ipc.listener-shutdown", func() {
 		select {
 		case <-ctx.Done():
 			s.stopOnce.Do(func() { close(s.stop) })
 		case <-s.stop:
 		}
 		_ = listener.Close()
-	}()
+	})
 
 	defer func() {
 		s.stopOnce.Do(func() { close(s.stop) })
@@ -169,7 +169,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		go func() {
 			defer s.requests.Done()
 			defer func() { s.mu.Lock(); delete(s.connections, connection); s.mu.Unlock() }()
-			s.handleConnection(connection)
+			guard("ipc.connection", func() { s.handleConnection(connection) })
 		}()
 	}
 }
@@ -179,7 +179,7 @@ func (s *Server) handleConnection(connection net.Conn) {
 
 	scanner := bufio.NewScanner(connection)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	encoder := json.NewEncoder(connection)
+	encoder := json.NewEncoder(responseWriter{connection})
 	for scanner.Scan() {
 		var request ipc.Request
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
@@ -453,4 +453,14 @@ func newID(prefix string) (string, error) {
 		return "", fmt.Errorf("generate ID: %w", err)
 	}
 	return prefix + "_" + hex.EncodeToString(bytes), nil
+}
+
+// Every reply, including idle-stream control replies, gets a fresh deadline.
+type responseWriter struct{ net.Conn }
+
+func (w responseWriter) Write(p []byte) (int, error) {
+	if err := w.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return 0, err
+	}
+	return w.Conn.Write(p)
 }

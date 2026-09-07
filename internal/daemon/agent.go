@@ -388,7 +388,7 @@ func (s *Server) launch(ctx context.Context, params launchParams) (Agent, error)
 	}
 
 	s.agentWorkers.Add(1)
-	go func() { defer s.agentWorkers.Done(); s.watchAgent(id, entry) }()
+	go func() { defer s.agentWorkers.Done(); guard("agent.watch", func() { s.watchAgent(id, entry) }) }()
 	return metadata, nil
 }
 
@@ -561,7 +561,7 @@ func (s *Server) handleAgentAttach(connection agentConnection) {
 	}
 
 	readerDone := make(chan struct{})
-	go func() {
+	go guard("agent.attach-reader", func() {
 		defer close(readerDone)
 		for connection.Scanner.Scan() {
 			var command struct {
@@ -575,7 +575,7 @@ func (s *Server) handleAgentAttach(connection agentConnection) {
 				return
 			}
 		}
-	}()
+	})
 
 	for {
 		select {
@@ -628,14 +628,16 @@ func (s *Server) deliverOpeningPrompt(entry *agentSession, text string, interact
 	s.agentWorkers.Add(1)
 	go func() {
 		defer s.agentWorkers.Done()
-		select {
-		case <-time.After(openingPromptTimeout):
-		case <-s.stop:
-			return
-		}
-		if late := entry.takeOpeningPrompt(); late != "" {
-			s.sendOpeningPrompt(entry, late, false)
-		}
+		guard("agent.opening-prompt-timeout", func() {
+			select {
+			case <-time.After(openingPromptTimeout):
+			case <-s.stop:
+				return
+			}
+			if late := entry.takeOpeningPrompt(); late != "" {
+				s.sendOpeningPrompt(entry, late, false)
+			}
+		})
 	}()
 }
 
@@ -662,25 +664,27 @@ func (s *Server) sendOpeningPrompt(entry *agentSession, text string, settle bool
 	s.agentWorkers.Add(1)
 	go func() {
 		defer s.agentWorkers.Done()
-		if settle {
-			select {
-			case <-time.After(openingPromptSettle):
-			case <-s.stop:
+		guard("agent.opening-prompt", func() {
+			if settle {
+				select {
+				case <-time.After(openingPromptSettle):
+				case <-s.stop:
+					return
+				}
+			}
+			session := entry.liveSession()
+			if session == nil {
 				return
 			}
-		}
-		session := entry.liveSession()
-		if session == nil {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := session.Prompt(ctx, text); err != nil {
-			entry.mu.Lock()
-			entry.metadata.AttentionReason = "opening prompt failed: " + err.Error()
-			entry.mu.Unlock()
-		}
-		_ = s.persist()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := session.Prompt(ctx, text); err != nil {
+				entry.mu.Lock()
+				entry.metadata.AttentionReason = "opening prompt failed: " + err.Error()
+				entry.mu.Unlock()
+			}
+			_ = s.persist()
+		})
 	}()
 }
 

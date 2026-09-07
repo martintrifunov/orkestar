@@ -135,13 +135,13 @@ func (s *Server) waitForTask(ctx context.Context, rawParams json.RawMessage) (wo
 	defer cancel()
 	// A shutdown must release the wait, or the daemon cannot stop until every
 	// outstanding one has timed out.
-	go func() {
+	go guard("task.wait-cancel", func() {
 		select {
 		case <-s.stop:
 			cancel()
 		case <-ctx.Done():
 		}
-	}()
+	})
 	return s.tasks.WaitFor(ctx, params.TaskID, until)
 }
 
