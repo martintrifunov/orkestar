@@ -424,14 +424,13 @@ func (s *Server) createWorkspace(rawParams json.RawMessage) (Workspace, error) {
 	// creating a second would scatter that work across two workspaces that
 	// mean the same directory. The name of the existing one stands: it is
 	// where the tasks already are.
-	s.mu.RLock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, existing := range s.workspaces {
 		if existing.Directory == directory {
-			s.mu.RUnlock()
 			return existing, nil
 		}
 	}
-	s.mu.RUnlock()
 
 	id, err := newID("w")
 	if err != nil {
@@ -444,9 +443,7 @@ func (s *Server) createWorkspace(rawParams json.RawMessage) (Workspace, error) {
 		CreatedAt: time.Now().UTC(),
 	}
 
-	s.mu.Lock()
 	s.workspaces[workspace.ID] = workspace
-	s.mu.Unlock()
 	return workspace, nil
 }
 
