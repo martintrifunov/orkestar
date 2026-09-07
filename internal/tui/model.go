@@ -988,12 +988,19 @@ func (m Model) launchPickedAgent() tea.Cmd {
 		mode = "interactive"
 	}
 	taskID := m.pickerTaskID
+	task, hasTask := m.pickerTask()
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		workspaceID, err := m.ensureWorkspace(ctx)
+		var workspaceID string
+		var err error
+		if hasTask {
+			workspaceID = task.WorkspaceID
+		} else {
+			workspaceID, err = m.ensureWorkspace(ctx)
+		}
 		if err != nil {
 			return agentLaunchedMsg{err: err}
 		}
