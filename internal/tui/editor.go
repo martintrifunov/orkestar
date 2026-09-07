@@ -111,7 +111,8 @@ func (e *textEditor) bounds() (int, int) {
 }
 func (e *textEditor) selected() string { a, b := e.bounds(); return string(e.text[a:b]) }
 func (e *textEditor) replace(s string) {
-	if len(string(e.text))+len(s) > files.MaxSize {
+	a, b := e.bounds()
+	if len(string(e.text[:a]))+len(string(e.text[b:]))+len(s) > files.MaxSize {
 		e.status = "File exceeds editor size limit"
 		return
 	}
@@ -120,7 +121,6 @@ func (e *textEditor) replace(s string) {
 		e.undo = e.undo[1:]
 	}
 	e.redo = nil
-	a, b := e.bounds()
 	r := []rune(s)
 	next := append([]rune(nil), e.text[:a]...)
 	next = append(next, r...)
