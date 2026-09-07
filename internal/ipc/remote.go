@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -58,9 +59,11 @@ func NewRemoteClient(remote Remote) *Client {
 	if executable == "" {
 		executable = "orkestar"
 	}
-	return NewClientWithDialer("ssh "+remote.Host, func(ctx context.Context, _ time.Duration) (net.Conn, error) {
+	client := NewClientWithDialer("ssh "+remote.Host, func(ctx context.Context, _ time.Duration) (net.Conn, error) {
 		return dialSSH(ctx, remote.Host, executable)
 	})
+	client.remote = true
+	return client
 }
 
 // sshArguments is the command line each connection runs. It is separate so a
@@ -87,73 +90,105 @@ func sshArguments(host, executable string) []string {
 // kills ssh the moment the call that opened it returns, which would leave a
 // remote pane dead before its first frame and make pooling impossible. A
 // connection's lifetime is the connection's, and Close ends it.
-func dialSSH(_ context.Context, host, executable string) (net.Conn, error) {
-	command := exec.Command("ssh", sshArguments(host, executable)...)
+func dialSSH(ctx context.Context, host, executable string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return startSSHCommand(exec.Command("ssh", sshArguments(host, executable)...), host)
+}
+
+// net.Pipe supplies real, independent read/write deadlines on all platforms.
+// Closing either end releases the bridge and reaps the subprocess.
+func startSSHCommand(command *exec.Cmd, host string) (net.Conn, error) {
 	stdin, err := command.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", host, err)
+		return nil, err
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", host, err)
+		_ = stdin.Close()
+		return nil, err
 	}
-	// ssh reports a refused host or a missing key here, and it is the only
-	// useful thing to say when the far end never answers.
-	var diagnostics strings.Builder
-	command.Stderr = &diagnostics
+	diagnostics := &sshDiagnostics{}
+	command.Stderr = diagnostics
+	command.WaitDelay = time.Second
 	if err := command.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("run ssh: %w", err)
 	}
-	return &sshConn{command: command, stdin: stdin, stdout: stdout, host: host, diagnostics: &diagnostics}, nil
+	local, bridge := net.Pipe()
+	c := &sshConn{Conn: local, command: command, bridge: bridge, stdin: stdin, stdout: stdout, host: host, diagnostics: diagnostics, done: make(chan struct{})}
+	go func() {
+		_, _ = io.Copy(stdin, bridge)
+		_ = stdin.Close()
+	}()
+	go func() {
+		_, _ = io.Copy(bridge, stdout)
+		// The child's stdout is drained before Wait closes its pipe.
+		_ = stdin.Close()
+		_ = command.Wait()
+		_ = bridge.Close()
+		close(c.done)
+	}()
+	return c, nil
 }
 
-// sshConn presents an ssh session's stdio as a net.Conn. Only what the IPC
-// client uses is real: reads, writes, close and a deadline.
 type sshConn struct {
+	net.Conn
 	command     *exec.Cmd
+	bridge      net.Conn
 	stdin       io.WriteCloser
 	stdout      io.ReadCloser
 	host        string
-	diagnostics *strings.Builder
-	deadline    time.Time
+	diagnostics *sshDiagnostics
+	once        sync.Once
+	done        chan struct{}
 }
 
 func (c *sshConn) Read(data []byte) (int, error) {
-	n, err := c.stdout.Read(data)
-	if err != nil && n == 0 {
-		// A dead session says nothing on its own; ssh's stderr is where the
-		// reason is, and without it the user sees only "EOF".
-		if reason := strings.TrimSpace(c.diagnostics.String()); reason != "" {
+	n, err := c.Conn.Read(data)
+	if err == io.EOF && n == 0 {
+		if reason := c.diagnostics.String(); reason != "" {
 			return n, fmt.Errorf("%s: %s", c.host, reason)
 		}
 	}
 	return n, err
 }
-
-func (c *sshConn) Write(data []byte) (int, error) { return c.stdin.Write(data) }
-
 func (c *sshConn) Close() error {
-	_ = c.stdin.Close()
-	_ = c.stdout.Close()
-	if c.command.Process != nil {
+	c.once.Do(func() {
+		_ = c.Conn.Close()
+		_ = c.bridge.Close()
+		_ = c.stdin.Close()
+		_ = c.stdout.Close()
 		_ = c.command.Process.Kill()
-	}
-	// cmd.Wait rather than Process.Wait: the session owns pipes, and only
-	// exec.Cmd knows to clean up after them. It also reports a process that
-	// was never started instead of dereferencing a nil one.
-	_ = c.command.Wait()
+	})
+	<-c.done
 	return nil
 }
-
 func (c *sshConn) LocalAddr() net.Addr  { return sshAddr(c.host) }
 func (c *sshConn) RemoteAddr() net.Addr { return sshAddr(c.host) }
 
-// SetDeadline is accepted and not enforced. A pipe has no deadline to set, and
-// the client's calls already carry a context that closes the session when it
-// ends, which is what a deadline would have been for.
-func (c *sshConn) SetDeadline(t time.Time) error      { c.deadline = t; return nil }
-func (c *sshConn) SetReadDeadline(t time.Time) error  { return c.SetDeadline(t) }
-func (c *sshConn) SetWriteDeadline(t time.Time) error { return c.SetDeadline(t) }
+type sshDiagnostics struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (b *sshDiagnostics) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	remaining := 8192 - b.text.Len()
+	if remaining > 0 {
+		_, _ = b.text.Write(p[:min(n, remaining)])
+	}
+	return n, nil
+}
+func (b *sshDiagnostics) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(b.text.String())
+}
 
 type sshAddr string
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -48,8 +49,10 @@ type Client struct {
 	// otherwise say only "connect to daemon" while talking to another machine.
 	describe string
 
-	mu   sync.Mutex
-	idle []*conversation
+	mu     sync.Mutex
+	idle   []*conversation
+	closed bool
+	remote bool
 }
 
 func NewClient(socketPath string) *Client {
@@ -69,6 +72,7 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	idle := c.idle
 	c.idle = nil
+	c.closed = true
 	c.mu.Unlock()
 	for _, held := range idle {
 		_ = held.conn.Close()
@@ -98,7 +102,7 @@ func (c *Client) keep(held *conversation) {
 		return
 	}
 	c.mu.Lock()
-	if len(c.idle) >= maxIdleConnections {
+	if c.closed || len(c.idle) >= maxIdleConnections {
 		c.mu.Unlock()
 		_ = held.conn.Close()
 		return
@@ -134,6 +138,20 @@ func (c *Client) dial(ctx context.Context) (*conversation, error) {
 // the client insisted on a fresh one each time, which costs little over a Unix
 // socket and a great deal over anything else.
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
+		return net.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+	}
 	request := Request{
 		ID:      fmt.Sprintf("req_%d", requestSequence.Add(1)),
 		Version: Version,
@@ -148,8 +166,8 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	}
 
 	// A pooled connection may have been closed at the far end since it was
-	// last used — a daemon restart, most obviously. A send that fails proves
-	// the daemon never saw the request, so that one is safe to retry on a
+	// last used — a daemon restart, most obviously. A send that writes zero bytes proves
+	// the daemon never saw the request, so only that one is safe to retry on a
 	// fresh connection. A reply that fails to arrive is not: the request may
 	// well have been carried out, and repeating a mutation is worse than
 	// reporting an error.
@@ -165,7 +183,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 
 	err := c.converse(ctx, held, request, method, result)
 	var failedToSend *sendFailed
-	if !errors.As(err, &failedToSend) {
+	if !errors.As(err, &failedToSend) || ctx.Err() != nil {
 		return err
 	}
 	fresh, dialErr := c.dial(ctx)
@@ -199,14 +217,27 @@ func (c *Client) converse(ctx context.Context, held *conversation, request Reque
 			return fmt.Errorf("set IPC deadline: %w", err)
 		}
 	}
-	if err := held.encoder.Encode(request); err != nil {
+	stop := context.AfterFunc(ctx, func() { _ = held.conn.Close() })
+	defer stop()
+	writer := &countedWriter{Writer: held.conn}
+	if err := json.NewEncoder(writer).Encode(request); err != nil {
 		_ = held.conn.Close()
-		return &sendFailed{fmt.Errorf("send %s request: %w", method, err)}
+		failure := fmt.Errorf("send %s request: %w", method, err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if writer.n == 0 {
+			return &sendFailed{failure}
+		}
+		return failure
 	}
 
 	var response Response
 	if err := held.decoder.Decode(&response); err != nil {
 		_ = held.conn.Close()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("read %s response: %w", method, err)
 	}
 	if response.Version != Version {
@@ -218,6 +249,10 @@ func (c *Client) converse(ctx context.Context, held *conversation, request Reque
 		// anything further.
 		_ = held.conn.Close()
 		return fmt.Errorf("mismatched response ID %q", response.ID)
+	}
+	if !stop() {
+		_ = held.conn.Close()
+		return ctx.Err()
 	}
 	c.keep(held)
 
@@ -244,4 +279,21 @@ func (c *Client) IdleConnections() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.idle)
+}
+
+// IsRemote reports whether filesystem paths belong to another machine.
+func (c *Client) IsRemote() bool { return c != nil && c.remote }
+
+type countedWriter struct {
+	io.Writer
+	n int
+}
+
+func (w *countedWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	w.n += n
+	if n != len(p) && err == nil {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }
