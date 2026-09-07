@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/git"
@@ -32,22 +33,26 @@ type reviewOutcome struct {
 	Reason   string
 }
 
-// runAutomaticReview asks the configured reviewer adapter to judge a
-// task's diff. It returns approved=true with no error when there is
-// nothing to review: no reviewer adapter configured, no worktree, or no
-// uncommitted changes.
+// runAutomaticReview asks the configured reviewer adapter to judge a task's
+// diff. A task with no worktree has nothing to review, the same as one with
+// no uncommitted changes, so it is approved outright. Once a worktree exists,
+// though, there may be real changes riding on this verdict: a missing
+// reviewer, a missing workspace, or an oversized diff all fail closed rather
+// than silently bypassing the review gate.
 func (s *Server) runAutomaticReview(ctx context.Context, task workflow.Task) (reviewOutcome, error) {
+	if task.WorktreePath == "" {
+		return reviewOutcome{Approved: true}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	s.mu.RLock()
 	reviewerName := s.reviewerAdapter
 	adapter, adapterOK := s.adapters[reviewerName]
-	workspace, workspaceOK := s.workspaces[task.WorkspaceID]
+	_, workspaceOK := s.workspaces[task.WorkspaceID]
 	s.mu.RUnlock()
 
 	if reviewerName == "" {
-		return reviewOutcome{Approved: true}, nil
-	}
-	if task.WorktreePath == "" {
-		return reviewOutcome{Approved: true}, nil
+		return reviewOutcome{}, fmt.Errorf("no reviewer adapter is configured")
 	}
 	if !workspaceOK {
 		return reviewOutcome{}, fmt.Errorf("workspace %q does not exist", task.WorkspaceID)
@@ -65,7 +70,7 @@ func (s *Server) runAutomaticReview(ctx context.Context, task workflow.Task) (re
 		return reviewOutcome{}, fmt.Errorf("review task %q: diff worktree: %w", task.ID, err)
 	}
 	if len(diff) > maxReviewDiffChars {
-		diff = diff[:maxReviewDiffChars] + "\n... (diff truncated)"
+		return reviewOutcome{}, fmt.Errorf("diff exceeds automatic review limit of %d bytes; split the task before review", maxReviewDiffChars)
 	}
 
 	if !adapterOK {
@@ -74,7 +79,7 @@ func (s *Server) runAutomaticReview(ctx context.Context, task workflow.Task) (re
 
 	session, err := adapter.Launch(ctx, agent.LaunchOptions{
 		Mode:      agent.ModeManaged,
-		Directory: workspace.Directory,
+		Directory: task.WorktreePath,
 	})
 	if err != nil {
 		return reviewOutcome{}, fmt.Errorf("review task %q: launch reviewer: %w", task.ID, err)
@@ -95,6 +100,9 @@ func (s *Server) runAutomaticReview(ctx context.Context, task workflow.Task) (re
 
 	if _, err := s.artifacts.Add(task.ID, workflow.ArtifactReview, "reviewer verdict", "", reply); err != nil {
 		return reviewOutcome{}, fmt.Errorf("review task %q: record review artifact: %w", task.ID, err)
+	}
+	if err := s.persist(); err != nil {
+		return reviewOutcome{}, err
 	}
 	return outcome, nil
 }
@@ -117,15 +125,13 @@ func buildReviewPrompt(task workflow.Task, diff string) string {
 // a rejection: blocking on an ambiguous review is safer than completing a
 // task no one actually approved.
 func parseReviewVerdict(reply string) reviewOutcome {
-	for _, line := range strings.Split(reply, "\n") {
-		trimmed := strings.TrimSpace(line)
-		upper := strings.ToUpper(trimmed)
-		switch {
-		case strings.HasPrefix(upper, "VERDICT: APPROVE"):
-			return reviewOutcome{Approved: true, Reason: reply}
-		case strings.HasPrefix(upper, "VERDICT: REJECT"):
-			return reviewOutcome{Approved: false, Reason: reply}
-		}
+	line := strings.TrimSpace(strings.SplitN(strings.TrimSpace(reply), "\n", 2)[0])
+	switch strings.ToUpper(line) {
+	case "VERDICT: APPROVE":
+		return reviewOutcome{Approved: true, Reason: reply}
+	case "VERDICT: REJECT":
+		return reviewOutcome{Approved: false, Reason: reply}
 	}
+
 	return reviewOutcome{Approved: false, Reason: "reviewer did not return a recognizable verdict:\n" + reply}
 }
