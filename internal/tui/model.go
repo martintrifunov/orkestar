@@ -369,7 +369,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePrompt(message)
 		}
 		if message.String() == "f6" {
-			cmd, _ := m.paneAction("o")
+			cmd, _ := m.paneAction(m.keys.key(ActionNextPane))
 			return m, cmd
 		}
 		if m.prefix {
