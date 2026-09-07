@@ -112,6 +112,10 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 	}
 	pending := &hookPermission{decision: make(chan string, 1), agentID: p.AgentID, nativeID: p.PermissionID}
 	s.mu.Lock()
+	if s.agents[p.AgentID] != entry || s.hookTokens[p.AgentID] != token {
+		s.mu.Unlock()
+		return map[string]string{}, nil
+	}
 	s.pendingHooks[id] = pending
 	s.permissions[id] = PermissionRequest{ID: id, AgentID: p.AgentID, Reason: reason, CreatedAt: time.Now().UTC()}
 	s.mu.Unlock()

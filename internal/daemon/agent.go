@@ -397,6 +397,10 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 		metadata, permissionCleared := entry.applyLifecycleEvent(event)
 
 		s.mu.Lock()
+		if s.agents[id] != entry {
+			s.mu.Unlock()
+			continue
+		}
 		if event.State == agent.StateWaitingPermission && entry.getPermissionID() == "" {
 			permissionID, err := newID("perm")
 			if err == nil {
