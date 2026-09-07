@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -267,6 +268,40 @@ func TestViewerRefusesToOpenInANarrowWindow(t *testing.T) {
 	}
 	if _, _, width, _ := wide.contentArea(); width != wide.width-embeddedSidebarWidth(wide.width)-1 {
 		t.Fatal("panes did not reclaim the hidden viewer's width")
+	}
+}
+
+func TestWorkspaceFilesIncludesIgnoredAndEmptyDirectories(t *testing.T) {
+	root := viewerRoot(t)
+	if out, err := exec.Command("git", "init", root).CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	for _, dir := range []string{"node_modules/package", "empty"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, content := range map[string]string{".gitignore": "ignored.txt\nnode_modules/\n", "ignored.txt": "hidden", "node_modules/package/index.js": "code"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := viewerModel(t, root)
+	m.filesExpanded["node_modules"] = true
+	m.filesExpanded["node_modules/package"] = true
+	names := strings.Join(rowNames(m), ",")
+	for _, want := range []string{"ignored.txt", "node_modules", "index.js", "empty"} {
+		if !strings.Contains(names, want) {
+			t.Fatalf("missing %s: %s", want, names)
+		}
+	}
+	for _, row := range m.fileRows() {
+		if row.node.name == ".git" {
+			t.Fatal("Git database exposed")
+		}
+		if row.node.name == "empty" && !row.node.dir {
+			t.Fatal("empty directory is a file")
+		}
 	}
 }
 

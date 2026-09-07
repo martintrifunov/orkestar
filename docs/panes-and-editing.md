@@ -49,8 +49,9 @@ until you open it, so it has no cost while hidden.
 While it is open it follows the workspace, re-reading every couple of seconds so
 files an agent writes or removes appear on their own. Expanded directories and
 the selected entry are tracked by path, so a refresh never collapses the tree or
-moves your selection. Ignored files are excluded through Git, with a bounded
-directory walk outside a repository.
+moves your selection. Git-ignored files and empty directories are included, including `node_modules`.
+The directory walk is bounded to 10,000 entries or three seconds and does not
+follow symlinks or descend into `.git`.
 
 Only one of the sidebar, the panes and the viewer holds the keyboard at a time,
 and a view that covers the whole content area, such as scrollback, takes it from

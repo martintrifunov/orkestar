@@ -39,26 +39,13 @@ type filesLoadedMsg struct {
 	err   error
 }
 
-// workspaceFiles lists the files of a workspace, preferring Git so ignored
-// paths stay out, and falling back to a bounded walk outside a repository.
+// workspaceFiles includes ignored files and empty directories in a bounded walk.
+// Git's internal database is not workspace content; symlinks are not followed.
 func workspaceFiles(root string) ([]string, error) {
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("cannot read %s", root)
 	}
 	var paths []string
-	if raw, err := gitOutput(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"); err == nil {
-		seen := map[string]bool{}
-		for _, path := range strings.Split(raw, "\x00") {
-			if path != "" && !seen[path] {
-				seen[path] = true
-				paths = append(paths, path)
-			}
-			if len(paths) >= 10000 {
-				break
-			}
-		}
-		return paths, nil
-	}
 	deadline := time.Now().Add(3 * time.Second)
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -68,12 +55,14 @@ func workspaceFiles(root string) ([]string, error) {
 			return fs.SkipAll
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" || d.Name() == "node_modules" {
+			if d.Name() == ".git" {
 				return fs.SkipDir
 			}
-			return nil
 		}
-		if rel, e := filepath.Rel(root, path); e == nil {
+		if rel, e := filepath.Rel(root, path); e == nil && rel != "." {
+			if d.IsDir() {
+				rel += "/"
+			}
 			paths = append(paths, rel)
 		}
 		return nil
@@ -82,7 +71,7 @@ func workspaceFiles(root string) ([]string, error) {
 }
 
 // buildFileTree turns a flat path list into a tree. Directories are inferred
-// from the paths themselves, so an empty directory simply does not appear.
+// from the paths themselves; a trailing slash represents an empty directory.
 func buildFileTree(paths []string) *fileNode {
 	root := &fileNode{dir: true}
 	nodes := map[string]*fileNode{"": root}
