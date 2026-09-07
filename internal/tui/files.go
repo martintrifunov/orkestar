@@ -178,6 +178,9 @@ func (m Model) fileCursorIndex(rows []fileRow) int {
 // toggleFiles opens or closes the viewer. Opening focuses it and starts the
 // first read; both directions resize the panes around it.
 func (m *Model) toggleFiles() tea.Cmd {
+	if m.remoteFilesUnavailable() {
+		return nil
+	}
 	if m.filesOpen {
 		m.filesOpen, m.filesFocused = false, false
 		m.resizePanes()
