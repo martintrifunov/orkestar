@@ -37,10 +37,7 @@ func BenchmarkSustainedOutput(b *testing.B) {
 			session, chunks := benchmarkSession(subscribers)
 			b.ReportAllocs()
 			for i := 0; b.Loop(); i++ {
-				session.mu.Lock()
-				_, _ = session.screen.Write(chunks[i%len(chunks)])
-				session.publish()
-				session.mu.Unlock()
+				_ = session.renderOutput(chunks[i%len(chunks)])
 			}
 		})
 	}

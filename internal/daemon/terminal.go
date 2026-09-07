@@ -68,7 +68,7 @@ func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSessio
 	}
 	s := &terminalSession{metadata: metadata, process: process, screen: terminal.NewScreen(metadata.Columns, metadata.Rows), subscribers: make(map[*terminalSubscriber]struct{}), done: make(chan struct{}), inputDone: make(chan struct{})}
 	if process != nil {
-		go func() {
+		go guard("terminal.input-forward", func() {
 			defer close(s.inputDone)
 			b := make([]byte, 4096)
 			for {
@@ -83,7 +83,7 @@ func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSessio
 					return
 				}
 			}
-		}()
+		})
 		go s.captureOutput()
 	} else {
 		_ = s.screen.Close()
@@ -250,16 +250,28 @@ func (s *terminalSession) captureOutput() {
 	for {
 		n, err := s.process.Read(b)
 		if n > 0 {
-			s.mu.Lock()
-			_, _ = s.screen.Write(b[:n])
-			s.publish()
-			s.mu.Unlock()
+			if crashErr := s.renderOutput(b[:n]); crashErr != nil {
+				s.finish(crashErr)
+				return
+			}
 		}
 		if err != nil {
 			s.finish(s.process.WaitError())
 			return
 		}
 	}
+}
+
+// renderOutput feeds a chunk of PTY output to the screen and publishes the
+// result, recovering from a panic in the terminal emulator so a bug in one
+// pane's rendering crashes that pane instead of the whole daemon.
+func (s *terminalSession) renderOutput(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return recoverPanic(fmt.Sprintf("terminal %s render", s.metadata.ID), func() {
+		_, _ = s.screen.Write(data)
+		s.publish()
+	})
 }
 func (s *terminalSession) finish(err error) {
 	s.mu.Lock()
@@ -350,7 +362,7 @@ func (s *Server) handleTerminalAttach(conn net.Conn, scanner *bufio.Scanner, enc
 	}
 	readerDone := make(chan struct{})
 	commands := make(chan json.RawMessage)
-	go func() {
+	go guard("terminal.attach-reader", func() {
 		defer close(readerDone)
 		for scanner.Scan() {
 			b := append(json.RawMessage(nil), scanner.Bytes()...)
@@ -360,7 +372,7 @@ func (s *Server) handleTerminalAttach(conn net.Conn, scanner *bufio.Scanner, enc
 				return
 			}
 		}
-	}()
+	})
 	// Closing the connection releases a blocked scanner on every exit path.
 	defer func() {
 		_ = conn.Close()
