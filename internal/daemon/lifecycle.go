@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"time"
-
-	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
 // stopTimeout bounds how long a stop request waits for a process to finish
@@ -178,6 +176,8 @@ func (s *Server) resetState(rawParams json.RawMessage) (ResetSummary, error) {
 		return ResetSummary{}, fmt.Errorf("reset discards every session, agent and task; call it with confirm")
 	}
 
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	// Collect the live handles first, then close them without holding the
 	// lock, since closing a session can call back into the server.
 	s.mu.RLock()
@@ -231,9 +231,9 @@ func (s *Server) resetState(rawParams json.RawMessage) (ResetSummary, error) {
 	s.agents = map[string]*agentSession{}
 	s.hookTokens = map[string]string{}
 	s.permissions = map[string]PermissionRequest{}
-	s.tasks = workflow.NewBoard()
-	s.leases = workflow.NewLeaseManager()
-	s.artifacts = workflow.NewArtifactStore()
+	s.tasks.Clear()
+	s.leases.Clear()
+	s.artifacts.Clear()
 	s.mu.Unlock()
 
 	return summary, nil

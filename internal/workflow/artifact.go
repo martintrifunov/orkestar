@@ -138,3 +138,11 @@ func (s *ArtifactStore) ForTask(taskID string) []Artifact {
 	}
 	return forTask
 }
+
+func (s *ArtifactStore) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.artifacts = make(map[string]Artifact)
+	s.order = make(map[string]uint64)
+	s.next = 0
+}

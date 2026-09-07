@@ -50,6 +50,7 @@ type Server struct {
 	socketPath   string
 	store        store.Store
 	persistMu    sync.Mutex
+	mutationMu   sync.RWMutex
 	requests     sync.WaitGroup
 	connections  map[net.Conn]struct{}
 
@@ -216,6 +217,12 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		return ipc.NewErrorResponse(request.ID, "unsupported_version", fmt.Sprintf("protocol version %d is not supported", request.Version)), false
 	}
 
+	// Reset excludes mutations already in flight and new launches. Hooks and
+	// waits must remain free to complete while a mutation is running.
+	if !readOnlyMethod(request.Method) && request.Method != "system.reset" && request.Method != "agent.hook" && request.Method != "permission.resolve" {
+		s.mutationMu.RLock()
+		defer s.mutationMu.RUnlock()
+	}
 	var (
 		result   any
 		err      error

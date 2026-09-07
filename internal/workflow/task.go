@@ -455,3 +455,13 @@ func (b *Board) Watchers() int {
 	defer b.mu.Unlock()
 	return len(b.watchers)
 }
+
+// Clear removes tasks in place and wakes pending waits during a daemon reset.
+func (b *Board) Clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tasks = make(map[string]Task)
+	b.order = make(map[string]uint64)
+	b.next = 0
+	b.notify()
+}

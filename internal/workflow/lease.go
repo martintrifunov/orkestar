@@ -146,3 +146,9 @@ func (m *LeaseManager) pruneLocked(resource string, now time.Time) []Lease {
 	}
 	return active
 }
+
+func (m *LeaseManager) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.leases = make(map[string]map[string]Lease)
+}
