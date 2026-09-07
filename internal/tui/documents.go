@@ -393,7 +393,10 @@ func (m Model) promptView() string {
 	}
 	matches := m.matches()
 	var lines []string
-	for i, path := range matches {
+	visible := max(1, m.height-14)
+	top := max(0, m.fileAt-visible+1)
+	for i := top; i < min(len(matches), top+visible); i++ {
+		path := matches[i]
 		if i == m.fileAt {
 			path = selectedStyle.Render(path)
 		}
@@ -402,7 +405,7 @@ func (m Model) promptView() string {
 	if len(lines) == 0 {
 		lines = append(lines, "No matches. Enter creates the typed path.")
 	}
-	return "Open or create a text file\n\nWorkspace: " + m.fileRoot + "\n\nPath: " + m.fileName + "▏\n\n" + strings.Join(lines, "\n") + "\n\n↑/↓ select · Enter opens · Esc cancels"
+	return "Open or create a text file\n\nWorkspace: " + m.fileRoot + "\nDirectory: /" + m.fileDir + "\n\nPath: " + m.fileName + "▏\n\n" + strings.Join(lines, "\n") + "\n\n↑/↓ select · →/Enter opens · ← goes up · Esc cancels"
 
 }
 func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -481,21 +484,39 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyDown:
 		m.fileAt = min(max(0, len(m.matches())-1), m.fileAt+1)
 		return m, nil
+	case tea.KeyLeft:
+		m.pickerParent()
+		return m, nil
+	case tea.KeyRight:
+		if matches := m.matches(); len(matches) > 0 {
+			name := matches[min(m.fileAt, len(matches)-1)]
+			if strings.HasSuffix(name, "/") {
+				m.pickerEnter(name)
+			}
+		}
+		return m, nil
 	case tea.KeyEnter:
 		if matches := m.matches(); len(matches) > 0 {
 			m.fileName = matches[min(m.fileAt, len(matches)-1)]
 		}
+		if strings.HasSuffix(m.fileName, "/") {
+			m.pickerEnter(m.fileName)
+			return m, nil
+		}
 		m.filePrompt = false
 		if strings.TrimSpace(m.fileName) != "" {
-			return m, m.openDocument(m.fileRoot, m.fileName)
+			return m, m.openDocument(m.fileRoot, filepath.Join(m.fileDir, m.fileName))
 		}
 	case tea.KeyBackspace:
 		m.fileAt = 0
 		r := []rune(m.fileName)
 		if len(r) > 0 {
 			m.fileName = string(r[:len(r)-1])
+		} else {
+			m.pickerParent()
 		}
 	default:
+		m.fileAt = 0
 		if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
 			m.fileName += k.Text
 		} else if k.Mod == 0 && k.Code >= 32 && k.Code < 127 {
