@@ -89,6 +89,6 @@ func (s *Server) resumeAgent(ctx context.Context, raw json.RawMessage) (Agent, e
 	if old.NativeSessionID == "" {
 		return Agent{}, fmt.Errorf("agent %s has no native session ID to resume", old.ID)
 	}
-	params, _ := json.Marshal(map[string]string{"workspace_id": old.WorkspaceID, "adapter": old.Adapter, "mode": old.Mode, "resume_session_id": old.NativeSessionID})
+	params, _ := json.Marshal(map[string]string{"workspace_id": old.WorkspaceID, "adapter": old.Adapter, "mode": old.Mode, "resume_session_id": old.NativeSessionID, "task_id": old.TaskID})
 	return s.launchAgent(ctx, params)
 }
