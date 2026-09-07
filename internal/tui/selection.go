@@ -175,11 +175,15 @@ func (m Model) extendSelection(mouse tea.Mouse) bool {
 			p.selection.dragging = false
 			return false
 		}
-		_, x, y, ok := m.paneContentAt(mouse.X, mouse.Y)
-		if !ok {
-			return true
+		for _, rect := range m.paneRects() {
+			if rect.terminal != p {
+				continue
+			}
+			x := max(0, min(max(0, rect.width-5), mouse.X-rect.x-2))
+			y := max(0, min(max(0, rect.height-3), mouse.Y-rect.y-1))
+			return p.selection.extend(x, y)
 		}
-		return p.selection.extend(x, y)
+		return true
 	}
 	return false
 }
