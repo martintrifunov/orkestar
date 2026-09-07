@@ -33,7 +33,7 @@ func NewServer(client *ipc.Client) *sdk.Server {
 	// an agent reliably reads anything about a server. Tool descriptions cover
 	// a call each and never the shape of the work.
 	server := sdk.NewServer(
-		&sdk.Implementation{Name: "orkestar", Version: "v0.4.1"},
+		&sdk.Implementation{Name: "orkestar", Version: "v0.4.2"},
 		&sdk.ServerOptions{Instructions: instructions},
 	)
 

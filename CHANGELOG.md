@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.2
+
+A crash in one terminal pane's rendering used to take the whole daemon down
+with it, along with every task and session it owned. Panics are now caught
+per pane and per goroutine instead of one bug ending everything, and closing
+an agent session actually cancels whatever prompt it had in flight instead of
+leaving it running unsupervised.
+
+- Recover from a panic in a terminal pane's rendering, in agent lifecycle
+  watching, in opening-prompt delivery, and in the IPC accept and
+  per-connection loops, instead of one panic crashing the daemon and every
+  session and task it owned.
+- Cancel an in-flight OpenCode prompt when its session closes, and publish a
+  session's stopped event before its PTY channel closes, so nothing keeps
+  running unsupervised after a session ends.
+- Reset the task board in place instead of swapping it, so a caller blocked
+  in `task.wait` is woken instead of left listening to an object nobody will
+  ever mutate again.
+- Close a race that could create two workspaces for one directory.
+- Fail closed instead of silently approving a task when automatic review has
+  no reviewer configured, no workspace, or a diff too large to review. A task
+  with no worktree still has nothing to review, so it is approved outright.
+- Fix a wait timeout overflow that could let a very large requested duration
+  through uncapped.
+- Report a template's tasks and worktrees created so far instead of
+  discarding them when a later one fails, and give a template-launched agent
+  a default prompt when it declares none.
+- Keep a resumed agent tied to its task.
+- Parse `git status` by NUL so a renamed, copied, or oddly named file no
+  longer breaks automatic review, and include untracked files in the diff a
+  reviewer sees.
+- Make an IPC call retry-safe against a partial write, release its connection
+  on cancellation, and give the ssh transport real deadlines and a race-free
+  shutdown.
+- Show gitignored files and empty directories in the file viewer, and browse
+  into and out of directories in both file pickers instead of only searching
+  a flat list.
+- Turn off local file browsing, editing and review over a remote session,
+  which read and wrote the wrong machine over ssh.
+- Send pasted text to whichever prompt is focused, launch a task-picked agent
+  into the task's own workspace, and follow the configured next-pane key
+  instead of a hardcoded one.
+- Fix the editor's size limit to account for the selection being replaced,
+  and keep a mouse-drag selection extending past a pane's own content instead
+  of freezing at the edge.
+
 ## 0.4.1
 
 Fixes for eight things a review of 0.4.0 found, three of which meant a headline
