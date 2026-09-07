@@ -61,25 +61,11 @@ func Start(options StartOptions) (*Process, error) {
 		return nil, fmt.Errorf("start PTY: size exceeds 500 columns or 200 rows")
 	}
 
-	pseudoterminal, err := xpty.NewPty(options.Columns, options.Rows)
+	pseudoterminal, command, err := startWithRetry(options)
 	if err != nil {
-		return nil, fmt.Errorf("create PTY: %w", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	command := exec.Command(options.Command, options.Arguments...)
-	configureCommand(command)
-	command.Dir = options.Directory
-	if options.Env == nil {
-		command.Env = os.Environ()
-	} else {
-		command.Env = options.Env
-	}
-	if err := pseudoterminal.Start(command); err != nil {
-		cancel()
-		pseudoterminal.Close()
 		return nil, fmt.Errorf("start %q in PTY: %w", options.Command, err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 
 	ioFile, err := prepareIO(pseudoterminal)
 	if err != nil {
@@ -99,6 +85,47 @@ func Start(options StartOptions) (*Process, error) {
 	}
 	go process.wait(ctx)
 	return process, nil
+}
+
+// textFileBusyRetries bounds how many times startWithRetry retries a launch
+// that fails with ETXTBSY: something else briefly held the executable open
+// for writing right as it was about to run. Seen against a fixture written
+// and executed in the same instant; plausible in production too, against a
+// binary a package manager is mid-upgrade on.
+const textFileBusyRetries = 5
+
+const textFileBusyDelay = 20 * time.Millisecond
+
+// startWithRetry starts command in a fresh PTY, retrying with a new PTY and
+// command on ETXTBSY. A failed exec.Cmd cannot be reused for a second Start,
+// so each attempt gets its own.
+func startWithRetry(options StartOptions) (xpty.Pty, *exec.Cmd, error) {
+	var lastErr error
+	for attempt := 0; attempt < textFileBusyRetries; attempt++ {
+		pseudoterminal, err := xpty.NewPty(options.Columns, options.Rows)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create PTY: %w", err)
+		}
+		command := exec.Command(options.Command, options.Arguments...)
+		configureCommand(command)
+		command.Dir = options.Directory
+		if options.Env == nil {
+			command.Env = os.Environ()
+		} else {
+			command.Env = options.Env
+		}
+		if err := pseudoterminal.Start(command); err != nil {
+			pseudoterminal.Close()
+			lastErr = err
+			if !isTextFileBusy(err) {
+				return nil, nil, err
+			}
+			time.Sleep(textFileBusyDelay)
+			continue
+		}
+		return pseudoterminal, command, nil
+	}
+	return nil, nil, lastErr
 }
 
 func (p *Process) Read(data []byte) (int, error) {

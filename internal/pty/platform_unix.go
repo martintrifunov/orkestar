@@ -28,6 +28,12 @@ func interruptedExit(err error) bool {
 	return ok && status.Signaled() && status.Signal() == syscall.SIGINT
 }
 
+// isTextFileBusy reports whether err is ETXTBSY: the executable was open for
+// writing elsewhere at the exact moment this tried to run it.
+func isTextFileBusy(err error) bool {
+	return errors.Is(err, syscall.ETXTBSY)
+}
+
 func stopProcessGroup(process *os.Process, force bool) {
 	signal := syscall.SIGHUP
 	if force {

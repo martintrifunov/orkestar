@@ -21,6 +21,10 @@ import (
 // same fact the Unix build reads out of the signal.
 const controlCExit = 0xC000013A
 
+// isTextFileBusy reports whether err is ETXTBSY. CreateProcess has no
+// equivalent failure mode, so this never fires on Windows.
+func isTextFileBusy(err error) bool { return false }
+
 // interruptedExit reports whether err says the process ended on the Ctrl-C we
 // sent it, which is a stop rather than a crash.
 func interruptedExit(err error) bool {
