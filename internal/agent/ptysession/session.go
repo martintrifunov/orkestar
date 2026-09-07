@@ -121,18 +121,16 @@ func (s *Session) Events() <-chan agent.LifecycleEvent {
 // Close stops the daemon-owned process and releases lifecycle events.
 // Client detachment never calls this method.
 func (s *Session) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-	close(s.events)
-	_ = s.process.Close()
-	return nil
+	return s.process.Close()
 }
 
 func (s *Session) watchExit() {
+	defer func() {
+		s.mu.Lock()
+		s.closed = true
+		close(s.events)
+		s.mu.Unlock()
+	}()
 	waitErr := s.process.WaitError()
 	if waitErr != nil {
 		s.emit(agent.StateCrashed, waitErr.Error())

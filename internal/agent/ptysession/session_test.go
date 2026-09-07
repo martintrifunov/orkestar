@@ -276,3 +276,19 @@ func TestPromptEndsWithCarriageReturn(t *testing.T) {
 		t.Fatalf("the prompt did not end with a carriage return: %q", seen)
 	}
 }
+
+func TestClosePublishesStoppedBeforeClosingEvents(t *testing.T) {
+	session, err := ptysession.Launch("fixture", fixtureExecutable(t), agent.LaunchOptions{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	waitForState(t, session, agent.StateReady)
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForState(t, session, agent.StateStopped)
+	if session.State() != agent.StateStopped {
+		t.Fatal(session.State())
+	}
+}
