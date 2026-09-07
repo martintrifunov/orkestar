@@ -153,3 +153,19 @@ func TestRemoveWorktree(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffIncludesUntrackedNamesWithoutQuotingThemInStatus(t *testing.T) {
+	root := initRepo(t)
+	name := " new file é.txt"
+	if err := os.WriteFile(filepath.Join(root, name), []byte("untracked content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := git.ChangedFiles(t.Context(), root)
+	if err != nil || len(changed) != 1 || changed[0].Path != name {
+		t.Fatalf("%+v %v", changed, err)
+	}
+	diff, err := git.Diff(t.Context(), root)
+	if err != nil || !strings.Contains(diff, "+untracked content") {
+		t.Fatalf("%q %v", diff, err)
+	}
+}

@@ -7,8 +7,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/martintrifunov/orkestar/internal/files"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Worktree describes one entry from `git worktree list`.
@@ -63,12 +66,18 @@ func branchExists(ctx context.Context, repoDir, branch string) bool {
 }
 
 func runGit(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	command := exec.CommandContext(ctx, "git", args...)
-	var output bytes.Buffer
+	command.WaitDelay = time.Second
+	var output boundedOutput
 	command.Stdout = &output
 	command.Stderr = &output
 	err := command.Run()
-	return strings.TrimRight(output.String(), "\n"), err
+	if output.overflow {
+		return "", fmt.Errorf("git output exceeds 2 MiB")
+	}
+	return output.String(), err
 }
 
 // ChangedFile is one entry from `git status --porcelain`.
@@ -80,7 +89,7 @@ type ChangedFile struct {
 // ChangedFiles lists files with uncommitted changes (staged, unstaged, or
 // untracked) in repoDir.
 func ChangedFiles(ctx context.Context, repoDir string) ([]ChangedFile, error) {
-	output, err := runGit(ctx, "-C", repoDir, "status", "--porcelain")
+	output, err := runGit(ctx, "-C", repoDir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, fmt.Errorf("status %q: %w: %s", repoDir, err, output)
 	}
@@ -89,24 +98,78 @@ func ChangedFiles(ctx context.Context, repoDir string) ([]ChangedFile, error) {
 	}
 
 	var files []ChangedFile
-	for _, line := range strings.Split(output, "\n") {
+	parts := strings.Split(output, "\x00")
+	for i := 0; i < len(parts); i++ {
+		line := parts[i]
 		if len(line) < 4 {
 			continue
 		}
-		files = append(files, ChangedFile{Status: line[:2], Path: strings.TrimSpace(line[3:])})
+		files = append(files, ChangedFile{Status: line[:2], Path: line[3:]})
+		if strings.ContainsAny(line[:2], "RC") {
+			i++
+		}
 	}
 	return files, nil
 }
 
 // Diff returns the unified diff of uncommitted changes in repoDir,
-// covering both staged and unstaged changes against HEAD. It does not
-// include untracked files; use ChangedFiles to see those.
+// covering staged, unstaged and untracked text changes against HEAD. It does not
+// omit untracked text files; they are represented as additions.
 func Diff(ctx context.Context, repoDir string) (string, error) {
-	output, err := runGit(ctx, "-C", repoDir, "diff", "--no-color", "HEAD")
+	base := "HEAD"
+	if _, err := runGit(ctx, "-C", repoDir, "rev-parse", "--verify", "HEAD"); err != nil {
+		base = "--cached"
+	}
+	output, err := runGit(ctx, "-C", repoDir, "diff", "--no-ext-diff", "--no-textconv", "--no-color", base, "--")
 	if err != nil {
 		return "", fmt.Errorf("diff %q: %w: %s", repoDir, err, output)
 	}
-	return output, nil
+	changed, err := ChangedFiles(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
+	var diff boundedOutput
+	_, _ = diff.Write([]byte(output))
+	for _, file := range changed {
+		if file.Status != "??" {
+			continue
+		}
+		doc, err := files.Open(repoDir, file.Path)
+		if err != nil {
+			return "", fmt.Errorf("diff untracked file %q: %w", file.Path, err)
+		}
+		lines := strings.Split(strings.TrimSuffix(doc.Text, "\n"), "\n")
+		if doc.Text == "" {
+			lines = nil
+		}
+		fmt.Fprintf(&diff, "diff --git %s %s\nnew file mode 100644\n--- /dev/null\n+++ %s\n@@ -0,0 +1,%d @@\n", strconv.Quote("a/"+file.Path), strconv.Quote("b/"+file.Path), strconv.Quote("b/"+file.Path), len(lines))
+		for _, line := range lines {
+			fmt.Fprintf(&diff, "+%s\n", line)
+		}
+		if doc.Text != "" && !strings.HasSuffix(doc.Text, "\n") {
+			fmt.Fprintln(&diff, "\\ No newline at end of file")
+		}
+	}
+	if diff.overflow {
+		return "", fmt.Errorf("git diff exceeds 2 MiB")
+	}
+	return diff.String(), nil
+}
+
+type boundedOutput struct {
+	bytes.Buffer
+	overflow bool
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := 2*1024*1024 - b.Len()
+	if n > remaining {
+		b.overflow = true
+		p = p[:remaining]
+	}
+	_, _ = b.Buffer.Write(p)
+	return n, nil
 }
 
 func parseWorktreeList(output string) []Worktree {
