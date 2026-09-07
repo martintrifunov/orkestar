@@ -169,12 +169,15 @@ func (s *Server) applyTemplate(ctx context.Context, rawParams json.RawMessage) (
 		}
 		task, err := s.tasks.Create(params.WorkspaceID, declared.Title, declared.Description, dependsOn, declared.ReviewRequired())
 		if err != nil {
-			return AppliedTemplate{}, fmt.Errorf("create %q: %w", declared.Key, err)
+			applied.Failed = fmt.Sprintf("create %q: %v", declared.Key, err)
+			return applied, nil
 		}
 		if declared.Worktree {
 			withWorktree, err := s.createWorktreeFor(ctx, task, "")
 			if err != nil {
-				return AppliedTemplate{}, fmt.Errorf("worktree for %q: %w", declared.Key, err)
+				applied.Tasks = append(applied.Tasks, task)
+				applied.Failed = fmt.Sprintf("worktree for %q: %v", declared.Key, err)
+				return applied, nil
 			}
 			task = withWorktree
 		}
@@ -194,7 +197,14 @@ func (s *Server) applyTemplate(ctx context.Context, rawParams json.RawMessage) (
 			applied.Waiting = append(applied.Waiting, task.ID)
 			continue
 		}
-		launched, err := s.launchForTask(ctx, task, declared.Agent, declared.Prompt)
+		prompt := declared.Prompt
+		if prompt == "" {
+			prompt = "You have been assigned this task: " + task.Title
+			if task.Description != "" {
+				prompt += "\n\n" + task.Description
+			}
+		}
+		launched, err := s.launchForTask(ctx, task, declared.Agent, prompt)
 		if err != nil {
 			// Reported in the result, not as an error. The tasks and their
 			// worktrees are already real, and an error would discard the
