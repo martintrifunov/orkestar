@@ -8,6 +8,10 @@
 </pre>
 
 <p align="center">
+  <strong>Orkestar is unstable and under active development. Use at your own risk.</strong>
+</p>
+
+<p align="center">
   <strong>Run your coding agents from one terminal, and keep them running when you close it.</strong>
 </p>
 
