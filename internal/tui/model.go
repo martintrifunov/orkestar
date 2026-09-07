@@ -64,6 +64,7 @@ type Model struct {
 	settings                 editorSettings
 	filePrompt, settingsOpen bool
 	fileName, fileRoot       string
+	fileDir                  string
 
 	// taskPrompt collects a new task's title. taskBusy blocks a second
 	// mutation while one is in flight, because completing a task can run a
