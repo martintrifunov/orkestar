@@ -204,7 +204,7 @@ func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {
 		t.Fatalf("prompt: %v", err)
 	}
 	waitForState(t, session, agent.StateWorking)
-	waitForState(t, session, agent.StateReady)
+	waitForState(t, session, agent.StateWaitingInput)
 
 	fixture.mu.Lock()
 	prompts := append([]string(nil), fixture.prompts...)
@@ -216,7 +216,7 @@ func TestAdapterLaunchPromptAndInterrupt(t *testing.T) {
 	if err := session.Interrupt(ctx); err != nil {
 		t.Fatalf("interrupt: %v", err)
 	}
-	waitForState(t, session, agent.StateReady)
+	waitForState(t, session, agent.StateWaitingInput)
 
 	fixture.mu.Lock()
 	aborted := fixture.abortedID

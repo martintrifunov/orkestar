@@ -89,7 +89,9 @@ func (a *Adapter) Launch(ctx context.Context, options agent.LaunchOptions) (agen
 		return nil, fmt.Errorf("opencode adapter: resume %q: %w", sessionID, err)
 	}
 
+	lifetime, cancel := context.WithCancel(context.Background())
 	session := &Session{
+		lifetime: lifetime, cancel: cancel,
 		id:      sessionID,
 		adapter: a,
 		state:   agent.StateReady,
@@ -160,6 +162,8 @@ func (a *Adapter) abort(ctx context.Context, sessionID string) error {
 }
 
 func (a *Adapter) doJSON(ctx context.Context, method, path string, body, result any) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -202,10 +206,13 @@ type Session struct {
 	id      string
 	adapter *Adapter
 
-	mu     sync.Mutex
-	state  agent.State
-	closed bool
-	events chan agent.LifecycleEvent
+	mu       sync.Mutex
+	state    agent.State
+	closed   bool
+	active   bool
+	lifetime context.Context
+	cancel   context.CancelFunc
+	events   chan agent.LifecycleEvent
 }
 
 var (
@@ -232,13 +239,25 @@ func (s *Session) Prompt(ctx context.Context, text string) error {
 // PromptForResponse sends a message and returns OpenCode's reply text,
 // concatenating every text part of the response.
 func (s *Session) PromptForResponse(ctx context.Context, text string) (string, error) {
+	s.mu.Lock()
+	if s.closed || s.active {
+		s.mu.Unlock()
+		return "", fmt.Errorf("session is closed or already working")
+	}
+	s.active = true
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); s.active = false; s.mu.Unlock() }()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(s.lifetime, cancel)
+	defer stop()
 	s.emit(agent.StateWorking, "prompted")
 	reply, err := s.adapter.prompt(ctx, s.id, text)
 	if err != nil {
 		s.emit(agent.StateReady, "prompt failed")
 		return "", fmt.Errorf("opencode session: %w", err)
 	}
-	s.emit(agent.StateReady, "prompt completed")
+	s.emit(agent.StateWaitingInput, "prompt completed")
 	return reply, nil
 }
 
@@ -247,7 +266,7 @@ func (s *Session) Interrupt(ctx context.Context) error {
 	if err := s.adapter.abort(ctx, s.id); err != nil {
 		return fmt.Errorf("opencode session: %w", err)
 	}
-	s.emit(agent.StateReady, "interrupted")
+	s.emit(agent.StateWaitingInput, "interrupted")
 	return nil
 }
 
@@ -259,13 +278,28 @@ func (s *Session) Events() <-chan agent.LifecycleEvent {
 // session on the OpenCode server; the server owns that lifecycle.
 func (s *Session) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
 	s.closed = true
 	s.state = agent.StateStopped
+	event := agent.LifecycleEvent{State: agent.StateStopped, Reason: "session closed", Timestamp: time.Now().UTC()}
+	select {
+	case s.events <- event:
+	default:
+		<-s.events
+		s.events <- event
+	}
 	close(s.events)
+	active := s.active
+	s.cancel()
+	s.mu.Unlock()
+	if active {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return s.adapter.abort(ctx, s.id)
+	}
 	return nil
 }
 
@@ -276,7 +310,7 @@ func (s *Session) emit(state agent.State, reason string) {
 		return
 	}
 	s.state = state
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
 	event := agent.LifecycleEvent{State: state, Reason: reason, Timestamp: time.Now().UTC()}
 	select {
