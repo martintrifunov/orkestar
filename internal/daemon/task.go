@@ -103,8 +103,8 @@ func waitTimeout(seconds int) (time.Duration, error) {
 	if seconds == 0 {
 		return defaultWaitTimeout, nil
 	}
-	if requested := time.Duration(seconds) * time.Second; requested <= maxWaitTimeout {
-		return requested, nil
+	if seconds <= int(maxWaitTimeout/time.Second) {
+		return time.Duration(seconds) * time.Second, nil
 	}
 	return 0, fmt.Errorf("wait timeout cannot exceed %s", maxWaitTimeout)
 }
