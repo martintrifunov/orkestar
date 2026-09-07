@@ -138,6 +138,9 @@ func (m *Model) localPane(title, root string, screen paneScreen) *embeddedTermin
 	return p
 }
 func (m *Model) openReview() tea.Cmd {
+	if m.remoteFilesUnavailable() {
+		return nil
+	}
 	root := m.paneRoot()
 	for _, p := range m.visiblePanes() {
 		if p.review != nil && p.root == root {
@@ -155,6 +158,11 @@ func (m *Model) openReview() tea.Cmd {
 	return m.refreshReview(p, 0)
 }
 func (m Model) openDocument(root, name string) tea.Cmd {
+	if m.client.IsRemote() {
+		return func() tea.Msg {
+			return documentLoaded{err: fmt.Errorf("file editing is unavailable over SSH; use an editor in a remote shell pane")}
+		}
+	}
 	settings := m.settings
 	return func() tea.Msg {
 		d, err := files.Open(root, name)
@@ -522,4 +530,12 @@ func (m Model) updateRenamePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.renameTo += string(k.Code)
 	}
 	return m, nil
+}
+
+func (m *Model) remoteFilesUnavailable() bool {
+	if !m.client.IsRemote() {
+		return false
+	}
+	m.notice = "File browsing, editing and Git review are local-only. Use a remote shell pane."
+	return true
 }
