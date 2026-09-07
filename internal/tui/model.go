@@ -348,11 +348,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.mouseClick(message)
 	case tea.PasteMsg:
+		if m.menu != nil {
+			return m, nil
+		}
+		if m.taskPrompt {
+			*m.field() += strings.ReplaceAll(message.Content, "\r", "")
+			return m, nil
+		}
+		if m.renaming != nil {
+			m.renameTo += strings.NewReplacer("\n", "", "\r", "").Replace(message.Content)
+			return m, nil
+		}
 		if m.filePrompt {
 			m.fileName += strings.ReplaceAll(message.Content, "\n", "")
 			return m, nil
 		}
-		if m.settingsOpen {
+		if m.settingsOpen || m.filesFocused {
 			return m, nil
 		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
