@@ -294,15 +294,16 @@ leaves the others usable and never moves the selection.
 
 ### M14: Extension surface (a decision, not a commitment)
 
-herdr's plugin manifest and marketplace are a moat. The roadmap still says to
-defer extension points until there are users, and that has not changed; this
-is where the decision will be made once M8's control surface exists.
+A marketplace is out of scope in every form: no plugin index, no discovery, no
+install-from-a-repository flow, and no core investment in extension
+distribution. What remains is a single capped decision, and it can be no.
 
-- [ ] Decide deliberately whether to ship a minimal extension manifest
-      (actions, event hooks, panes, keybindings) and a registry, or to keep
-      extending the core instead.
+- [ ] Decide whether even a minimal extension manifest (actions, event hooks,
+      panes, keybindings) and a local registry is worth shipping, or whether
+      the core keeps growing instead. Absent a real extension wanting to exist,
+      the answer stays no.
 
-Deliberate non-goals, unchanged: a full plugin or theme marketplace, tabs as a
+Deliberate non-goals, unchanged: any plugin or theme marketplace, tabs as a
 separate concept, a graphics engine, and matching herdr on multiplexer surface
 for its own sake. Orkestar's bet stays the workflow layer and a runtime a
 person can walk away from.
