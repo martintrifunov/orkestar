@@ -161,6 +161,122 @@ All five shipped. What each cost was mostly honesty rather than code:
       list is not the same as seeing it.
 - [ ] Thin engine-native status panels if they prove useful
 
+## Competitive runtime parity — 2026-09-16
+
+A read of [herdr](https://github.com/herdrdev/herdr) 0.9.0, an agent-native
+multiplexer with far more reach. Orkestar already owns the parts that matter:
+a daemon that owns every PTY, detach and reattach without stopping work,
+attention states, agent-to-agent waits, and a workflow layer herdr has no
+equivalent of (tasks, dependencies, a review gate, artifacts, resource
+leases). This track is only the runtime and daily-use surface where herdr is
+ahead, excluding the MCP gateway and game engines. It is ordered by what
+removes the most reasons to choose herdr; the milestones are mostly
+independent, so the order can move.
+
+### M8: Agent-native control surface
+
+Orkestar's IPC is client-internal and its CLI controls terminals and tasks but
+not panes, and neither can read a pane's output or subscribe to pane events.
+herdr's entire CLI is the agent and plugin API. Without this an agent cannot
+drive Orkestar the way it drives herdr.
+
+- [ ] Pane and session control over IPC with CLI wrappers: split, move, swap,
+      zoom, focus, resize, rename, close, and send text or keys.
+- [ ] Read a pane's output: visible, recent, and unwrapped.
+- [ ] Event subscriptions for pane, agent and workspace lifecycle, and extend
+      the existing waits with pane-output and agent-state conditions.
+- [ ] Expose the same surface over MCP so one agent can read and drive another.
+- [ ] `agent explain`: why Orkestar believes an agent is in its current state.
+
+First slice: `terminal read <id> --lines N` and `pane split` over IPC and CLI.
+Acceptance: an agent using only the CLI or socket splits a pane, runs a
+command, reads its output, and waits for another agent to block.
+
+### M9: Session continuity across daemon restart
+
+herdr restores the screen shape after a server restart and can resume eligible
+agent conversations; Orkestar restores metadata, marks everything interrupted,
+and keeps PTY output memory-only.
+
+- [ ] Persist the split tree, focus and per-workspace directory, and rebuild
+      it on daemon start.
+- [ ] Optional scrollback persistence, with the secrets caveat stated.
+- [ ] Automatic native session restore for adapters that reported an ID, with
+      an explicit opt-out.
+
+Acceptance: restart the daemon; layout, labels and supported agent
+conversations return without typing a resume command.
+
+### M10: Declarative agents
+
+Orkestar needs a hand-written adapter per agent, which is why Cursor and Grok
+stalled. herdr ships roughly sixteen agents through detection manifests and
+per-agent resume commands, so a new CLI works without code.
+
+- [ ] An agent manifest: name, executable, resume command, lifecycle detection
+      rules, and supported modes.
+- [ ] Screen-detection fallback that infers working, blocked or idle from the
+      pane when no hook channel exists.
+- [ ] Manifest registry with reload and local overrides.
+- [ ] Move Cursor and Grok onto manifests with their documented resume flags
+      and verify against the installed CLIs.
+- [ ] Hooks stay authoritative when they exist; detection is the fallback.
+
+Acceptance: adding an agent is a config file plus a fixture test, and Cursor
+and Grok report attention and resume.
+
+### M11: Version-tolerant protocol and live handoff
+
+herdr negotiates client and server capabilities without matching builds, and
+can hand live PTYs to a replacement server so an update does not kill work.
+Orkestar refuses a version difference, and restarting it stops every process.
+
+- [ ] A capability handshake so any client and daemon within a protocol
+      generation interoperate; remove the hard refusal in `--remote`.
+- [ ] An opt-in handoff that transfers live PTYs to a replacement daemon where
+      the platform allows it.
+
+Acceptance: replace the daemon binary under load and every pane keeps running.
+
+### M12: Multi-machine federation
+
+herdr keeps local work and several saved SSH machines in one window with a
+combined agent list and independent reconnects; Orkestar has a single remote
+and no saved machines.
+
+- [ ] Saved machine profiles (id, label, ssh target, remote session) with add,
+      list, rename, enable, disable and remove.
+- [ ] Per-machine connections with independent reconnect and health checks.
+- [ ] A combined workspace and agent list with an attention rollup, and input
+      routed to the selected machine.
+- [ ] No local command, config or secret is copied to a remote.
+
+Depends on M11's negotiation. Acceptance: local plus two remotes; losing one
+leaves the others usable and never moves the selection.
+
+### M13: Pane layout and daily-use parity
+
+- [ ] Swap and move panes across groups; a portable layout export and apply.
+- [ ] Richer configuration: terminal window title, sidebar row layouts and
+      tokens, and themes.
+- [ ] Inline images (already listed under M7) once a pane can hold graphics,
+      since screenshots and diffs need them as much as engines do.
+
+### M14: Extension surface (a decision, not a commitment)
+
+herdr's plugin manifest and marketplace are a moat. The roadmap still says to
+defer extension points until there are users, and that has not changed; this
+is where the decision will be made once M8's control surface exists.
+
+- [ ] Decide deliberately whether to ship a minimal extension manifest
+      (actions, event hooks, panes, keybindings) and a registry, or to keep
+      extending the core instead.
+
+Deliberate non-goals, unchanged: a full plugin or theme marketplace, tabs as a
+separate concept, a graphics engine, and matching herdr on multiplexer surface
+for its own sake. Orkestar's bet stays the workflow layer and a runtime a
+person can walk away from.
+
 ## Later possibilities
 
 - Plugin distribution. Deliberately not before there are users: designing
