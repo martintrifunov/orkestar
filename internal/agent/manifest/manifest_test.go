@@ -43,7 +43,9 @@ func launchArguments(t *testing.T, descriptor manifest.Manifest, resume string) 
 	}
 	defer session.Close()
 
-	deadline := time.Now().Add(2 * time.Second)
+	// Generous: a loaded suite can take well over a second to fork and run
+	// the fixture, and a tight deadline makes this flaky rather than failing.
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		raw, err := os.ReadFile(argsFile)
 		if err == nil {
