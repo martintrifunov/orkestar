@@ -53,6 +53,12 @@ func (m *LeaseManager) Acquire(resource, holderID string, mode LeaseMode, durati
 	if mode != LeaseShared && mode != LeaseExclusive {
 		return Lease{}, fmt.Errorf("invalid lease mode %q", mode)
 	}
+	// A zero duration is a deliberate no-expiry lease. A negative one is not:
+	// it would leave ExpiresAt zero and read as no-expiry too, so reject it
+	// rather than silently granting a permanent exclusive claim.
+	if duration < 0 {
+		return Lease{}, fmt.Errorf("lease duration must not be negative")
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

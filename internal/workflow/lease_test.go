@@ -83,3 +83,27 @@ func TestReleaseUnknownLease(t *testing.T) {
 		t.Fatal("expected release of unknown lease to fail")
 	}
 }
+
+func TestNegativeLeaseDurationIsRejected(t *testing.T) {
+	t.Parallel()
+
+	manager := workflow.NewLeaseManager()
+	if _, err := manager.Acquire("scene", "agent_1", workflow.LeaseExclusive, -time.Minute); err == nil {
+		t.Fatal("expected a negative lease duration to be rejected")
+	}
+	if leases := manager.ListAll(); len(leases) != 0 {
+		t.Fatalf("expected no lease to be recorded, got %#v", leases)
+	}
+}
+
+func TestZeroLeaseDurationNeverExpires(t *testing.T) {
+	t.Parallel()
+
+	manager := workflow.NewLeaseManager()
+	if _, err := manager.Acquire("scene", "agent_1", workflow.LeaseExclusive, 0); err != nil {
+		t.Fatalf("acquire no-expiry lease: %v", err)
+	}
+	if leases := manager.List("scene"); len(leases) != 1 {
+		t.Fatalf("expected a zero-duration lease to remain, got %#v", leases)
+	}
+}

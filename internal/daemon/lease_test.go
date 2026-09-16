@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,5 +88,52 @@ func TestResourceLeaseAcquireAndRelease(t *testing.T) {
 		"duration_ms": 60000,
 	}, &conflict); err != nil {
 		t.Fatalf("acquire lease after release: %v", err)
+	}
+}
+
+func TestResourceLeaseRejectsInvalidDurations(t *testing.T) {
+	t.Parallel()
+
+	socketDirectory, err := os.MkdirTemp("/tmp", "orkestar-lease-test-")
+	if err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
+	socketPath := filepath.Join(socketDirectory, "orkestar.sock")
+
+	server := daemon.NewServer(socketPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-serverError; err != nil {
+			t.Errorf("server shutdown: %v", err)
+		}
+	})
+
+	client := ipc.NewClient(socketPath)
+	waitForServer(t, client)
+	callContext, callCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer callCancel()
+
+	for _, duration := range []int64{-1, math.MaxInt64} {
+		var lease workflow.Lease
+		if err := client.Call(callContext, "resource.acquire", map[string]any{
+			"resource":    "unreal-editor",
+			"holder_id":   "agent_1",
+			"mode":        string(workflow.LeaseExclusive),
+			"duration_ms": duration,
+		}, &lease); err == nil {
+			t.Fatalf("expected duration_ms %d to be rejected, got lease %#v", duration, lease)
+		}
+	}
+
+	var snapshot daemon.Snapshot
+	if err := client.Call(callContext, "system.snapshot", nil, &snapshot); err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if len(snapshot.Leases) != 0 {
+		t.Fatalf("expected no lease recorded, got %#v", snapshot.Leases)
 	}
 }
