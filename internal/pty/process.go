@@ -215,9 +215,22 @@ func (p *Process) recentlyInterrupted() bool {
 }
 
 func (p *Process) wait(ctx context.Context) {
-	err := xpty.WaitProcess(ctx, p.cmd)
-	finishPTY(p.pty)
-	p.waitMu.Lock()
+	var err error
+	// A panic in the platform wait must not leave done unclosed: every reader
+	// of WaitError blocks on it forever, and every interactive agent session
+	// depends on this path. Recover, record the failure, and always signal.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("wait for PTY process: %v", r)
+		}
+		finishPTY(p.pty)
+		p.waitMu.Lock()
+		p.waitErr = err
+		p.waitMu.Unlock()
+		close(p.done)
+	}()
+
+	err = xpty.WaitProcess(ctx, p.cmd)
 	// Close sets stopping, but an interrupt reaches the process first and can
 	// kill it before Close is ever called: on Linux the shell dies of SIGINT
 	// where macOS's survives it. Both are the process ending because it was
@@ -225,7 +238,4 @@ func (p *Process) wait(ctx context.Context) {
 	if p.stopping.Load() || (p.recentlyInterrupted() && interruptedExit(err)) {
 		err = nil
 	}
-	p.waitErr = err
-	p.waitMu.Unlock()
-	close(p.done)
 }

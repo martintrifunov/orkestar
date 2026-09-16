@@ -2,7 +2,9 @@ package pty
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +28,27 @@ func TestFinalOutputDrainsAfterExit(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("PTY EOF blocked after child exit")
+	}
+}
+
+// TestWaitRecoversFromAPanicAndStillSignalsDone pins the containment half of
+// the wait fix: a panic in the platform wait must still close done and record
+// an error, so every WaitError reader is released instead of blocking forever.
+// A zero Process reaches that path because xpty.WaitProcess dereferences cmd.
+func TestWaitRecoversFromAPanicAndStillSignalsDone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("finishPTY closes the platform PTY, which is absent in this fixture")
+	}
+	p := &Process{done: make(chan struct{})}
+	p.wait(context.Background())
+
+	select {
+	case <-p.Done():
+	default:
+		t.Fatal("done was not closed after a recovered panic")
+	}
+	if err := p.WaitError(); err == nil {
+		t.Fatal("expected a wait error after a recovered panic")
 	}
 }
 
