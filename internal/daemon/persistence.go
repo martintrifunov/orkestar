@@ -90,5 +90,16 @@ func (s *Server) resumeAgent(ctx context.Context, raw json.RawMessage) (Agent, e
 		return Agent{}, fmt.Errorf("agent %s has no native session ID to resume", old.ID)
 	}
 	params, _ := json.Marshal(map[string]string{"workspace_id": old.WorkspaceID, "adapter": old.Adapter, "mode": old.Mode, "resume_session_id": old.NativeSessionID, "task_id": old.TaskID})
-	return s.launchAgent(ctx, params)
+	resumed, err := s.launchAgent(ctx, params)
+	if err != nil {
+		return Agent{}, err
+	}
+	// The resume created a new agent and terminal. Forget the old ones only
+	// once the launch succeeded: a failed resume must leave the record intact
+	// so the user can try again, and a kept token or orphaned terminal would
+	// otherwise accumulate on every successful resume.
+	if orphan := s.forgetAgent(old.ID, old.TerminalID); orphan != nil {
+		_ = orphan.close()
+	}
+	return resumed, nil
 }

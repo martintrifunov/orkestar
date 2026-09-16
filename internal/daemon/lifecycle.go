@@ -129,21 +129,31 @@ func (s *Server) removeAgent(rawParams json.RawMessage) (map[string]string, erro
 	if !finishedState(metadata.State) {
 		return nil, fmt.Errorf("agent %q is %s; stop it first", params.AgentID, metadata.State)
 	}
-	s.mu.Lock()
-	delete(s.agents, params.AgentID)
-	delete(s.hookTokens, params.AgentID)
-	var orphan *terminalSession
-	if metadata.TerminalID != "" {
-		if session, ok := s.terminals[metadata.TerminalID]; ok {
-			orphan = session
-			delete(s.terminals, metadata.TerminalID)
-		}
-	}
-	s.mu.Unlock()
-	if orphan != nil {
+	if orphan := s.forgetAgent(params.AgentID, metadata.TerminalID); orphan != nil {
 		_ = orphan.close()
 	}
 	return map[string]string{"status": "removed"}, nil
+}
+
+// forgetAgent removes an agent's record, its hook token and the terminal
+// bridged to it, returning that terminal so the caller can close it outside
+// the lock. It leaves nothing pointing at a missing agent: a stale live token
+// could still receive hooks, and a stale terminal record is orphaned in the
+// sidebar.
+func (s *Server) forgetAgent(agentID, terminalID string) *terminalSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.agents, agentID)
+	delete(s.hookTokens, agentID)
+	if terminalID == "" {
+		return nil
+	}
+	session, ok := s.terminals[terminalID]
+	if !ok {
+		return nil
+	}
+	delete(s.terminals, terminalID)
+	return session
 }
 
 // ResetSummary reports what a reset cleared.

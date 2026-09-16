@@ -96,6 +96,61 @@ func TestMetadataRecoveryAndExplicitResume(t *testing.T) {
 	if resumed.ID == a.ID || resumed.NativeSessionID != a.NativeSessionID {
 		t.Fatalf("resume identity incorrect: %#v", resumed)
 	}
+	// Resuming replaces the old agent rather than leaving it behind: an
+	// interrupted record and its token would otherwise accumulate on every
+	// resume, and the sidebar would fill with phantoms.
+	callRecovery(t, client, "system.snapshot", nil, &state)
+	if len(state.Agents) != 1 || state.Agents[0].ID != resumed.ID {
+		t.Fatalf("old agent record survived resume: %#v", state.Agents)
+	}
+}
+
+func TestResumeForgetsTheOldAgentAndToken(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-resume-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "socket")
+	s, client, _ := serveRecoveryTest(t, path)
+
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": t.TempDir()}, &w)
+	var a Agent
+	callRecovery(t, client, "agent.launch", map[string]string{"workspace_id": w.ID, "adapter": "fixture"}, &a)
+
+	s.mu.RLock()
+	_, hadToken := s.hookTokens[a.ID]
+	s.mu.RUnlock()
+	if !hadToken {
+		t.Fatal("expected the launched agent to have a hook token")
+	}
+
+	// Close the session and let its watcher drain, then mark it finished, the
+	// same end state a stopped agent reaches, so resume is permitted.
+	entry, err := s.findAgent(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = entry.liveSession().Close()
+	s.agentWorkers.Wait()
+	entry.mu.Lock()
+	entry.metadata.State = string(agent.StateStopped)
+	entry.mu.Unlock()
+
+	var resumed Agent
+	callRecovery(t, client, "agent.resume", map[string]string{"agent_id": a.ID}, &resumed)
+
+	s.mu.RLock()
+	_, agentKept := s.agents[a.ID]
+	_, tokenKept := s.hookTokens[a.ID]
+	s.mu.RUnlock()
+	if agentKept {
+		t.Fatal("old agent record survived resume")
+	}
+	if tokenKept {
+		t.Fatal("old agent hook token survived resume")
+	}
 }
 func TestHookLifecycleAndPermissionDecision(t *testing.T) {
 	s := NewServer(filepath.Join(t.TempDir(), "socket"))
