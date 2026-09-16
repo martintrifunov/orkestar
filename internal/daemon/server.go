@@ -321,7 +321,7 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 func readOnlyMethod(method string) bool {
 	switch method {
 	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
-		"task.wait", "agent.wait", "template.list":
+		"task.wait", "agent.wait", "template.list", "permission.list":
 		return true
 	default:
 		return false
