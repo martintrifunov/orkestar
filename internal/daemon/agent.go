@@ -349,7 +349,11 @@ func (s *Server) launch(ctx context.Context, params launchParams) (Agent, error)
 	if processSession, ok := session.(agent.ProcessSession); ok {
 		terminalID, terr := newID("term")
 		if terr != nil {
+			// The adapter already launched, so the record and token registered
+			// above must go too, or a starting agent with no session and a live
+			// hook token is left behind and re-persisted.
 			_ = session.Close()
+			s.forgetAgent(id, "")
 			return Agent{}, terr
 		}
 		terminalMetadata := Terminal{
