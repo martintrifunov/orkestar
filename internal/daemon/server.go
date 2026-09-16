@@ -245,6 +245,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.terminalHistory(request.Params)
 	case "terminal.read":
 		result, err = s.terminalRead(request.Params)
+	case "terminal.send":
+		result, err = s.terminalSend(request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
 	case "terminal.stop":
@@ -304,7 +306,7 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 	if err != nil {
 		return ipc.NewErrorResponse(request.ID, "invalid_params", err.Error()), shutdown
 	}
-	if err == nil && !readOnlyMethod(request.Method) {
+	if err == nil && !readOnlyMethod(request.Method) && !volatileMethod(request.Method) {
 		err = s.persist()
 		if err != nil {
 			return ipc.NewErrorResponse(request.ID, "storage_error", err.Error()), shutdown
@@ -324,6 +326,20 @@ func readOnlyMethod(method string) bool {
 	switch method {
 	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
 		"terminal.read", "task.wait", "agent.wait", "template.list", "permission.list":
+		return true
+	default:
+		return false
+	}
+}
+
+// volatileMethod names methods that change only live process or screen state,
+// never the persisted snapshot. They are not read-only — terminal.send drives
+// a running process — but there is nothing durable to save, and rewriting the
+// snapshot for every keystroke would hold the persistence lock against real
+// lifecycle writes.
+func volatileMethod(method string) bool {
+	switch method {
+	case "terminal.send":
 		return true
 	default:
 		return false

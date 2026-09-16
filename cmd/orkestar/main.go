@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -172,7 +173,7 @@ func runRemoteTUI(host, directory string) error {
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | stop <terminal-id> | remove <terminal-id>")
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] <text> | stop <terminal-id> | remove <terminal-id>")
 	}
 
 	switch args[0] {
@@ -231,6 +232,32 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 			return err
 		}
 		fmt.Println(result.Text)
+		return nil
+	case "send":
+		if len(args) < 3 {
+			return errors.New("usage: orkestar terminal send <terminal-id> [--enter] <text>")
+		}
+		terminalID := args[1]
+		enter := false
+		var words []string
+		for _, argument := range args[2:] {
+			if argument == "--enter" {
+				enter = true
+				continue
+			}
+			words = append(words, argument)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var result map[string]string
+		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal.send", map[string]any{
+			"terminal_id": terminalID,
+			"text":        strings.Join(words, " "),
+			"enter":       enter,
+		}, &result); err != nil {
+			return err
+		}
+		fmt.Printf("%s sent\n", terminalID)
 		return nil
 	case "stop", "remove":
 		if len(args) != 2 {

@@ -328,6 +328,49 @@ func (s *terminalSession) finish(err error) {
 	}
 }
 
+// terminalSend injects input into a terminal that no client is driving. It
+// refuses when a controller is attached: a terminal has at most one input
+// source, so a script must not race a person typing. An agent that needs to
+// type into a TUI-owned terminal should attach and claim control instead.
+func (s *Server) terminalSend(raw json.RawMessage) (map[string]string, error) {
+	var p struct {
+		TerminalID string `json:"terminal_id"`
+		Text       string `json:"text"`
+		Enter      bool   `json:"enter"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("decode terminal send params: %w", err)
+	}
+	if p.Text == "" && !p.Enter {
+		return nil, errors.New("terminal send needs text or enter")
+	}
+	s.mu.RLock()
+	term := s.terminals[p.TerminalID]
+	s.mu.RUnlock()
+	if term == nil {
+		return nil, fmt.Errorf("unknown terminal")
+	}
+	term.mu.Lock()
+	defer term.mu.Unlock()
+	if term.renderBroken {
+		return nil, errors.New("terminal screen is no longer available")
+	}
+	if term.process == nil {
+		return nil, errors.New("terminal is no longer running")
+	}
+	if term.controller != nil {
+		return nil, errors.New("terminal has an attached controller; attach and claim it to send input")
+	}
+	text := p.Text
+	if p.Enter {
+		// Carriage return is what a terminal sends when Enter is pressed. A
+		// raw-mode reader treats a line feed as an ordinary character.
+		text += "\r"
+	}
+	term.screen.Input([]byte(text))
+	return map[string]string{"status": "sent"}, nil
+}
+
 func (s *Server) startTerminal(raw json.RawMessage) (Terminal, error) {
 	var p struct {
 		WorkspaceID string   `json:"workspace_id"`

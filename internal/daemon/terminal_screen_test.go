@@ -177,3 +177,59 @@ func TestTerminalReadReturnsBoundRecentOutput(t *testing.T) {
 		t.Fatalf("expected beta and gamma, got %q", read.Text)
 	}
 }
+
+// terminal.send drives a terminal no client is watching, and refuses once a
+// controller is attached so a script cannot race a person typing.
+func TestTerminalSendDrivesAnUnattendedTerminal(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-send-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	_, client, _ := serveRecoveryTest(t, filepath.Join(dir, "socket"))
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": dir}, &w)
+	var started Terminal
+	callRecovery(t, client, "terminal.start", map[string]any{
+		"workspace_id": w.ID,
+		"command":      []string{"/bin/sh", "-c", `while IFS= read -r line; do printf 'got:%s\n' "$line"; done`},
+	}, &started)
+
+	var sent map[string]string
+	callRecovery(t, client, "terminal.send", map[string]any{"terminal_id": started.ID, "text": "hello", "enter": true}, &sent)
+
+	var read struct {
+		Text string `json:"text"`
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		callRecovery(t, client, "terminal.read", map[string]string{"terminal_id": started.ID}, &read)
+		if strings.Contains(read.Text, "got:hello") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("terminal never received the sent line: %q", read.Text)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	attachContext, attachCancel := context.WithTimeout(context.Background(), time.Second)
+	defer attachCancel()
+	var attached struct {
+		Controller bool `json:"controller"`
+	}
+	stream, err := client.OpenStream(attachContext, "terminal.attach", map[string]any{"terminal_id": started.ID, "screen": true}, &attached)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	defer stream.Close()
+	if !attached.Controller {
+		t.Fatal("expected the attaching client to become the controller")
+	}
+
+	sendContext, sendCancel := context.WithTimeout(context.Background(), time.Second)
+	defer sendCancel()
+	if err := client.Call(sendContext, "terminal.send", map[string]any{"terminal_id": started.ID, "text": "nope", "enter": true}, &sent); err == nil {
+		t.Fatal("terminal.send should be refused while a controller is attached")
+	}
+}
