@@ -300,17 +300,25 @@ and no saved machines.
       `internal/machine` plus `orkestar machine ...`, stored in
       `~/.config/orkestar/machines.json` (override with
       `ORKESTAR_MACHINES_FILE`). No credentials are stored.
-- [ ] Per-machine connections with independent reconnect and health checks.
+- [x] Per-machine connections with independent reconnect and health checks.
+      Landed 2026-09-16 in `internal/federation`: one connection per enabled
+      machine, a per-machine backoff on failure, and `machine status`. A lost
+      machine goes offline without moving the others.
 - [ ] A combined workspace and agent list with an attention rollup, and input
-      routed to the selected machine.
+      routed to the selected machine. The merged board and attention rollup
+      exist (`federation.Manager.Board`, `machine board`) and routing is a
+      primitive (`ClientFor`, `machine call`), but the TUI is not yet wired to
+      several machines.
 - [ ] No local command, config or secret is copied to a remote.
 
 Depends on M11's negotiation. Acceptance: local plus two remotes; losing one
 leaves the others usable and never moves the selection.
 
-Progress 2026-09-16: the saved-machine catalog landed; per-machine
-connections, the combined board and health checks remain. ssh itself is still
-untested here (no sshd on this machine).
+Progress 2026-09-16: the saved-machine catalog, the federation manager
+(connections, health, backoff, merged board, routing) and `machine
+status|board|call` landed, tested against in-process daemons. A remote session
+can also be selected per machine. The TUI "one window" integration and ssh
+against a real host remain; there is no sshd on this machine to verify ssh.
 
 ### M13: Pane layout and daily-use parity
 

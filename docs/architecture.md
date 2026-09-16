@@ -21,10 +21,14 @@ exit must not affect managed processes.
 
 A client may reach a daemon on another machine over ssh (`--remote`). The
 saved machines it can reach live in a local catalog
-(`~/.config/orkestar/machines.json`): a host and an optional session, with no
-credential of its own, since ssh owns authentication. The catalog is the first
-step toward one window over several machines; per-machine connections and a
-combined board are not built yet.
+(`~/.config/orkestar/machines.json`): a host, an optional session and no
+credential of its own, since ssh owns authentication. `internal/federation`
+holds one connection per saved machine, tracks each connection's health with a
+per-machine backoff, merges their boards into a single view that names the
+source machine, and routes a call to the machine that owns an entity. The
+manager is a client-side layer: the daemon on each machine stays authoritative
+and unchanged, and the merged board prefixes nothing, so the machine ID, not a
+rewritten ID, is what a caller routes on.
 
 ## Core concepts
 
