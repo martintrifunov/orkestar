@@ -58,6 +58,11 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.embedded != nil {
 		title = m.paneTitle()
 	}
+	if len(m.machines) > 1 {
+		// With more than one machine it matters which one is on screen, so the
+		// header names it the way a switcher does.
+		title = "  " + m.currentMachine().Label + " ·" + title
+	}
 	if m.notice != "" {
 		title = "  " + m.notice
 	}

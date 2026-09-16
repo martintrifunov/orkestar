@@ -25,7 +25,9 @@ import (
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/daemonclient"
+	"github.com/martintrifunov/orkestar/internal/federation"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/machine"
 	orkestarmcp "github.com/martintrifunov/orkestar/internal/mcp"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
 	"github.com/martintrifunov/orkestar/internal/tui"
@@ -125,7 +127,49 @@ func runTUI(paths runtimepath.Paths) error {
 	if err != nil {
 		return fmt.Errorf("get current directory: %w", err)
 	}
-	return tui.Run(ipc.NewClient(paths.Socket), directory, filepath.Join(paths.Directory, "layout.json"))
+	machines, err := tuiMachines(paths)
+	if err != nil {
+		return err
+	}
+	return tui.Run(machines, directory)
+}
+
+// tuiMachines is the local daemon followed by the saved, enabled ssh machines.
+// Each machine gets its own client and its own layout file, so switching does
+// not lose the other machine's panes. A machine that will not dial is reported
+// and skipped; the rest still open.
+func tuiMachines(paths runtimepath.Paths) ([]tui.Machine, error) {
+	machines := []tui.Machine{{
+		ID:         "local",
+		Label:      "Local",
+		Client:     ipc.NewClient(paths.Socket),
+		LayoutPath: filepath.Join(paths.Directory, "layout.json"),
+	}}
+	catalogPath, err := runtimepath.MachineCatalogPath()
+	if err != nil {
+		return machines, err
+	}
+	catalog, err := machine.Load(catalogPath)
+	if err != nil {
+		return machines, err
+	}
+	for _, saved := range catalog.List() {
+		if !saved.Enabled {
+			continue
+		}
+		client, err := federation.RemoteDialer(context.Background(), saved)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "orkestar: machine %s: %v\n", saved.Label, err)
+			continue
+		}
+		machines = append(machines, tui.Machine{
+			ID:         saved.ID,
+			Label:      saved.Label,
+			Client:     client,
+			LayoutPath: filepath.Join(paths.Directory, "machines", saved.ID, "layout.json"),
+		})
+	}
+	return machines, nil
 }
 
 // runRemoteTUI attaches to a daemon on another machine. The interface runs
@@ -178,7 +222,7 @@ func runRemoteTUI(host, directory string) error {
 	// A remote session keeps its own layout: this client would attach to
 	// terminals on another machine, and a remembered layout from a local one
 	// would point at IDs that mean nothing there.
-	return tui.Run(client, directory, "")
+	return tui.Run([]tui.Machine{{ID: "remote", Label: remote.Host, Client: client}}, directory)
 }
 
 func runTerminal(paths runtimepath.Paths, args []string) error {

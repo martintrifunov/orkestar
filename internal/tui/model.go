@@ -54,6 +54,16 @@ const (
 	focusAgents
 )
 
+// Machine is one daemon the interface can attach to: the local daemon and any
+// saved ssh machines. The first is selected on start; each keeps its own layout
+// file so switching does not lose the other machine's panes.
+type Machine struct {
+	ID         string
+	Label      string
+	Client     *ipc.Client
+	LayoutPath string
+}
+
 type Model struct {
 	clipboardTarget          *textEditor
 	filePaths                []string
@@ -157,6 +167,11 @@ type Model struct {
 	// layoutRestored guards the one attempt to restore a saved layout, made
 	// once the first snapshot has said which terminals are alive.
 	layoutRestored bool
+	// machines are the daemons this interface can attach to, local first.
+	// Switching detaches the current panes and reconnects; each machine keeps
+	// its own layout file.
+	machines       []Machine
+	machineIndex   int
 	sidebarFocused bool
 	opening        bool
 	ctx            context.Context
@@ -178,6 +193,9 @@ func New(client *ipc.Client, directory string) Model {
 		client:    client,
 		directory: directory,
 		loading:   true,
+		// A single local machine until Run supplies the saved ones. The layout
+		// path stays empty here so tests that build a model do not touch disk.
+		machines: []Machine{{ID: "local", Label: "Local", Client: client}},
 		// Focused until the terminal says otherwise. A terminal that never
 		// reports focus would otherwise look permanently unfocused, and every
 		// notification would fire while the user was looking straight at it.
@@ -185,11 +203,19 @@ func New(client *ipc.Client, directory string) Model {
 	}
 }
 
-func Run(client *ipc.Client, directory, layoutPath string) error {
+// Run starts the interface over the given machines, the first selected. Each
+// machine has its own client and layout file, so switching detaches the current
+// panes and brings back the other machine's.
+func Run(machines []Machine, directory string) error {
+	if len(machines) == 0 {
+		return fmt.Errorf("run: at least one machine is required")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	model := New(client, directory)
-	model.layoutPath = layoutPath
+	model := New(machines[0].Client, directory)
+	model.machines = machines
+	model.machineIndex = 0
+	model.layoutPath = machines[0].LayoutPath
 	model.ctx = ctx
 	program := tea.NewProgram(model)
 	final, err := program.Run()
@@ -199,6 +225,45 @@ func Run(client *ipc.Client, directory, layoutPath string) error {
 		ending.persistLayout()
 	}
 	return err
+}
+
+// currentMachine is the machine the interface is attached to.
+func (m Model) currentMachine() Machine {
+	if len(m.machines) == 0 {
+		return Machine{Client: m.client}
+	}
+	if m.machineIndex < 0 || m.machineIndex >= len(m.machines) {
+		return m.machines[0]
+	}
+	return m.machines[m.machineIndex]
+}
+
+// switchMachine moves to the next or previous machine. The current panes are
+// detached (the daemon keeps the processes), the new machine's own layout is
+// restored on its first snapshot, and every pane opened afterwards attaches
+// through the new client, so input follows the selection.
+func (m *Model) switchMachine(delta int) tea.Cmd {
+	if len(m.machines) < 2 {
+		m.notice = "No other machines. Add one with `orkestar machine add`."
+		return nil
+	}
+	m.persistLayout()
+	m.closePanes()
+	m.layout = nil
+	m.embedded = nil
+	m.pendingSplit = nil
+	m.zoomed = false
+	m.snapshot = daemon.Snapshot{}
+	m.snapshotLoaded = false
+	m.loading = true
+	m.err = nil
+	m.machineIndex = (m.machineIndex + delta + len(m.machines)) % len(m.machines)
+	selected := m.machines[m.machineIndex]
+	m.client = selected.Client
+	m.layoutPath = selected.LayoutPath
+	m.layoutRestored = false
+	m.notice = "Machine: " + selected.Label
+	return m.loadSnapshot()
 }
 
 // prompting reports whether a modal prompt owns the keyboard and the content
@@ -526,7 +591,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.selected++
 				}
 			}
-		case m.keys.prefixAction(key) == ActionSplitRight || m.keys.prefixAction(key) == ActionSplitDown || m.keys.prefixAction(key) == ActionNextPane:
+		case m.keys.prefixAction(key) == ActionSplitRight || m.keys.prefixAction(key) == ActionSplitDown || m.keys.prefixAction(key) == ActionNextPane || m.keys.prefixAction(key) == ActionNextMachine:
 			cmd, _ := m.paneAction(message.String())
 			return m, cmd
 		case m.keys.is(key, ActionEditTask):
@@ -1154,6 +1219,8 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case ActionSwapPane:
 			m.swapWithNextPane()
 			return m, nil
+		case ActionNextMachine:
+			return m, m.switchMachine(1)
 		case ActionClaimPane:
 			m.claimPane()
 			return m, nil
