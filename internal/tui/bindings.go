@@ -49,6 +49,7 @@ const (
 	ActionSplitRight   Action = "split-right"
 	ActionSplitDown    Action = "split-down"
 	ActionNextPane     Action = "next-pane"
+	ActionSwapPane     Action = "swap-pane"
 	ActionZoom         Action = "zoom"
 	ActionClosePane    Action = "close-pane"
 	ActionScrollback   Action = "scrollback"
@@ -86,6 +87,7 @@ func defaultBindings() map[Action]string {
 		ActionSplitRight:   "v",
 		ActionSplitDown:    "s",
 		ActionNextPane:     "o",
+		ActionSwapPane:     "p",
 		ActionZoom:         "z",
 		ActionClosePane:    "q",
 		ActionScrollback:   "[",
@@ -141,6 +143,7 @@ var placements = map[Action]placement{
 
 	ActionSplitRight:  prefixed,
 	ActionSplitDown:   prefixed,
+	ActionSwapPane:    prefixed,
 	ActionZoom:        prefixed,
 	ActionClosePane:   prefixed,
 	ActionScrollback:  prefixed,
@@ -266,7 +269,7 @@ func (m Model) helpLine() string {
 		return "↑/↓ select · enter open · ←/→ collapse/expand · " + k(ActionRefresh) + " refresh · esc back"
 	case m.prefix:
 		return "Prefix: " + k(ActionSplitRight) + "/" + k(ActionSplitDown) + " split · " +
-			k(ActionNextPane) + " next · " + k(ActionZoom) + " zoom · arrows resize (repeat) · " +
+			k(ActionNextPane) + " next · " + k(ActionSwapPane) + " swap · " + k(ActionZoom) + " zoom · arrows resize (repeat) · " +
 			k(ActionDiff) + " diff · " + k(ActionEditFile) + " edit · " + k(ActionRenamePane) +
 			" rename · " + k(ActionFiles) + " files · esc done"
 	case len(m.paneRects()) < len(m.visiblePanes()):
@@ -289,9 +292,9 @@ func (m Model) helpLine() string {
 			" files  esc terminal  " + k(ActionQuit) + " quit"
 	case m.embedded != nil:
 		return "drag to copy · " + k(ActionPrefix) + " then: " + k(ActionSplitRight) + "/" +
-			k(ActionSplitDown) + " split · " + k(ActionNextPane) + " next · " + k(ActionZoom) +
-			" zoom · arrows resize · " + k(ActionDiff) + " diff · " + k(ActionEditFile) +
-			" edit · " + k(ActionClosePane) + " close"
+			k(ActionSplitDown) + " split · " + k(ActionNextPane) + " next · " + k(ActionSwapPane) +
+			" swap · " + k(ActionZoom) + " zoom · arrows resize · " + k(ActionDiff) + " diff · " +
+			k(ActionEditFile) + " edit · " + k(ActionClosePane) + " close"
 	}
 	return k(ActionNewAgent) + " agent  " + k(ActionNewShell) + " shell  " + k(ActionOpen) +
 		" open  " + k(ActionStopRemove) + " stop/remove  " + k(ActionFiles) + " files  " +

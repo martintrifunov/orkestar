@@ -139,6 +139,50 @@ func (m Model) findPane(id string) *embeddedTerminal {
 	}
 	return nil
 }
+
+// swapWithNextPane exchanges the focused pane with the next one in layout
+// order, keeping the split shape and ratios. The focused pane stays focused,
+// so the keys after a swap keep acting on the same work.
+func (m *Model) swapWithNextPane() {
+	panes := m.visiblePanes()
+	if len(panes) < 2 || m.embedded == nil {
+		m.notice = "Only one pane. Ctrl+b v/s splits it."
+		return
+	}
+	index := -1
+	for i, pane := range panes {
+		if pane == m.embedded {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return
+	}
+	next := panes[(index+1)%len(panes)]
+	if next == m.embedded {
+		return
+	}
+	if !swapLeaves(m.tree(), m.embedded, next) {
+		return
+	}
+	m.notice = ""
+	m.resizePanes()
+	m.persistLayout()
+}
+
+// swapLeaves exchanges which pane two leaves hold, keeping the split shape and
+// ratios. It reports whether both panes were found.
+func swapLeaves(tree *splitNode, a, b *embeddedTerminal) bool {
+	first, _ := tree.find(a, nil)
+	second, _ := tree.find(b, nil)
+	if first == nil || second == nil {
+		return false
+	}
+	first.pane, second.pane = second.pane, first.pane
+	return true
+}
+
 func (m *Model) nextPane() {
 	panes := m.visiblePanes()
 	for i, p := range panes {
@@ -198,6 +242,20 @@ func (m Model) paneLabel(p *embeddedTerminal) string {
 		return name + " · " + task.Title
 	}
 	return name
+}
+
+// windowTitle mirrors the focused pane into the outer terminal's title, so a
+// terminal tab or window list says which work is on screen, not just that
+// Orkestar is running.
+func (m Model) windowTitle() string {
+	if m.embedded == nil || m.sidebarFocused {
+		return "Orkestar"
+	}
+	label := m.paneLabel(m.embedded)
+	if label == "" {
+		return "Orkestar"
+	}
+	return "Orkestar · " + label
 }
 
 // withPaneTitle draws the name into the pane's top border, the way a tiling

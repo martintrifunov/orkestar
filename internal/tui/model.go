@@ -811,7 +811,7 @@ func (m Model) View() tea.View {
 	content := m.render()
 	view := tea.NewView(content)
 	view.AltScreen = true
-	view.WindowTitle = "Orkestar"
+	view.WindowTitle = m.windowTitle()
 	view.MouseMode = tea.MouseModeCellMotion
 	// Focus reporting is what lets a notification stay quiet while the user is
 	// already looking at the pane it would be about.
@@ -1150,6 +1150,9 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadHistory()
 		case ActionNextPane:
 			m.nextPane()
+			return m, nil
+		case ActionSwapPane:
+			m.swapWithNextPane()
 			return m, nil
 		case ActionClaimPane:
 			m.claimPane()

@@ -233,6 +233,9 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 			m.notice = ""
 		}
 		return nil, true
+	case ActionSwapPane:
+		m.swapWithNextPane()
+		return nil, true
 	case ActionSplitRight, ActionSplitDown:
 		// Every split opens a new daemon-owned shell beside or below
 		// the focused pane. The target is captured now so a focus change while
