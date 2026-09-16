@@ -105,6 +105,8 @@ func run(args []string) error {
 		return runTemplate(paths, args[1:])
 	case "mcp":
 		return runMCP(paths, args[1:])
+	case "machine":
+		return runMachine(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -567,6 +569,11 @@ Usage:
   orkestar daemon proxy
   orkestar status
   orkestar reset [--yes]
+  orkestar machine add <[user@]host> [--label NAME] [--remote-session NAME]
+  orkestar machine list [--json]
+  orkestar machine rename <machine-id> <label>
+  orkestar machine enable|disable <machine-id>
+  orkestar machine remove <machine-id>
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>

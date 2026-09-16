@@ -13,6 +13,9 @@ const runtimeDirectoryEnvironment = "ORKESTAR_RUNTIME_DIR"
 // manifests are read from, which is what tests and unusual installs need.
 const agentManifestDirectoryEnvironment = "ORKESTAR_AGENT_MANIFESTS_DIR"
 
+// machineCatalogEnvironment overrides the saved-machine catalog path.
+const machineCatalogEnvironment = "ORKESTAR_MACHINES_FILE"
+
 // AgentManifestDirectory is where declarative agent manifests live. It is
 // configuration rather than runtime state, so it sits under the user config
 // directory rather than beside the socket.
@@ -25,6 +28,19 @@ func AgentManifestDirectory() (string, error) {
 		return "", fmt.Errorf("find user config directory: %w", err)
 	}
 	return filepath.Join(configDirectory, "orkestar", "agents"), nil
+}
+
+// MachineCatalogPath is where saved SSH machines live, beside the agent
+// manifests. It is configuration, not runtime state.
+func MachineCatalogPath() (string, error) {
+	if path := os.Getenv(machineCatalogEnvironment); path != "" {
+		return path, nil
+	}
+	configDirectory, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("find user config directory: %w", err)
+	}
+	return filepath.Join(configDirectory, "orkestar", "machines.json"), nil
 }
 
 type Paths struct {
