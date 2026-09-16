@@ -19,6 +19,13 @@ The daemon is the authority for state and process ownership. Clients render
 state, submit commands, and attach to terminal streams. A client crash or clean
 exit must not affect managed processes.
 
+A client may reach a daemon on another machine over ssh (`--remote`). The
+saved machines it can reach live in a local catalog
+(`~/.config/orkestar/machines.json`): a host and an optional session, with no
+credential of its own, since ssh owns authentication. The catalog is the first
+step toward one window over several machines; per-machine connections and a
+combined board are not built yet.
+
 ## Core concepts
 
 ### Workspace

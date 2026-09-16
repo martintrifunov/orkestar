@@ -295,8 +295,11 @@ herdr keeps local work and several saved SSH machines in one window with a
 combined agent list and independent reconnects; Orkestar has a single remote
 and no saved machines.
 
-- [ ] Saved machine profiles (id, label, ssh target, remote session) with add,
-      list, rename, enable, disable and remove.
+- [x] Saved machine profiles (id, label, ssh target, remote session) with add,
+      list, rename, enable, disable and remove. Landed 2026-09-16 as
+      `internal/machine` plus `orkestar machine ...`, stored in
+      `~/.config/orkestar/machines.json` (override with
+      `ORKESTAR_MACHINES_FILE`). No credentials are stored.
 - [ ] Per-machine connections with independent reconnect and health checks.
 - [ ] A combined workspace and agent list with an attention rollup, and input
       routed to the selected machine.
@@ -304,6 +307,10 @@ and no saved machines.
 
 Depends on M11's negotiation. Acceptance: local plus two remotes; losing one
 leaves the others usable and never moves the selection.
+
+Progress 2026-09-16: the saved-machine catalog landed; per-machine
+connections, the combined board and health checks remain. ssh itself is still
+untested here (no sshd on this machine).
 
 ### M13: Pane layout and daily-use parity
 
