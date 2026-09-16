@@ -137,6 +137,21 @@ type ProcessSession interface {
 	Process() *pty.Process
 }
 
+// Detector is an optional extension of Adapter for adapters that can infer
+// lifecycle from the pane's visible text rather than from hooks. It is the
+// fallback for a CLI with no hook channel: ordered rules are matched against
+// the screen, first match wins. Hooks stay authoritative wherever an adapter
+// has them.
+type Detector interface {
+	Detections() []Detection
+}
+
+// Detection maps a substring of a pane's output to a lifecycle state.
+type Detection struct {
+	State    State
+	Contains string
+}
+
 // Adapter launches and describes a specific agent integration.
 type Adapter interface {
 	// Capabilities describes what this adapter supports.

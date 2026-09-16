@@ -67,7 +67,16 @@ type terminalSession struct {
 	// daemon restart, when opt-in pane history is enabled. A restored terminal
 	// has no process and no live screen, so this is all it can show.
 	restoredHistory []string
+	// detect, when set, infers an agent lifecycle state from the pane's text.
+	// It is how a manifest adapter without hooks reports working or blocked.
+	detect     func(text string)
+	lastDetect time.Time
 }
+
+// detectInterval bounds how often the screen is scanned for a detected state.
+// PTY output arrives in many small chunks, and scanning the whole screen for
+// each one would cost far more than the answer is worth.
+const detectInterval = 250 * time.Millisecond
 
 func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSession {
 	if metadata.Columns <= 0 {
@@ -316,12 +325,31 @@ func (s *terminalSession) captureOutput() {
 				s.finish(crashErr)
 				return
 			}
+			s.runDetection()
 		}
 		if err != nil {
 			s.finish(s.process.WaitError())
 			return
 		}
 	}
+}
+
+// runDetection lets a detector scan the pane after output. It does not hold
+// the session lock while the detector runs, since applying a detected state
+// takes the agent's lock.
+func (s *terminalSession) runDetection() {
+	if s.detect == nil {
+		return
+	}
+	s.mu.Lock()
+	if time.Since(s.lastDetect) < detectInterval {
+		s.mu.Unlock()
+		return
+	}
+	s.lastDetect = time.Now()
+	text := s.text(maxReadLines)
+	s.mu.Unlock()
+	s.detect(text)
 }
 
 // renderOutput feeds a chunk of PTY output to the screen and publishes the

@@ -27,6 +27,13 @@ type Resume struct {
 	Arguments []string `json:"arguments"`
 }
 
+// DetectionRule maps a substring of the pane's output to a lifecycle state,
+// for a CLI with no hook channel. Rules are tried in order.
+type DetectionRule struct {
+	State    string `json:"state" jsonschema:"one of working, waiting_input, waiting_permission, waiting_resource, ready"`
+	Contains string `json:"contains"`
+}
+
 // Manifest is a declarative agent adapter.
 type Manifest struct {
 	Name        string   `json:"name"`
@@ -35,9 +42,10 @@ type Manifest struct {
 	Description string   `json:"description,omitempty"`
 	// Prompt and Interrupt default to true; a pointer distinguishes an absent
 	// field from a deliberate false.
-	Prompt    *bool   `json:"prompt,omitempty"`
-	Interrupt *bool   `json:"interrupt,omitempty"`
-	Resume    *Resume `json:"resume,omitempty"`
+	Prompt    *bool           `json:"prompt,omitempty"`
+	Interrupt *bool           `json:"interrupt,omitempty"`
+	Resume    *Resume         `json:"resume,omitempty"`
+	Detection []DetectionRule `json:"detection,omitempty"`
 }
 
 // Validate reports whether the manifest can produce a usable adapter.
@@ -50,6 +58,17 @@ func (m Manifest) Validate() error {
 	}
 	if m.Resume != nil && len(m.Resume.Arguments) == 0 {
 		return errors.New("resume.arguments cannot be empty when resume is set")
+	}
+	for _, rule := range m.Detection {
+		if rule.Contains == "" {
+			return errors.New("a detection rule needs a contains string")
+		}
+		switch agent.State(rule.State) {
+		case agent.StateWorking, agent.StateWaitingInput, agent.StateWaitingPermission,
+			agent.StateWaitingResource, agent.StateReady:
+		default:
+			return fmt.Errorf("detection rule %q has state %q, which is not a reportable state", rule.Contains, rule.State)
+		}
 	}
 	return nil
 }
@@ -97,6 +116,16 @@ func New(m Manifest) (*Adapter, error) {
 }
 
 func (a *Adapter) Capabilities() agent.Capabilities { return a.manifest.Capabilities() }
+
+// Detections exposes the manifest's detection rules so the daemon can infer a
+// lifecycle state from the pane when the CLI reports none.
+func (a *Adapter) Detections() []agent.Detection {
+	detections := make([]agent.Detection, 0, len(a.manifest.Detection))
+	for _, rule := range a.manifest.Detection {
+		detections = append(detections, agent.Detection{State: agent.State(rule.State), Contains: rule.Contains})
+	}
+	return detections
+}
 
 func (a *Adapter) Launch(ctx context.Context, options agent.LaunchOptions) (agent.Session, error) {
 	if options.Mode != agent.ModeInteractive {

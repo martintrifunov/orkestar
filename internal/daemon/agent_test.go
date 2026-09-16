@@ -32,7 +32,12 @@ type controllableAdapter struct {
 	// middle of a sequence.
 	launches *atomic.Int64
 	failFrom *atomic.Int64
+	// detections, when set, makes the adapter an agent.Detector.
+	detections []agent.Detection
 }
+
+// Detections lets a test adapter infer lifecycle from pane text.
+func (a *controllableAdapter) Detections() []agent.Detection { return a.detections }
 
 // failAfter makes the adapter refuse every launch after the first n.
 func (a *controllableAdapter) failAfter(n int64) { a.failFrom.Store(n) }
@@ -66,6 +71,19 @@ func newPTYControllableAdapter(t *testing.T, name string) *controllableAdapter {
 }
 
 func (a *controllableAdapter) Capabilities() agent.Capabilities { return a.capabilities }
+
+// newDetectingPTYAdapter hands out PTY-backed sessions and reports detection
+// rules, so a test can check that pane text moves the agent's state.
+func newDetectingPTYAdapter(t *testing.T, name, script string, detections []agent.Detection) *controllableAdapter {
+	t.Helper()
+	adapter := newControllableAdapter(name)
+	adapter.detections = detections
+	adapter.executable = filepath.Join(t.TempDir(), "fixture")
+	if err := os.WriteFile(adapter.executable, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return adapter
+}
 
 func (a *controllableAdapter) Launch(ctx context.Context, options agent.LaunchOptions) (agent.Session, error) {
 	if limit := a.failFrom.Load(); limit > 0 && a.launches.Add(1) > limit {
@@ -365,5 +383,70 @@ func waitForAgentState(t *testing.T, stream *ipc.Stream, want string) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for agent state %q", want)
 		}
+	}
+}
+
+// A manifest adapter without hooks can infer lifecycle from its pane text.
+// Hooks stay authoritative; this is the fallback path.
+func TestDetectedStateUpdatesAnAgentWithoutHooks(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("/tmp", "orkestar-detect-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "socket")
+
+	server := daemon.NewServer(socket)
+	server.RegisterAdapter(newDetectingPTYAdapter(t, "detector",
+		"#!/bin/sh\nprintf 'DETECT-IDLE\\n'; while :; do sleep 1; done\n",
+		[]agent.Detection{{State: agent.StateWaitingInput, Contains: "DETECT-IDLE"}},
+	))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case e := <-done:
+			if e != nil {
+				t.Errorf("server shutdown: %v", e)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("server did not stop")
+		}
+	})
+
+	client := ipc.NewClient(socket)
+	waitForServer(t, client)
+	callContext, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer callCancel()
+
+	var workspace daemon.Workspace
+	if err := client.Call(callContext, "workspace.create", map[string]string{"directory": dir}, &workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	var launched daemon.Agent
+	if err := client.Call(callContext, "agent.launch", map[string]any{
+		"workspace_id": workspace.ID, "adapter": "detector", "mode": "interactive",
+	}, &launched); err != nil {
+		t.Fatalf("launch agent: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var snapshot daemon.Snapshot
+		if err := client.Call(callContext, "system.snapshot", nil, &snapshot); err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+		for _, launchedAgent := range snapshot.Agents {
+			if launchedAgent.ID == launched.ID && launchedAgent.State == string(agent.StateWaitingInput) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("agent never reached the detected state: %#v", snapshot.Agents)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -414,6 +415,14 @@ func (s *Server) launch(ctx context.Context, params launchParams) (Agent, error)
 	s.agents[id] = entry
 	s.mu.Unlock()
 
+	// A manifest adapter can infer lifecycle from the pane when it has no hook
+	// channel; hooks stay authoritative wherever they exist.
+	if detector, ok := adapter.(agent.Detector); ok && metadata.TerminalID != "" {
+		if rules := detector.Detections(); len(rules) > 0 {
+			s.attachDetection(id, entry, metadata.TerminalID, rules)
+		}
+	}
+
 	// Assigning here rather than making the caller do it in a second call
 	// means the board and the session can never disagree about who owns the
 	// task. A launch that raced a task removal is not worth failing over: the
@@ -476,6 +485,48 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 	}
 }
 
+// attachDetection wires a detector to the bridged terminal, so output can move
+// an agent between states when no hook reports them. A hook-sourced agent is
+// left alone even if one slips through, and a replaced or removed agent is
+// ignored.
+func (s *Server) attachDetection(id string, entry *agentSession, terminalID string, rules []agent.Detection) {
+	s.mu.RLock()
+	terminal := s.terminals[terminalID]
+	s.mu.RUnlock()
+	if terminal == nil {
+		return
+	}
+	terminal.detect = func(text string) {
+		state, ok := matchDetection(rules, text)
+		if !ok || state == agent.StateStopped || state == agent.StateCrashed {
+			return
+		}
+		metadata := entry.snapshot()
+		if metadata.SignalSource == "hooks" || metadata.State == string(state) {
+			return
+		}
+		s.mu.RLock()
+		current := s.agents[id] == entry
+		s.mu.RUnlock()
+		if !current {
+			return
+		}
+		entry.applyLifecycleEvent(agent.LifecycleEvent{State: state, Reason: "detected in the pane", Timestamp: time.Now().UTC()})
+		_ = s.persist()
+	}
+}
+
+// matchDetection returns the first rule whose text appears in the pane.
+func matchDetection(rules []agent.Detection, text string) (agent.State, bool) {
+	for _, rule := range rules {
+		if rule.Contains != "" && strings.Contains(text, rule.Contains) {
+			return rule.State, true
+		}
+	}
+	return "", false
+}
+
+// findAgent returns a live agent session by ID.
 func (s *Server) findAgent(agentID string) (*agentSession, error) {
 	s.mu.RLock()
 	entry, ok := s.agents[agentID]

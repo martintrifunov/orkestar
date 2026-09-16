@@ -142,6 +142,34 @@ func TestLoadRejectsTyposAndMissingFields(t *testing.T) {
 	}
 }
 
+func TestDetectionRulesParseAndValidate(t *testing.T) {
+	descriptor := manifest.Manifest{
+		Name: "fixture", Executable: "fixture",
+		Detection: []manifest.DetectionRule{
+			{State: "working", Contains: "esc to interrupt"},
+			{State: "waiting_input", Contains: "? for shortcuts"},
+		},
+	}
+	if err := descriptor.Validate(); err != nil {
+		t.Fatalf("valid detection rules were rejected: %v", err)
+	}
+	adapter, err := manifest.New(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detections := adapter.Detections()
+	if len(detections) != 2 || detections[0].State != agent.StateWorking || detections[1].Contains != "? for shortcuts" {
+		t.Fatalf("unexpected detections: %#v", detections)
+	}
+
+	if err := (manifest.Manifest{Name: "x", Executable: "x", Detection: []manifest.DetectionRule{{State: "bogus", Contains: "y"}}}).Validate(); err == nil {
+		t.Fatal("expected a bogus detection state to be rejected")
+	}
+	if err := (manifest.Manifest{Name: "x", Executable: "x", Detection: []manifest.DetectionRule{{State: "working"}}}).Validate(); err == nil {
+		t.Fatal("expected a detection rule without contains to be rejected")
+	}
+}
+
 func TestLoadDirSkipsInvalidFilesAndSorts(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
