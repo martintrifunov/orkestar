@@ -84,7 +84,7 @@ func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSessio
 				}
 			}
 		})
-		go s.captureOutput()
+		go guard("terminal.capture-output", s.captureOutput)
 	} else {
 		_ = s.screen.Close()
 		close(s.inputDone)
