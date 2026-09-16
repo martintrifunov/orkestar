@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/store"
@@ -102,4 +104,35 @@ func (s *Server) resumeAgent(ctx context.Context, raw json.RawMessage) (Agent, e
 		_ = orphan.close()
 	}
 	return resumed, nil
+}
+
+// autoResumeInterrupted relaunches the agent sessions that were running when
+// the daemon last stopped and that reported a native session ID. It runs once,
+// when the first client connects after a restart, so nothing is relaunched
+// unattended and reopening the interface brings the conversations back without
+// a command. A session whose adapter is gone, whose executable is missing, or
+// whose launch fails is left interrupted rather than forgotten.
+func (s *Server) autoResumeInterrupted() {
+	s.mu.RLock()
+	ids := make([]string, 0)
+	for id, entry := range s.agents {
+		metadata := entry.snapshot()
+		if metadata.State == "interrupted" && metadata.NativeSessionID != "" {
+			ids = append(ids, id)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		params, err := json.Marshal(map[string]string{"agent_id": id})
+		if err != nil {
+			continue
+		}
+		if _, err := s.resumeAgent(context.Background(), params); err != nil {
+			log.Printf("auto-resume agent %s: %v", id, err)
+			continue
+		}
+		log.Printf("auto-resumed agent %s", id)
+	}
 }

@@ -411,6 +411,7 @@ func serveDaemon(paths runtimepath.Paths) error {
 	defer cancel()
 	server := daemon.NewServer(paths.Socket)
 	server.SetVersion(version)
+	server.SetAutoResume(autoResumeEnabled())
 	server.RegisterAdapter(claude.New(""))
 	server.RegisterAdapter(codex.New(""))
 	server.RegisterAdapter(opencode.New("", "", nil))
@@ -448,6 +449,13 @@ func registerManifestAdapters(server *daemon.Server) {
 		}
 		server.RegisterAdapter(adapter)
 	}
+}
+
+// autoResumeEnabled reports whether the daemon may relaunch the agent sessions
+// that were running when it last stopped, once the first client connects.
+// Enabled by default; ORKESTAR_AUTO_RESUME=0 turns it off.
+func autoResumeEnabled() bool {
+	return os.Getenv("ORKESTAR_AUTO_RESUME") != "0"
 }
 
 func stopDaemon(paths runtimepath.Paths) error {

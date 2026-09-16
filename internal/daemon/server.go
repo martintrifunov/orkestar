@@ -53,6 +53,10 @@ type Server struct {
 	mutationMu   sync.RWMutex
 	requests     sync.WaitGroup
 	connections  map[net.Conn]struct{}
+	// autoResume relaunches agents that were running when the daemon last
+	// stopped, once the first client connects after a restart.
+	autoResume     bool
+	autoResumeOnce sync.Once
 
 	mu              sync.RWMutex
 	listener        net.Listener
@@ -71,6 +75,10 @@ type Server struct {
 
 // SetVersion sets the build identity advertised by ping. Call before Serve.
 func (s *Server) SetVersion(version string) { s.buildVersion = version }
+
+// SetAutoResume controls whether agents that were running when the daemon last
+// stopped are relaunched when the first client connects. Call before Serve.
+func (s *Server) SetAutoResume(enabled bool) { s.autoResume = enabled }
 
 func NewServer(socketPath string) *Server {
 	return &Server{
@@ -165,6 +173,14 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.mu.Lock()
 		s.connections[connection] = struct{}{}
 		s.mu.Unlock()
+		// The first client to arrive after a restart is what brings the
+		// interrupted agent conversations back. Nothing is relaunched while
+		// nobody is connected, and an opt-out leaves this a no-op.
+		s.autoResumeOnce.Do(func() {
+			if s.autoResume {
+				go guard("agent.auto-resume", s.autoResumeInterrupted)
+			}
+		})
 		s.requests.Add(1)
 		go func() {
 			defer s.requests.Done()
