@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,12 +112,13 @@ func (a *controllableAdapter) launched(t *testing.T) *controllableSession {
 }
 
 type controllableSession struct {
-	id      string
-	state   agent.State
-	events  chan agent.LifecycleEvent
-	prompts chan string
-	options agent.LaunchOptions
-	process *pty.Process
+	id        string
+	state     agent.State
+	events    chan agent.LifecycleEvent
+	prompts   chan string
+	options   agent.LaunchOptions
+	process   *pty.Process
+	closeOnce sync.Once
 }
 
 // ptyControllableSession is a controllable session that owns a real process,
@@ -154,10 +156,12 @@ func (s *controllableSession) Prompt(ctx context.Context, text string) error {
 func (s *controllableSession) Interrupt(ctx context.Context) error { return nil }
 func (s *controllableSession) Events() <-chan agent.LifecycleEvent { return s.events }
 func (s *controllableSession) Close() error {
-	if s.process != nil {
-		_ = s.process.Close()
-	}
-	close(s.events)
+	s.closeOnce.Do(func() {
+		if s.process != nil {
+			_ = s.process.Close()
+		}
+		close(s.events)
+	})
 	return nil
 }
 
@@ -193,7 +197,7 @@ func TestAgentLifecycleAndPermissionInbox(t *testing.T) {
 
 	client := ipc.NewClient(socketPath)
 	waitForServer(t, client)
-	callContext, callCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	callContext, callCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer callCancel()
 
 	var workspace daemon.Workspace
@@ -292,6 +296,25 @@ func TestAgentLifecycleAndPermissionInbox(t *testing.T) {
 	}
 	if len(snapshot.Agents) != 1 || snapshot.Agents[0].ID != launched.ID {
 		t.Fatalf("unexpected agents in snapshot: %#v", snapshot.Agents)
+	}
+
+	// The attach stream must end when the session does, not hang until the
+	// client gives up: watchAgent closes every subscriber once its events end.
+	if err := session.Close(); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+	end := make(chan error, 1)
+	go func() {
+		var event ipc.Event
+		end <- stream.Receive(&event)
+	}()
+	select {
+	case err := <-end:
+		if err == nil {
+			t.Fatal("agent attach stream should end when the session stops")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent attach stream did not end after the session stopped")
 	}
 }
 

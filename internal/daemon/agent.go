@@ -101,6 +101,19 @@ func (a *agentSession) subscribe() (Agent, chan agentEvent, func()) {
 	return a.metadata, events, unsubscribe
 }
 
+// closeSubscribers ends every live agent.attach stream. watchAgent calls it
+// once the session's own events channel closes, so a client waiting on the
+// subscription is released instead of hanging until it disconnects. The
+// membership check in unsubscribe keeps a later detach from closing twice.
+func (a *agentSession) closeSubscribers() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for events := range a.subscribers {
+		delete(a.subscribers, events)
+		close(events)
+	}
+}
+
 // attentionStates are lifecycle states that require attention before the
 // agent can make progress on its own.
 func isAttentionState(state agent.State) bool {
@@ -393,7 +406,14 @@ func (s *Server) launch(ctx context.Context, params launchParams) (Agent, error)
 }
 
 func (s *Server) watchAgent(id string, entry *agentSession) {
-	for event := range entry.liveSession().Events() {
+	// A subscriber to agent.attach is waiting on its own channel, not this
+	// one; releasing it when the session's events end is what ends the stream.
+	defer entry.closeSubscribers()
+	session := entry.liveSession()
+	if session == nil {
+		return
+	}
+	for event := range session.Events() {
 		metadata, permissionCleared := entry.applyLifecycleEvent(event)
 
 		s.mu.Lock()
@@ -580,6 +600,8 @@ func (s *Server) handleAgentAttach(connection agentConnection) {
 	for {
 		select {
 		case <-readerDone:
+			return
+		case <-s.stop:
 			return
 		case event, ok := <-events:
 			if !ok {
