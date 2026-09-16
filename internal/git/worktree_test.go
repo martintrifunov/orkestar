@@ -154,6 +154,26 @@ func TestRemoveWorktree(t *testing.T) {
 	}
 }
 
+func TestDiffNamesUntrackedBinaryFilesInsteadOfFailing(t *testing.T) {
+	root := initRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("untracked text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "blob.bin"), []byte{0x00, 0x01, 0x02, 0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := git.Diff(t.Context(), root)
+	if err != nil {
+		t.Fatalf("diff with an untracked binary file: %v", err)
+	}
+	if !strings.Contains(diff, "+untracked text") {
+		t.Fatalf("expected the untracked text file in the diff, got %q", diff)
+	}
+	if !strings.Contains(diff, "blob.bin") || !strings.Contains(diff, "Binary files") {
+		t.Fatalf("expected the untracked binary file to be named as binary, got %q", diff)
+	}
+}
+
 func TestDiffIncludesUntrackedNamesWithoutQuotingThemInStatus(t *testing.T) {
 	root := initRepo(t)
 	name := " new file é.txt"

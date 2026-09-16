@@ -136,7 +136,12 @@ func Diff(ctx context.Context, repoDir string) (string, error) {
 		}
 		doc, err := files.Open(repoDir, file.Path)
 		if err != nil {
-			return "", fmt.Errorf("diff untracked file %q: %w", file.Path, err)
+			// A binary, oversized or otherwise unreadable untracked file is
+			// named the way git names one rather than aborting the whole diff:
+			// one build artifact an agent left behind must not block review of
+			// everything else in the worktree.
+			fmt.Fprintf(&diff, "diff --git %s %s\nnew file mode 100644\nBinary files /dev/null and %s differ\n", strconv.Quote("a/"+file.Path), strconv.Quote("b/"+file.Path), strconv.Quote("b/"+file.Path))
+			continue
 		}
 		lines := strings.Split(strings.TrimSuffix(doc.Text, "\n"), "\n")
 		if doc.Text == "" {
