@@ -298,6 +298,19 @@ func TestAgentLifecycleAndPermissionInbox(t *testing.T) {
 		t.Fatalf("unexpected agents in snapshot: %#v", snapshot.Agents)
 	}
 
+	// agent.explain answers why the daemon believes the agent is in its
+	// current state, which is a different question from the state alone.
+	var explanation daemon.AgentExplanation
+	if err := client.Call(callContext, "agent.explain", map[string]string{"agent_id": launched.ID}, &explanation); err != nil {
+		t.Fatalf("explain agent: %v", err)
+	}
+	if explanation.Agent.ID != launched.ID || !explanation.Live || !explanation.Resumable {
+		t.Fatalf("unexpected explanation: %#v", explanation)
+	}
+	if len(explanation.Reasons) == 0 {
+		t.Fatal("agent.explain returned no reasons")
+	}
+
 	// The attach stream must end when the session does, not hang until the
 	// client gives up: watchAgent closes every subscriber once its events end.
 	if err := session.Close(); err != nil {

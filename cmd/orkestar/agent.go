@@ -46,7 +46,7 @@ func runHook() error {
 }
 func runAgent(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <claude-code|opencode|codex> | resume <agent-id> | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")
+		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <claude-code|opencode|codex> | resume <agent-id> | explain <agent-id> | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -99,6 +99,15 @@ func runAgent(paths runtimepath.Paths, args []string) error {
 			return err
 		}
 		result = a
+	case "explain":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: agent explain <agent-id>")
+		}
+		var explanation daemon.AgentExplanation
+		if err := client.Call(ctx, "agent.explain", map[string]string{"agent_id": args[1]}, &explanation); err != nil {
+			return err
+		}
+		result = explanation
 	default:
 		return fmt.Errorf("unknown agent command %q", args[0])
 	}

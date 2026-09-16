@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -459,6 +460,94 @@ func (s *Server) findAgent(agentID string) (*agentSession, error) {
 		return nil, fmt.Errorf("agent %q does not exist", agentID)
 	}
 	return entry, nil
+}
+
+// AgentExplanation is why the daemon believes an agent is in its current
+// state. It is the diagnostic counterpart to the lifecycle state itself, for
+// the question a surprising "blocked" or "crashed" raises and the metadata
+// alone does not answer.
+type AgentExplanation struct {
+	Agent       Agent               `json:"agent"`
+	Live        bool                `json:"live"`
+	Resumable   bool                `json:"resumable"`
+	Reasons     []string            `json:"reasons"`
+	Permissions []PermissionRequest `json:"permissions,omitempty"`
+}
+
+func (s *Server) explainAgent(raw json.RawMessage) (AgentExplanation, error) {
+	var p struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return AgentExplanation{}, fmt.Errorf("decode agent explain params: %w", err)
+	}
+	entry, err := s.findAgent(p.AgentID)
+	if err != nil {
+		return AgentExplanation{}, err
+	}
+	metadata := entry.snapshot()
+	live := entry.liveSession() != nil
+
+	s.mu.RLock()
+	permissions := make([]PermissionRequest, 0, 1)
+	for _, request := range s.permissions {
+		if request.AgentID == p.AgentID {
+			permissions = append(permissions, request)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Slice(permissions, func(left, right int) bool {
+		return permissions[left].CreatedAt.Before(permissions[right].CreatedAt)
+	})
+
+	reasons := make([]string, 0, 5)
+	switch {
+	case metadata.SignalSource == "hooks":
+		reasons = append(reasons, "lifecycle comes from the agent's own hooks")
+	case live:
+		reasons = append(reasons, "no hook signal: state comes from the process, so working and waiting states are not reported")
+	}
+	switch metadata.State {
+	case "interrupted":
+		reasons = append(reasons, "the daemon restarted; this session's process is gone")
+	case "stopped":
+		reasons = append(reasons, "the process exited")
+	case "crashed":
+		reasons = append(reasons, "the process exited with an error")
+	}
+	if !live && metadata.TerminalID != "" {
+		s.mu.RLock()
+		term := s.terminals[metadata.TerminalID]
+		s.mu.RUnlock()
+		if term != nil {
+			term.mu.Lock()
+			exitErr := term.metadata.ExitError
+			term.mu.Unlock()
+			if exitErr != "" {
+				reasons = append(reasons, "last terminal error: "+exitErr)
+			}
+		}
+	}
+	if len(permissions) > 0 {
+		reasons = append(reasons, fmt.Sprintf("waiting on %d permission request(s)", len(permissions)))
+	} else if metadata.AttentionReason != "" {
+		reasons = append(reasons, "attention: "+metadata.AttentionReason)
+	}
+	if metadata.TaskID != "" {
+		reasons = append(reasons, "working task "+metadata.TaskID)
+	}
+	if metadata.NativeSessionID == "" {
+		reasons = append(reasons, "no native session ID, so it cannot be resumed")
+	} else {
+		reasons = append(reasons, "resumable as native session "+metadata.NativeSessionID)
+	}
+	return AgentExplanation{
+		Agent:       metadata,
+		Live:        live,
+		Resumable:   metadata.NativeSessionID != "",
+		Reasons:     reasons,
+		Permissions: permissions,
+	}, nil
 }
 
 func (s *Server) promptAgent(ctx context.Context, rawParams json.RawMessage) (map[string]string, error) {

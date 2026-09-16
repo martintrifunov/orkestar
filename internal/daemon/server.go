@@ -261,6 +261,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.hookEvent(context.Background(), request.Params)
 	case "agent.resume":
 		result, err = s.resumeAgent(context.Background(), request.Params)
+	case "agent.explain":
+		result, err = s.explainAgent(request.Params)
 	case "agent.prompt":
 		result, err = s.promptAgent(context.Background(), request.Params)
 	case "agent.interrupt":
@@ -327,8 +329,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 func readOnlyMethod(method string) bool {
 	switch method {
 	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
-		"terminal.read", "terminal.wait", "task.wait", "agent.wait", "template.list",
-		"permission.list":
+		"terminal.read", "terminal.wait", "task.wait", "agent.wait", "agent.explain",
+		"template.list", "permission.list":
 		return true
 	default:
 		return false
