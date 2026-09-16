@@ -207,21 +207,31 @@ The POSIX PTY fixture suite still runs only on macOS/Linux.
 
 ## Cursor and Grok — unverified
 
-Both adapters launch their CLI in a pane and claim nothing else. Neither CLI
-was installed on the machine they were written on, so their flags and any hook
-contract are unchecked, and the capabilities say so: interactive, prompt and
-interrupt, with no managed mode and no resume.
+Both adapters run their CLI in a pane and claim only interactive, prompt and
+interrupt, with no managed mode and no resume. Neither CLI is installed here,
+so nothing beyond that is claimed.
 
-What that costs in practice is attention. Claude Code and Codex report working,
-waiting for input and waiting for a permission through hooks that were verified
-against them; a Cursor or Grok session reports only started, stopped or
-crashed, so it never raises attention in the sidebar and never rings the bell
-for a permission it is waiting on.
+Official documentation confirms the executable names and a resume flag for
+each: `cursor-agent` with `-r/--resume [chatId]`, and `grok` with
+`-r/--resume <id>` and `-c/--continue`. Both also have a hook mechanism —
+Cursor reads `.cursor/hooks.json` (project) and `~/.cursor/hooks.json` (user)
+and merges Claude-format `settings.json` hooks; Grok loads project lifecycle
+hook scripts and plugins. Neither documents an invocation-local way to supply
+hook configuration, the way Claude Code's `--settings` and Codex's
+`-c hooks.*` overrides let Orkestar wire lifecycle without editing agent
+settings. Cursor's is a project file and Grok's is a project plugin, both of
+which Orkestar deliberately does not write.
 
-Verifying either means installing the CLI and checking three things: whether
-the executable name is right, whether it has a resume flag, and whether it has
-a hook or plugin mechanism that can report lifecycle. Until then, treat them as
-"runs in a pane" rather than as supported the way the first three are.
+What that costs in practice is attention and resume. Claude Code and Codex
+report working, waiting for input and waiting for a permission through
+invocation-local hooks verified against them, and capture the native session
+ID those hooks carry; a Cursor or Grok session reports only started, stopped
+or crashed, so it never raises attention and `agent.resume` has no native ID
+to resume. Left to confirm with either CLI in front of you: that the
+documented resume flag behaves as documented, and whether an invocation-local
+hook channel exists (or whether writing a project hook file is acceptable).
+Until both are settled, treat them as "runs in a pane" rather than as
+supported the way the first three are.
 
 ## v0.1.0 release checks
 
