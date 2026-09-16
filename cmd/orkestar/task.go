@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -97,6 +102,8 @@ func runTask(paths runtimepath.Paths, args []string) error {
 		return taskWait(paths, args[1:])
 	case "diff":
 		return taskDiff(paths, args[1:])
+	case "watch":
+		return taskWatch(paths, args[1:])
 	default:
 		return errTaskUsage
 	}
@@ -111,7 +118,52 @@ var errTaskUsage = errors.New(`usage:
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
-  orkestar task diff <task-id>`)
+  orkestar task diff <task-id>
+  orkestar task watch`)
+
+// taskWatch streams the task board, printing the whole board on each change.
+// It is the subscription counterpart to `task wait`: a wait follows one task,
+// and this follows every task until interrupted.
+func taskWatch(paths runtimepath.Paths, args []string) error {
+	if len(args) != 0 {
+		return errTaskUsage
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	var initial struct {
+		Tasks []workflow.Task `json:"tasks"`
+	}
+	stream, err := ipc.NewClient(paths.Socket).OpenStream(ctx, "task.attach", nil, &initial)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	for _, task := range initial.Tasks {
+		printTask(task)
+	}
+	for {
+		var event ipc.Event
+		if err := stream.Receive(&event); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if event.Event != "task.updated" {
+			continue
+		}
+		var payload struct {
+			Tasks []workflow.Task `json:"tasks"`
+		}
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			return err
+		}
+		fmt.Println("--")
+		for _, task := range payload.Tasks {
+			printTask(task)
+		}
+	}
+}
 
 func taskCreate(paths runtimepath.Paths, args []string) error {
 	if len(args) < 2 {

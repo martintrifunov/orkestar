@@ -1,16 +1,76 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/git"
+	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
+
+// handleTaskAttach streams the task board to a client: the current board as
+// the attach reply, then a task.updated event whenever anything on it moves.
+// It is the subscription counterpart to task.wait: a waiter watches one task,
+// and this watches the whole board.
+func (s *Server) handleTaskAttach(connection net.Conn, scanner *bufio.Scanner, encoder *json.Encoder, request ipc.Request) {
+	if request.Version != ipc.Version {
+		_ = encoder.Encode(ipc.NewErrorResponse(request.ID, "unsupported_version", "unsupported protocol version"))
+		return
+	}
+	changes, stopWatching := s.tasks.Watch()
+	defer stopWatching()
+
+	response, err := ipc.NewResponse(request.ID, map[string]any{"tasks": s.tasks.List()})
+	if err != nil {
+		return
+	}
+	_ = connection.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if encoder.Encode(response) != nil {
+		return
+	}
+
+	readerDone := make(chan struct{})
+	go guard("task.attach-reader", func() {
+		defer close(readerDone)
+		for scanner.Scan() {
+			var command struct {
+				Version int    `json:"version"`
+				Command string `json:"command"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &command) != nil || command.Version != ipc.Version {
+				continue
+			}
+			if command.Command == "detach" {
+				return
+			}
+		}
+	})
+
+	for {
+		select {
+		case <-readerDone:
+			return
+		case <-changes:
+			b, err := json.Marshal(map[string]any{"tasks": s.tasks.List()})
+			if err != nil {
+				return
+			}
+			_ = connection.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			if encoder.Encode(ipc.Event{Version: ipc.Version, Event: "task.updated", Data: b}) != nil {
+				return
+			}
+		case <-s.stop:
+			return
+		}
+	}
+}
 
 func (s *Server) createTask(rawParams json.RawMessage) (workflow.Task, error) {
 	var params struct {

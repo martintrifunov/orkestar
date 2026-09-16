@@ -194,6 +194,10 @@ func (s *Server) handleConnection(connection net.Conn) {
 			s.handleAgentAttach(agentConnection{Scanner: scanner, Encoder: encoder, Request: request})
 			return
 		}
+		if request.Method == "task.attach" {
+			s.handleTaskAttach(connection, scanner, encoder, request)
+			return
+		}
 		response, shutdown := s.handleRequest(request)
 		encodeErr := encoder.Encode(response)
 		if shutdown {
