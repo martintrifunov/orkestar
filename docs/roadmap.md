@@ -196,6 +196,8 @@ terminal (`terminal.start`).
       for visible and recent output; unwrapped output remains.
 - [ ] Event subscriptions for terminal, agent and workspace lifecycle, and
       extend the existing waits with output and agent-state conditions.
+      `terminal.wait` on an output condition landed 2026-09-16 over IPC, CLI
+      and MCP; lifecycle event subscriptions remain.
 - [x] Expose the same surface over MCP so one agent can read and drive another.
       `terminal_start`, `terminal_list`, `terminal_read` and `terminal_send`
       landed 2026-09-16, and the connect instructions teach them.
