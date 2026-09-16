@@ -275,10 +275,13 @@ herdr negotiates client and server capabilities without matching builds, and
 can hand live PTYs to a replacement server so an update does not kill work.
 Orkestar refuses a version difference, and restarting it stops every process.
 
-- [ ] A capability handshake so any client and daemon within a protocol
-      generation interoperate; remove the hard refusal in `--remote`.
+- [x] A capability handshake so any client and daemon within a protocol
+      generation interoperate; remove the hard refusal in `--remote`. Landed
+      2026-09-16: `system.ping` advertises the protocol generation, and the
+      remote client refuses only a protocol difference, not a build one.
 - [ ] An opt-in handoff that transfers live PTYs to a replacement daemon where
-      the platform allows it.
+      the platform allows it. Deferred: it needs platform-level PTY transfer
+      and is untestable in this environment.
 
 Acceptance: replace the daemon binary under load and every pane keeps running.
 
