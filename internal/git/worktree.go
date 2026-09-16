@@ -35,8 +35,8 @@ func AddWorktree(ctx context.Context, repoDir, path, branch string) error {
 		args = append(args, path, branch)
 	}
 
-	if output, err := runGit(ctx, args...); err != nil {
-		return fmt.Errorf("add worktree at %q for branch %q: %w: %s", path, branch, err, output)
+	if _, err := runGit(ctx, args...); err != nil {
+		return fmt.Errorf("add worktree at %q for branch %q: %w", path, branch, err)
 	}
 	return nil
 }
@@ -45,8 +45,8 @@ func AddWorktree(ctx context.Context, repoDir, path, branch string) error {
 // It refuses to remove a worktree with uncommitted changes; the caller
 // must resolve or discard those first.
 func RemoveWorktree(ctx context.Context, repoDir, path string) error {
-	if output, err := runGit(ctx, "-C", repoDir, "worktree", "remove", path); err != nil {
-		return fmt.Errorf("remove worktree at %q: %w: %s", path, err, output)
+	if _, err := runGit(ctx, "-C", repoDir, "worktree", "remove", path); err != nil {
+		return fmt.Errorf("remove worktree at %q: %w", path, err)
 	}
 	return nil
 }
@@ -55,7 +55,7 @@ func RemoveWorktree(ctx context.Context, repoDir, path string) error {
 func ListWorktrees(ctx context.Context, repoDir string) ([]Worktree, error) {
 	output, err := runGit(ctx, "-C", repoDir, "worktree", "list", "--porcelain")
 	if err != nil {
-		return nil, fmt.Errorf("list worktrees in %q: %w: %s", repoDir, err, output)
+		return nil, fmt.Errorf("list worktrees in %q: %w", repoDir, err)
 	}
 	return parseWorktreeList(output), nil
 }
@@ -70,14 +70,24 @@ func runGit(ctx context.Context, args ...string) (string, error) {
 	defer cancel()
 	command := exec.CommandContext(ctx, "git", args...)
 	command.WaitDelay = time.Second
-	var output boundedOutput
-	command.Stdout = &output
-	command.Stderr = &output
+	// stdout is what callers parse, so it must stay clean: git warnings on an
+	// otherwise successful command arrive on stderr and would otherwise be
+	// read as path or worktree entries. stderr is folded into the error only,
+	// where it is diagnostics.
+	var stdout, stderr boundedOutput
+	command.Stdout = &stdout
+	command.Stderr = &stderr
 	err := command.Run()
-	if output.overflow {
+	if stdout.overflow {
 		return "", fmt.Errorf("git output exceeds 2 MiB")
 	}
-	return output.String(), err
+	if err != nil {
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return stdout.String(), fmt.Errorf("%w: %s", err, message)
+		}
+		return stdout.String(), err
+	}
+	return stdout.String(), nil
 }
 
 // ChangedFile is one entry from `git status --porcelain`.
@@ -91,7 +101,7 @@ type ChangedFile struct {
 func ChangedFiles(ctx context.Context, repoDir string) ([]ChangedFile, error) {
 	output, err := runGit(ctx, "-C", repoDir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
-		return nil, fmt.Errorf("status %q: %w: %s", repoDir, err, output)
+		return nil, fmt.Errorf("status %q: %w", repoDir, err)
 	}
 	if output == "" {
 		return nil, nil
@@ -122,7 +132,7 @@ func Diff(ctx context.Context, repoDir string) (string, error) {
 	}
 	output, err := runGit(ctx, "-C", repoDir, "diff", "--no-ext-diff", "--no-textconv", "--no-color", base, "--")
 	if err != nil {
-		return "", fmt.Errorf("diff %q: %w: %s", repoDir, err, output)
+		return "", fmt.Errorf("diff %q: %w", repoDir, err)
 	}
 	changed, err := ChangedFiles(ctx, repoDir)
 	if err != nil {
