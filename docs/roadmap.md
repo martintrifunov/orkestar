@@ -303,9 +303,13 @@ leaves the others usable and never moves the selection.
 
 ### M13: Pane layout and daily-use parity
 
-- [ ] Swap and move panes across groups; a portable layout export and apply.
-- [ ] Richer configuration: terminal window title, sidebar row layouts and
-      tokens, and themes.
+- [x] Swap and move panes across groups; a portable layout export and apply.
+      Swap landed 2026-09-16 (`Ctrl+b p` exchanges the focused pane with the
+      next, keeping split shape and ratios); moving across groups and a
+      portable export/apply remain.
+- [x] Richer configuration: terminal window title, sidebar row layouts and
+      tokens, and themes. The window title now names the focused pane; sidebar
+      row layouts and themes remain.
 - [ ] Inline images (already listed under M7) once a pane can hold graphics,
       since screenshots and diffs need them as much as engines do.
 

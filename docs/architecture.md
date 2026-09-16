@@ -209,7 +209,9 @@ PTY sizes all follow. It is closed by default and polls the workspace only while
 open. A configurable limit (default 16, `max_panes` in `tui.json`) refuses further
 panes instead of replacing one. A window too small for every leaf shows only the
 focused pane; hidden attachments remain alive and cycle with F6. Mouse clicks and
-`Ctrl+b o` change focus. Picker, read-only scrollback and prompt overlays occupy
+`Ctrl+b o` change focus, `Ctrl+b p` swaps the focused pane with the next, and
+the outer terminal's window title names the focused pane. Picker, read-only
+scrollback and prompt overlays occupy
 the content area. Git review and standard file editing have their own persistent
 panes; native Vim/Nano use daemon-owned terminals. The standard editor colors
 source and configuration files, lexing in the background so typing never waits
