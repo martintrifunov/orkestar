@@ -248,16 +248,20 @@ Orkestar needs a hand-written adapter per agent, which is why Cursor and Grok
 stalled. herdr ships roughly sixteen agents through detection manifests and
 per-agent resume commands, so a new CLI works without code.
 
-- [ ] An agent manifest: name, executable, resume command, lifecycle detection
+- [x] An agent manifest: name, executable, resume command, lifecycle detection
       rules, and supported modes.
-- [ ] Screen-detection fallback that infers working, blocked or idle from the
-      pane when no hook channel exists.
+- [x] Screen-detection fallback that infers working, blocked or idle from the
+      pane when no hook channel exists. Landed 2026-09-16: a manifest may
+      declare ordered detection rules, and the daemon applies them to the
+      bridged terminal when the adapter has no hooks. No built-in manifest
+      ships rules, so existing agents are unchanged.
 - [x] Manifest registry with reload and local overrides. Landed 2026-09-16:
       manifests load at startup and a manifest may take a built-in adapter's
       name; `agent.reloadAdapters` (CLI `agent reload`) rebuilds the whole set.
 - [ ] Move Cursor and Grok onto manifests with their documented resume flags
-      and verify against the installed CLIs.
-- [ ] Hooks stay authoritative when they exist; detection is the fallback.
+      and verify against the installed CLIs. Blocked: neither CLI is installed
+      here, so their resume and hooks cannot be verified.
+- [x] Hooks stay authoritative when they exist; detection is the fallback.
 
 Progress 2026-09-16: `internal/agent/manifest` and the registry landed. A
 manifest is name, executable, arguments and a resume template; the daemon
