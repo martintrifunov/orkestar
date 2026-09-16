@@ -91,6 +91,39 @@ disabled. Nothing in the suite needs the network or an installed agent CLI.
 The full test suite, vet and race checks passed on macOS arm64. A Linux amd64
 cross-build also succeeded; Linux runtime tests were not run in this session.
 
+## Control surface, continuity, agents and federation (0.5.0)
+
+Deterministic tests cover the 0.5.0 additions against real daemons and PTYs,
+but not against other machines or installed agent CLIs:
+
+- Control surface: `terminal.read` returns bounded recent output, `terminal.send`
+  drives an unattended terminal and is refused while a client holds the input
+  controller, and `terminal.wait` returns on a match or fails at its deadline.
+  `agent.explain` reports signal source, resumability and permissions, and
+  `task.attach` streams board changes. The same surface is exercised through the
+  MCP server, whose connect instructions are checked both ways against the tool
+  list.
+- Continuity: auto-resume relaunches an interrupted agent on the first client
+  connection and is disabled by `ORKESTAR_AUTO_RESUME=0`; opt-in pane history
+  survives a daemon restart and is absent when disabled; the TUI restores a
+  layout against live daemon terminals and drops a pane whose terminal is gone.
+- Declarative agents: a manifest launches and resumes with the documented
+  arguments (subcommand and flag forms), rejects unknown fields and bad
+  detection states, loads/reloads a directory, and a detector moves an agent's
+  state from pane text while a hook-sourced agent is left alone.
+- Federation: with in-process daemons standing in for machines, the manager
+  merges boards, routes by machine, backs off and reconnects, drops a lost
+  machine without moving the others, and forgets a disabled one. The TUI
+  switcher repoints the client and per-machine layout, and the sidebar renders
+  a merged agent list with a machine column.
+- Themes: palettes resolve with a fallback, a non-default palette renders
+  differently, and `tui.json` `"theme"` is read.
+
+Not covered: ssh against a real host (there is no sshd on the build machine, so
+the transport is verified only through the proxy-over-pipes path), installing
+the CLIs for Cursor and Grok, and live authenticated model turns. Those remain
+in the matrices below.
+
 ## Installed-agent smoke matrix
 
 Run `go build -o ./orkestar ./cmd/orkestar`, then

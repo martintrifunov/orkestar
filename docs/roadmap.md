@@ -333,10 +333,28 @@ against a real host cannot be verified on this machine (no sshd).
       next, keeping split shape and ratios); moving across groups and a
       portable export/apply remain.
 - [x] Richer configuration: terminal window title, sidebar row layouts and
-      tokens, and themes. The window title now names the focused pane; sidebar
-      row layouts and themes remain.
+      tokens, and themes. The window title names the focused pane, and a theme
+      is chosen in `tui.json` (`"theme"`) or cycled with `t` in settings
+      (palettes: `orkestar` dark default, `light`). Sidebar row layouts and
+      tokens remain.
 - [ ] Inline images (already listed under M7) once a pane can hold graphics,
       since screenshots and diffs need them as much as engines do.
+
+## v0.5.0 — 2026-09-16
+
+M8 through M13's verifiable items shipped together as **0.5.0**: the
+agent-native control surface (read/send/wait, `agent.explain`, `task.attach`,
+MCP tools), session continuity (auto-resume, layout and opt-in pane history),
+declarative agent manifests with detection, protocol negotiation, the
+multi-machine federation catalog/manager/CLI and a TUI machine switcher with a
+merged agent sidebar, pane swap, the window title and themes.
+
+Deliberately not in 0.5.0, with reasons: Cursor and Grok resume verification
+(no CLI installed), live handoff and inline images (large, and the terminal to
+verify against is not here), ssh against a real host (no sshd), a single merged
+sidebar that drives remote agents without switching, and M12's "no local
+command or secret copied to a remote" guarantee beyond the catalog holding no
+credentials.
 
 ### M14: Extension surface (a decision, not a commitment)
 

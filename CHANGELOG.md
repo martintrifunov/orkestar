@@ -1,9 +1,71 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
-A bug-fix pass after 0.4.2. Cursor and Grok research is recorded in
-`docs/validation.md`.
+An agent-native control surface, session continuity, declarative agents,
+multi-machine federation and a configurable theme, on top of a bug-fix pass.
+Cursor and Grok research is recorded in `docs/validation.md`.
+
+The control surface (M8):
+
+- `terminal.read`, `terminal.send` and `terminal.wait` over IPC, the CLI and
+  MCP, so a script or agent can read a pane, type into an unattended one, and
+  wait for output instead of polling. `terminal.send` refuses while a client
+  holds the terminal's input controller.
+- `agent.explain` (IPC, CLI, MCP): why Orkestar believes an agent is in its
+  current state — signal source, live process, resumability, pending
+  permissions.
+- `task.attach` streams the task board, and `orkestar task watch` prints it.
+
+Session continuity (M9):
+
+- When the first client connects after a daemon restart, every interrupted
+  agent that reported a native session ID is relaunched automatically;
+  `ORKESTAR_AUTO_RESUME=0` turns it off. Plain commands are still never
+  restarted.
+- The TUI remembers its pane layout in `<runtime>/layout.json` and restores it
+  against the terminals the daemon is still running; editor and review panes
+  are not persisted.
+- `ORKESTAR_PANE_HISTORY=1` persists each terminal's bounded recent text and
+  restores it into `terminal.read`. Off by default: pane output can hold
+  secrets.
+
+Declarative agents (M10):
+
+- `internal/agent/manifest` turns a JSON description (name, executable,
+  arguments, resume template, detection rules) into an adapter. The daemon
+  loads `<user config>/orkestar/agents/*.json` at startup, a manifest may take
+  a built-in adapter's name, and `agent.reloadAdapters` (CLI `agent reload`)
+  rebuilds the set without a restart.
+- A manifest can declare ordered detection rules, applied to the bridged
+  terminal when an adapter has no hooks; hooks stay authoritative.
+
+Protocol (M11):
+
+- `system.ping` advertises the protocol generation, and `--remote` refuses only
+  a protocol difference, not a build one. A saved machine can also select a
+  named session on the far side.
+
+Multi-machine federation (M12):
+
+- `internal/machine` plus `orkestar machine add|list|status|board|call|rename|
+  enable|disable|remove` store saved ssh machines in
+  `~/.config/orkestar/machines.json`, with no credentials.
+- `internal/federation` keeps one connection per machine, retries a lost one on
+  a backoff, merges their boards with an attention rollup, and routes a call to
+  the machine that owns an entity.
+- The TUI opens every saved machine, shows their agents in one sidebar with a
+  machine column and per-machine status, switches with `Ctrl+b g` (each machine
+  keeps its own layout), and routes input to the selected machine.
+
+Daily use (M13):
+
+- `Ctrl+b p` swaps the focused pane with the next, and the outer terminal's
+  window title names the focused pane.
+- A theme can be chosen in `tui.json` (`"theme": "light"`), cycled with `t` in
+  settings, and defaults to the original dark palette.
+
+Fixes:
 
 - Name an untracked binary or oversized file in a diff instead of failing the
   whole diff, which had permanently blocked the done transition on an
