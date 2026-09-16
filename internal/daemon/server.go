@@ -57,6 +57,9 @@ type Server struct {
 	// stopped, once the first client connects after a restart.
 	autoResume     bool
 	autoResumeOnce sync.Once
+	// paneHistory persists bounded terminal text across a restart. Off by
+	// default: terminal output can hold secrets, tokens and prompts.
+	paneHistory bool
 
 	mu              sync.RWMutex
 	listener        net.Listener
@@ -79,6 +82,11 @@ func (s *Server) SetVersion(version string) { s.buildVersion = version }
 // SetAutoResume controls whether agents that were running when the daemon last
 // stopped are relaunched when the first client connects. Call before Serve.
 func (s *Server) SetAutoResume(enabled bool) { s.autoResume = enabled }
+
+// SetPaneHistory controls whether bounded terminal text is persisted across a
+// daemon restart. Call before Serve. Off by default because pane output can
+// contain secrets.
+func (s *Server) SetPaneHistory(enabled bool) { s.paneHistory = enabled }
 
 func NewServer(socketPath string) *Server {
 	return &Server{
@@ -145,6 +153,9 @@ func (s *Server) Serve(ctx context.Context) error {
 			_ = conn.Close()
 		}
 		s.mu.Unlock()
+		// Read every live terminal's text before its process and screen are
+		// closed, so an opt-in restart has something to show.
+		s.savePaneHistory()
 		s.closeTerminals()
 		s.requests.Wait()
 		s.closeTerminals() // Include launches that were already in flight.

@@ -54,7 +54,9 @@ func (s *Server) stopTerminal(rawParams json.RawMessage) (Terminal, error) {
 	if !ok {
 		return Terminal{}, fmt.Errorf("terminal %q does not exist", params.TerminalID)
 	}
-	return session.stop(stopTimeout), nil
+	stopped := session.stop(stopTimeout)
+	s.savePaneHistory()
+	return stopped, nil
 }
 
 // removeTerminal forgets a finished session. A running one has to be stopped
@@ -80,6 +82,7 @@ func (s *Server) removeTerminal(rawParams json.RawMessage) (map[string]string, e
 	delete(s.terminals, params.TerminalID)
 	s.mu.Unlock()
 	_ = session.close()
+	s.savePaneHistory()
 	return map[string]string{"status": "removed"}, nil
 }
 

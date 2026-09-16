@@ -5,12 +5,84 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/store"
 )
+
+// paneHistoryFile holds the bounded text of terminals across a restart. It
+// sits beside the metadata database and is treated like terminal history:
+// output can hold secrets, so it is only written when opt-in pane history is
+// on.
+const paneHistoryFile = "pane-history.json"
+
+func (s *Server) paneHistoryPath() string {
+	return filepath.Join(filepath.Dir(s.socketPath), paneHistoryFile)
+}
+
+// loadPaneHistory seeds restored terminals with the text they had when the
+// daemon last stopped. Only terminals that are still known are given history.
+func (s *Server) loadPaneHistory() {
+	if !s.paneHistory {
+		return
+	}
+	encoded, err := os.ReadFile(s.paneHistoryPath())
+	if err != nil {
+		return
+	}
+	var saved map[string][]string
+	if json.Unmarshal(encoded, &saved) != nil {
+		return
+	}
+	s.mu.Lock()
+	for id, lines := range saved {
+		if session, ok := s.terminals[id]; ok {
+			session.mu.Lock()
+			session.restoredHistory = lines
+			session.mu.Unlock()
+		}
+	}
+	s.mu.Unlock()
+}
+
+// savePaneHistory writes every terminal's bounded text. A running terminal has
+// its live screen; a restored one keeps what it came back with, so a second
+// restart does not lose it.
+func (s *Server) savePaneHistory() {
+	if !s.paneHistory {
+		return
+	}
+	s.mu.RLock()
+	saved := make(map[string][]string, len(s.terminals))
+	for id, session := range s.terminals {
+		session.mu.Lock()
+		// The whole bounded text, not just the scrollback: a short session's
+		// output may still be on the visible screen.
+		text := session.text(maxReadLines)
+		session.mu.Unlock()
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		saved[id] = strings.Split(text, "\n")
+	}
+	s.mu.RUnlock()
+
+	path := s.paneHistoryPath()
+	if len(saved) == 0 {
+		_ = os.Remove(path)
+		return
+	}
+	encoded, err := json.Marshal(saved)
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	_ = os.WriteFile(path, encoded, 0o600)
+}
 
 func (s *Server) openStore() error {
 	db, err := store.Open(filepath.Join(filepath.Dir(s.socketPath), "metadata.db"))
@@ -50,6 +122,7 @@ func (s *Server) openStore() error {
 	}
 	s.tasks.Restore(saved.Tasks)
 	s.artifacts.Restore(saved.Artifacts)
+	s.loadPaneHistory()
 	return nil
 }
 func (s *Server) persist() error {

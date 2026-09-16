@@ -415,6 +415,7 @@ func serveDaemon(paths runtimepath.Paths) error {
 	server := daemon.NewServer(paths.Socket)
 	server.SetVersion(version)
 	server.SetAutoResume(autoResumeEnabled())
+	server.SetPaneHistory(paneHistoryEnabled())
 	server.RegisterAdapter(claude.New(""))
 	server.RegisterAdapter(codex.New(""))
 	server.RegisterAdapter(opencode.New("", "", nil))
@@ -459,6 +460,12 @@ func registerManifestAdapters(server *daemon.Server) {
 // Enabled by default; ORKESTAR_AUTO_RESUME=0 turns it off.
 func autoResumeEnabled() bool {
 	return os.Getenv("ORKESTAR_AUTO_RESUME") != "0"
+}
+
+// paneHistoryEnabled reports whether terminal text should survive a daemon
+// restart. Off by default: pane output can contain secrets.
+func paneHistoryEnabled() bool {
+	return os.Getenv("ORKESTAR_PANE_HISTORY") == "1"
 }
 
 func stopDaemon(paths runtimepath.Paths) error {

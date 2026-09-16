@@ -63,6 +63,10 @@ type terminalSession struct {
 	// buffer is then in an unknown state, so every later screen read is
 	// skipped rather than risking another panic on corrupt data.
 	renderBroken bool
+	// restoredHistory is the bounded text a terminal came back with after a
+	// daemon restart, when opt-in pane history is enabled. A restored terminal
+	// has no process and no live screen, so this is all it can show.
+	restoredHistory []string
 }
 
 func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSession {
@@ -108,6 +112,11 @@ func (s *terminalSession) frame() terminal.Frame {
 	if s.renderedAt == s.revision && s.renderedAt != 0 {
 		return s.rendered
 	}
+	if s.process == nil {
+		f := terminal.Frame{Columns: s.metadata.Columns, Rows: s.metadata.Rows, Revision: s.revision}
+		s.rendered, s.renderedAt = f, s.revision
+		return f
+	}
 	f := terminal.Frame{Columns: s.metadata.Columns, Rows: s.metadata.Rows}
 	if !s.renderBroken {
 		if err := recoverPanic(fmt.Sprintf("terminal %s frame", s.metadata.ID), func() {
@@ -125,6 +134,9 @@ func (s *terminalSession) frame() terminal.Frame {
 // history returns the scrollback, or nil once a recovered render panic has
 // made the emulator unsafe to read. Callers must hold s.mu.
 func (s *terminalSession) history() []string {
+	if s.process == nil {
+		return s.restoredHistory
+	}
 	if s.renderBroken {
 		return nil
 	}
