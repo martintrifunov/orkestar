@@ -338,18 +338,16 @@ func (s *terminalSession) captureOutput() {
 // the session lock while the detector runs, since applying a detected state
 // takes the agent's lock.
 func (s *terminalSession) runDetection() {
-	if s.detect == nil {
-		return
-	}
 	s.mu.Lock()
-	if time.Since(s.lastDetect) < detectInterval {
+	detect := s.detect
+	if detect == nil || time.Since(s.lastDetect) < detectInterval {
 		s.mu.Unlock()
 		return
 	}
 	s.lastDetect = time.Now()
 	text := s.text(maxReadLines)
 	s.mu.Unlock()
-	s.detect(text)
+	detect(text)
 }
 
 // renderOutput feeds a chunk of PTY output to the screen and publishes the

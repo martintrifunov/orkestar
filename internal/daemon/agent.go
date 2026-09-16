@@ -496,6 +496,7 @@ func (s *Server) attachDetection(id string, entry *agentSession, terminalID stri
 	if terminal == nil {
 		return
 	}
+	terminal.mu.Lock()
 	terminal.detect = func(text string) {
 		state, ok := matchDetection(rules, text)
 		if !ok || state == agent.StateStopped || state == agent.StateCrashed {
@@ -514,6 +515,7 @@ func (s *Server) attachDetection(id string, entry *agentSession, terminalID stri
 		entry.applyLifecycleEvent(agent.LifecycleEvent{State: state, Reason: "detected in the pane", Timestamp: time.Now().UTC()})
 		_ = s.persist()
 	}
+	terminal.mu.Unlock()
 }
 
 // matchDetection returns the first rule whose text appears in the pane.
