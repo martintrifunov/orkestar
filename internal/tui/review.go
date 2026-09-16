@@ -21,7 +21,18 @@ type reviewPane struct {
 	selected, top, columns, rows int
 	diff                         string
 	err                          error
+	// theme is the palette this pane was opened with.
+	theme theme
 }
+
+// palette is the pane's theme, or the default when it was built without one.
+func (r *reviewPane) palette() theme {
+	if r.theme.name == "" {
+		return themes["orkestar"]
+	}
+	return r.theme
+}
+
 type reviewLoaded struct {
 	pane   *embeddedTerminal
 	review *reviewPane
@@ -44,8 +55,8 @@ func gitOutput(root string, args ...string) (string, error) {
 	}
 	return string(b), nil
 }
-func loadReview(root string, selected int) *reviewPane {
-	r := &reviewPane{root: root, columns: 60, rows: 20}
+func loadReview(root string, selected int, th theme) *reviewPane {
+	r := &reviewPane{root: root, columns: 60, rows: 20, theme: th}
 	raw, err := gitOutput(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		r.err = err
@@ -95,9 +106,10 @@ func (r *reviewPane) loadFile() {
 	r.diff, r.err = gitOutput(r.root, "diff", "--no-ext-diff", "--no-textconv", "--no-color", base, "--", f.path)
 }
 func (r *reviewPane) Render() string {
-	out := []string{dimStyle.Render("[ / ] file · e edit · r refresh · wheel scroll")}
+	palette := r.palette()
+	out := []string{palette.dim.Render("[ / ] file · e edit · r refresh · wheel scroll")}
 	if r.err != nil {
-		return strings.Join(append(out, errorStyle.Render(r.err.Error())), "\n")
+		return strings.Join(append(out, palette.error.Render(r.err.Error())), "\n")
 	}
 	if len(r.files) == 0 {
 		return strings.Join(append(out, "No uncommitted changes against HEAD."), "\n")
@@ -106,11 +118,11 @@ func (r *reviewPane) Render() string {
 	for i := start; i < min(len(r.files), start+3); i++ {
 		line := r.files[i].status + " " + r.files[i].path
 		if i == r.selected {
-			line = selectedStyle.Render(line)
+			line = palette.selected.Render(line)
 		}
 		out = append(out, line)
 	}
-	out = append(out, dimStyle.Render(fmt.Sprintf("File %d/%d · staged + unstaged vs HEAD", r.selected+1, len(r.files))))
+	out = append(out, palette.dim.Render(fmt.Sprintf("File %d/%d · staged + unstaged vs HEAD", r.selected+1, len(r.files))))
 	lines := strings.Split(r.diff, "\n")
 	old, newLine := 0, 0
 	var rendered []string
@@ -161,7 +173,7 @@ func (r *reviewPane) Paste(string)             {}
 func (r *reviewPane) Navigation(rune, int)     {}
 func (r *reviewPane) Close() error             { return nil }
 func (m Model) refreshReview(p *embeddedTerminal, selection int) tea.Cmd {
-	return func() tea.Msg { return reviewLoaded{p, loadReview(p.root, selection)} }
+	return func() tea.Msg { return reviewLoaded{p, loadReview(p.root, selection, m.theme)} }
 }
 
 type reviewOutput struct {

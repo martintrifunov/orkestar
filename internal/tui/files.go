@@ -10,14 +10,11 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // filesRefresh is how often the open viewer re-reads the workspace. It only
 // runs while the viewer is open, so a collapsed viewer costs nothing.
 const filesRefresh = 2 * time.Second
-
-var directoryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#78A9E8"))
 
 // fileNode is one entry of the workspace tree. Paths are relative to the
 // viewer's root and always use forward slashes, so they are stable map keys
@@ -325,20 +322,20 @@ func (m Model) renderFiles() string {
 	if width == 0 {
 		return ""
 	}
-	heading := accentStyle.Render("Files")
+	heading := m.theme.accent.Render("Files")
 	if m.filesLoading && m.filesTree == nil {
-		heading += dimStyle.Render(" reading…")
+		heading += m.theme.dim.Render(" reading…")
 	}
 	out := []string{heading}
 	switch {
 	case m.filesErr != nil:
-		out = append(out, errorStyle.Render(m.filesErr.Error()))
+		out = append(out, m.theme.error.Render(m.filesErr.Error()))
 	case m.filesTree == nil:
-		out = append(out, dimStyle.Render("Reading the workspace…"))
+		out = append(out, m.theme.dim.Render("Reading the workspace…"))
 	default:
 		rows := m.fileRows()
 		if len(rows) == 0 {
-			out = append(out, dimStyle.Render("No files."))
+			out = append(out, m.theme.dim.Render("No files."))
 		}
 		cursor := m.fileCursorIndex(rows)
 		visible := m.filesViewRows()
@@ -355,16 +352,16 @@ func (m Model) renderFiles() string {
 			line := strings.Repeat("  ", row.depth) + marker + row.node.name
 			switch {
 			case i == cursor && m.filesFocused:
-				line = selectedStyle.Render(line)
+				line = m.theme.selected.Render(line)
 			case row.node.dir:
-				line = directoryStyle.Render(line)
+				line = m.theme.directory.Render(line)
 			}
 			out = append(out, line)
 		}
 	}
-	style := panelStyle
+	style := m.theme.panel
 	if m.filesFocused {
-		style = style.BorderForeground(lipgloss.Color("#D7A84B"))
+		style = style.BorderForeground(m.theme.accentColor)
 	}
 	return style.Width(width).Height(height).Render(fitPane(strings.Join(out, "\n"), width-4, height-2))
 }

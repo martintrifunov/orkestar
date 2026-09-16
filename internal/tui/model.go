@@ -9,19 +9,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/workflow"
-)
-
-var (
-	accentStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#D7A84B")).Bold(true)
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#111111")).Background(lipgloss.Color("#D7A84B")).Bold(true)
-	panelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#5F5F5F")).Padding(0, 1)
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B"))
 )
 
 type snapshotMsg struct {
@@ -145,6 +136,9 @@ type Model struct {
 	// keys resolves a keystroke to an action. Dispatch switches on the action
 	// so a rebinding changes one map rather than every switch.
 	keys bindings
+	// theme is the resolved palette, from tui.json ("theme"), defaulting to
+	// the original dark one.
+	theme theme
 
 	// focused tracks whether the terminal has focus, so a notification is only
 	// posted to someone who is not already looking at the thing it is about.
@@ -196,6 +190,7 @@ func New(client *ipc.Client, directory string) Model {
 		client:    client,
 		directory: directory,
 		loading:   true,
+		theme:     resolveTheme(settings.Theme),
 		// A single local machine until Run supplies the saved ones. The layout
 		// path stays empty here so tests that build a model do not touch disk.
 		machines: []Machine{{ID: "local", Label: "Local", Client: client}},
@@ -306,7 +301,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.roomForPane() {
 				return m, nil
 			}
-			e := newTextEditor(message.doc)
+			e := newTextEditor(message.doc, m.theme)
 			e.syntax = m.settings.syntaxEnabled()
 			p := m.localPane(message.doc.Path, message.root, e)
 			p.editor = e
@@ -907,18 +902,23 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) render() string {
+	// A model built as a literal (which tests do) has no theme; give it the
+	// default so rendering never depends on how the model was constructed.
+	if m.theme.name == "" {
+		m.theme = resolveTheme("")
+	}
 	return m.renderMenu(m.renderEmbedded(m.width, m.height))
 }
 
 func (m Model) renderAgentPicker(width int) string {
-	header := accentStyle.Render("New agent") + dimStyle.Render("  choose which agent to launch")
+	header := m.theme.accent.Render("New agent") + m.theme.dim.Render("  choose which agent to launch")
 	if task, ok := m.pickerTask(); ok {
-		header = accentStyle.Render("Start task") + dimStyle.Render("  "+task.Title+" · runs in its worktree and takes the assignment")
+		header = m.theme.accent.Render("Start task") + m.theme.dim.Render("  "+task.Title+" · runs in its worktree and takes the assignment")
 	}
 
 	lines := []string{}
 	if len(m.snapshot.Adapters) == 0 {
-		lines = append(lines, dimStyle.Render("No agent adapters are registered with the daemon."))
+		lines = append(lines, m.theme.dim.Render("No agent adapters are registered with the daemon."))
 	}
 	for index, capabilities := range m.snapshot.Adapters {
 		mode := "managed only"
@@ -927,22 +927,22 @@ func (m Model) renderAgentPicker(width int) string {
 		}
 		line := fmt.Sprintf("%-16s  %s", capabilities.Name, mode)
 		if index == m.agentPickerAt {
-			line = selectedStyle.Render(" " + line + " ")
+			line = m.theme.selected.Render(" " + line + " ")
 		} else {
 			line = "  " + line
 		}
 		lines = append(lines, line)
 	}
-	panel := panelStyle.Width(width - 4).Render(strings.Join(lines, "\n"))
+	panel := m.theme.panel.Width(width - 4).Render(strings.Join(lines, "\n"))
 
-	return header + "\n\n" + panel + "\n\n" + dimStyle.Render("up/down select  enter launch  esc cancel")
+	return header + "\n\n" + panel + "\n\n" + m.theme.dim.Render("up/down select  enter launch  esc cancel")
 }
 
 func (m Model) renderAgents() string {
-	lines := []string{accentStyle.Render("Agents")}
+	lines := []string{m.theme.accent.Render("Agents")}
 	agents := m.allAgents()
 	if len(agents) == 0 {
-		lines = append(lines, dimStyle.Render("No agent sessions."))
+		lines = append(lines, m.theme.dim.Render("No agent sessions."))
 	}
 	multiple := len(m.machines) > 1
 	for index, scoped := range agents {
@@ -954,11 +954,11 @@ func (m Model) renderAgents() string {
 		}
 		switch {
 		case !scoped.Remote && m.focus == focusAgents && index == m.agentSelected:
-			line = selectedStyle.Render(" " + line + " ")
+			line = m.theme.selected.Render(" " + line + " ")
 		case scoped.Remote:
 			// Another machine's agent is shown, not driven from here: select
 			// that machine (ctrl+b g) to act on it.
-			line = "  " + dimStyle.Render(line)
+			line = "  " + m.theme.dim.Render(line)
 		default:
 			line = "  " + line
 		}
@@ -966,26 +966,26 @@ func (m Model) renderAgents() string {
 		// An agent's task is the most useful thing to know about it after its
 		// state: it says what the session is for, not just that it exists.
 		if title := m.taskTitleOfScoped(scoped); title != "" {
-			lines = append(lines, dimStyle.Render("    on "+title))
+			lines = append(lines, m.theme.dim.Render("    on "+title))
 		}
 		if agent.AttentionReason != "" {
-			lines = append(lines, errorStyle.Render("    "+agent.AttentionReason))
+			lines = append(lines, m.theme.error.Render("    "+agent.AttentionReason))
 		}
 	}
 
 	if len(m.remote) > 0 {
-		lines = append(lines, "", accentStyle.Render("Other machines"))
+		lines = append(lines, "", m.theme.accent.Render("Other machines"))
 		for _, view := range m.remote {
 			detail := view.State
 			if view.Err != "" {
 				detail = "offline"
 			}
-			lines = append(lines, dimStyle.Render(fmt.Sprintf("  %s  %s", view.Label, detail)))
+			lines = append(lines, m.theme.dim.Render(fmt.Sprintf("  %s  %s", view.Label, detail)))
 		}
 	}
 
 	if len(m.snapshot.Permissions) > 0 {
-		lines = append(lines, "", accentStyle.Render("Pending permissions"))
+		lines = append(lines, "", m.theme.accent.Render("Pending permissions"))
 		for _, permission := range m.snapshot.Permissions {
 			lines = append(lines, fmt.Sprintf("  %s: %s", permission.AgentID, permission.Reason))
 		}
@@ -994,42 +994,42 @@ func (m Model) renderAgents() string {
 }
 
 func (m Model) renderDiff(width int) string {
-	header := accentStyle.Render("Diff")
+	header := m.theme.accent.Render("Diff")
 	for _, task := range m.snapshot.Tasks {
 		if task.ID == m.diffTaskID {
-			header = accentStyle.Render("Diff · "+task.Title) + dimStyle.Render("  "+string(task.Status))
+			header = m.theme.accent.Render("Diff · "+task.Title) + m.theme.dim.Render("  "+string(task.Status))
 			if task.AutoReview {
-				header += dimStyle.Render(" · review required")
+				header += m.theme.dim.Render(" · review required")
 			}
 		}
 	}
 	if m.diffErr != nil {
-		return header + "\n\n" + errorStyle.Render(m.diffErr.Error()) + "\n\n" + dimStyle.Render("esc/d/q back")
+		return header + "\n\n" + m.theme.error.Render(m.diffErr.Error()) + "\n\n" + m.theme.dim.Render("esc/d/q back")
 	}
 
-	lines := []string{accentStyle.Render(fmt.Sprintf("Changed files (%d)", len(m.diff.Files)))}
+	lines := []string{m.theme.accent.Render(fmt.Sprintf("Changed files (%d)", len(m.diff.Files)))}
 	for _, file := range m.diff.Files {
 		lines = append(lines, fmt.Sprintf("  %s %s", file.Status, file.Path))
 	}
 	if len(m.diff.Files) == 0 {
-		lines = append(lines, dimStyle.Render("  No changes."))
+		lines = append(lines, m.theme.dim.Render("  No changes."))
 	}
-	filesPanel := panelStyle.Width(width - 4).Render(strings.Join(lines, "\n"))
+	filesPanel := m.theme.panel.Width(width - 4).Render(strings.Join(lines, "\n"))
 
 	diffText := m.diff.Diff
 	if diffText == "" {
-		diffText = dimStyle.Render("No unstaged or staged diff against HEAD.")
+		diffText = m.theme.dim.Render("No unstaged or staged diff against HEAD.")
 	}
-	diffPanel := panelStyle.Width(width - 4).Render(diffText)
+	diffPanel := m.theme.panel.Width(width - 4).Render(diffText)
 
 	sections := header + "\n\n" + filesPanel + "\n" + diffPanel
 
 	if verdict := m.latestReviewVerdict(); verdict != "" {
-		reviewPanel := panelStyle.Width(width - 4).Render(accentStyle.Render("Latest reviewer verdict") + "\n\n" + verdict)
+		reviewPanel := m.theme.panel.Width(width - 4).Render(m.theme.accent.Render("Latest reviewer verdict") + "\n\n" + verdict)
 		sections += "\n" + reviewPanel
 	}
 
-	return sections + "\n\n" + dimStyle.Render("esc/d/q back")
+	return sections + "\n\n" + m.theme.dim.Render("esc/d/q back")
 }
 
 // latestReviewVerdict returns the most recent review artifact's content for
@@ -1045,32 +1045,32 @@ func (m Model) latestReviewVerdict() string {
 }
 
 func (m Model) renderWorkspaces() string {
-	lines := []string{accentStyle.Render("Workspaces")}
+	lines := []string{m.theme.accent.Render("Workspaces")}
 	if len(m.snapshot.Workspaces) == 0 {
-		lines = append(lines, dimStyle.Render("No workspace yet."), dimStyle.Render("Start an agent to create one."))
+		lines = append(lines, m.theme.dim.Render("No workspace yet."), m.theme.dim.Render("Start an agent to create one."))
 		return strings.Join(lines, "\n")
 	}
 	for _, workspace := range m.snapshot.Workspaces {
-		lines = append(lines, fmt.Sprintf("• %s", workspace.Name), dimStyle.Render("  "+workspace.Directory))
+		lines = append(lines, fmt.Sprintf("• %s", workspace.Name), m.theme.dim.Render("  "+workspace.Directory))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderTerminals() string {
-	lines := []string{accentStyle.Render("Sessions")}
+	lines := []string{m.theme.accent.Render("Sessions")}
 	if len(m.snapshot.Terminals) == 0 {
-		lines = append(lines, dimStyle.Render("No sessions."), "", dimStyle.Render("Press a to launch an agent."))
+		lines = append(lines, m.theme.dim.Render("No sessions."), "", m.theme.dim.Render("Press a to launch an agent."))
 		return strings.Join(lines, "\n")
 	}
 	for index, terminal := range m.snapshot.Terminals {
 		command := strings.Join(terminal.Command, " ")
 		line := fmt.Sprintf("%-9s  %s", terminal.State, command)
 		if index == m.selected {
-			line = selectedStyle.Render(" " + line + " ")
+			line = m.theme.selected.Render(" " + line + " ")
 		} else {
 			line = "  " + line
 		}
-		lines = append(lines, line, dimStyle.Render("    "+terminal.ID))
+		lines = append(lines, line, m.theme.dim.Render("    "+terminal.ID))
 	}
 	return strings.Join(lines, "\n")
 }

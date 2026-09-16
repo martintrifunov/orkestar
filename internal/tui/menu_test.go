@@ -68,7 +68,7 @@ func TestTheMenuOffersOnlyWhatWouldWork(t *testing.T) {
 	// A document pane has no scrollback; the wheel scrolls it.
 	// Built the way the model builds one: a bare textEditor has no document
 	// behind it and nothing that reads one would survive.
-	editor := newTextEditor(&files.Document{Path: "notes.md", Text: "hello"})
+	editor := newTextEditor(&files.Document{Path: "notes.md", Text: "hello"}, resolveTheme(""))
 	document := &embeddedTerminal{terminalID: "doc", editor: editor, emulator: editor, done: make(chan struct{})}
 	if labels := labels(m.menuFor(document)); strings.Contains(labels, "Scrollback") {
 		t.Fatalf("a document pane offered scrollback: %s", labels)

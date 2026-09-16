@@ -52,10 +52,21 @@ type textEditor struct {
 	spansVersion int
 	language     string
 	spans        [][]syntax.Span
+	// theme is the palette this pane was opened with, since the pane renders
+	// itself and has no model to read one from.
+	theme theme
 }
 
-func newTextEditor(d *files.Document) *textEditor {
-	return &textEditor{doc: d, text: []rune(d.Text), anchor: -1, columns: 60, rows: 20, syntax: true, spansVersion: -1}
+// palette is the pane's theme, or the default when it was built without one.
+func (e *textEditor) palette() theme {
+	if e.theme.name == "" {
+		return themes["orkestar"]
+	}
+	return e.theme
+}
+
+func newTextEditor(d *files.Document, th theme) *textEditor {
+	return &textEditor{doc: d, text: []rune(d.Text), anchor: -1, columns: 60, rows: 20, syntax: true, spansVersion: -1, theme: th}
 }
 
 // highlight lexes the document off the UI goroutine. Lexing costs roughly a
@@ -171,6 +182,7 @@ func (e *textEditor) reveal() {
 	}
 }
 func (e *textEditor) Render() string {
+	palette := e.palette()
 	lines := strings.Split(string(e.text), "\n")
 	a, b := e.bounds()
 	at := 0
@@ -179,7 +191,7 @@ func (e *textEditor) Render() string {
 	if e.searching {
 		help = "Find: " + e.query + "▏ · Enter next · Esc close"
 	}
-	out = append(out, dimStyle.Render(help))
+	out = append(out, palette.dim.Render(help))
 	for row, line := range lines {
 		r := []rune(line)
 		if row >= e.top && len(out) < e.rows-1 {
@@ -199,13 +211,14 @@ func (e *textEditor) Render() string {
 			status += " · " + e.language
 		}
 	}
-	out = append(out, dimStyle.Render(status))
+	out = append(out, palette.dim.Render(status))
 	return strings.Join(out, "\n")
 }
 
 // renderLine styles one line, grouping neighbouring runes that share a color
 // and selection state into a single escape sequence.
 func (e *textEditor) renderLine(row int, r []rune, selectionStart, selectionEnd, offset int) string {
+	palette := e.palette()
 	colors := make([]string, len(r))
 	if row < len(e.spans) {
 		for _, s := range e.spans[row] {
@@ -227,7 +240,7 @@ func (e *textEditor) renderLine(row int, r []rune, selectionStart, selectionEnd,
 		segment := displayRunes(r[start:end])
 		switch style, ok := syntaxStyles[colors[start]]; {
 		case selected(start):
-			out.WriteString(selectedStyle.Render(segment))
+			out.WriteString(palette.selected.Render(segment))
 		case ok:
 			out.WriteString(style.Render(segment))
 		default:

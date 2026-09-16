@@ -15,7 +15,7 @@ func TestDocumentScrollingDoesNotBounceAtEdges(t *testing.T) {
 			m := Model{width: 120, height: 30}
 			var top, maxTop func() int
 			if kind == "editor" {
-				e := newTextEditor(&files.Document{Text: strings.Repeat("line\n", 100)})
+				e := newTextEditor(&files.Document{Text: strings.Repeat("line\n", 100)}, resolveTheme(""))
 				p := m.localPane("Editor", t.TempDir(), e)
 				p.editor = e
 				e.cursor = len(e.text)
@@ -68,7 +68,7 @@ func TestDocumentScrollingDoesNotBounceAtEdges(t *testing.T) {
 	}
 }
 func TestMouseMotionWithoutHeldButtonDoesNotScrollEditor(t *testing.T) {
-	e := newTextEditor(&files.Document{Text: strings.Repeat("line\n", 100)})
+	e := newTextEditor(&files.Document{Text: strings.Repeat("line\n", 100)}, resolveTheme(""))
 	m := Model{width: 120, height: 30}
 	p := m.localPane("Editor", t.TempDir(), e)
 	p.editor = e

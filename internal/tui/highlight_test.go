@@ -43,7 +43,7 @@ func deliver(t *testing.T, cmd tea.Cmd) {
 
 func editorFor(t *testing.T, name, text string) *textEditor {
 	t.Helper()
-	e := newTextEditor(&files.Document{Path: name, Text: text})
+	e := newTextEditor(&files.Document{Path: name, Text: text}, resolveTheme(""))
 	e.columns, e.rows = 80, 24
 	return e
 }
@@ -146,7 +146,7 @@ func TestSelectionOverridesSyntaxColor(t *testing.T) {
 	lex(t, e)
 	e.anchor, e.cursor = 0, len("package")
 	out := e.Render()
-	if !strings.Contains(out, selectedStyle.Render("package")) {
+	if !strings.Contains(out, resolveTheme("").selected.Render("package")) {
 		t.Fatalf("selection is not highlighted as selected:\n%q", out)
 	}
 	if strings.Contains(out, colored(syntax.Keyword, "package")) {

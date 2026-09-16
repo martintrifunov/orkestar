@@ -50,21 +50,21 @@ func (m Model) blockedBy(task workflow.Task) int {
 }
 
 func (m Model) renderTasks() string {
-	lines := []string{accentStyle.Render("Tasks")}
+	lines := []string{m.theme.accent.Render("Tasks")}
 	if len(m.snapshot.Tasks) == 0 {
-		return strings.Join(append(lines, dimStyle.Render("No tasks yet."), dimStyle.Render("Press c to create one.")), "\n")
+		return strings.Join(append(lines, m.theme.dim.Render("No tasks yet."), m.theme.dim.Render("Press c to create one.")), "\n")
 	}
 	for index, task := range m.snapshot.Tasks {
 		line := fmt.Sprintf("%-11s  %s", task.Status, task.Title)
 		selected := m.focus == focusTasks && index == m.taskSelected
 		if selected {
-			line = selectedStyle.Render(" " + line + " ")
+			line = m.theme.selected.Render(" " + line + " ")
 		} else {
 			line = "  " + line
 		}
 		lines = append(lines, line)
 		if task.WorktreePath != "" {
-			lines = append(lines, dimStyle.Render("    branch "+task.WorktreeBranch))
+			lines = append(lines, m.theme.dim.Render("    branch "+task.WorktreeBranch))
 		}
 		// The detail lines are only worth their rows for the task being acted
 		// on. The description is why the task exists, so it comes first.
@@ -75,14 +75,14 @@ func (m Model) renderTasks() string {
 			if len(group) > 1 {
 				mark = fmt.Sprintf("    on screen · %d panes", len(group))
 			}
-			lines = append(lines, accentStyle.Render(mark))
+			lines = append(lines, m.theme.accent.Render(mark))
 		}
 		if selected {
 			if task.Description != "" {
-				lines = append(lines, dimStyle.Render("    "+task.Description))
+				lines = append(lines, m.theme.dim.Render("    "+task.Description))
 			}
 			if detail := m.taskDetail(task); detail != "" {
-				lines = append(lines, dimStyle.Render("    "+detail))
+				lines = append(lines, m.theme.dim.Render("    "+detail))
 			}
 		}
 	}
@@ -269,7 +269,7 @@ func (m Model) taskPromptView() string {
 	}
 	description := m.cursorOn(1, m.taskDescription)
 	if description == "" {
-		description = dimStyle.Render("what done looks like, or why this exists")
+		description = m.theme.dim.Render("what done looks like, or why this exists")
 	}
 	body := "New task\n\nWorkspace: " + m.directory +
 		"\n\nTitle: " + m.cursorOn(0, m.taskTitle) +

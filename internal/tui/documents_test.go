@@ -18,7 +18,7 @@ func TestEditorSelectionUndoSaveAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := newTextEditor(d)
+	e := newTextEditor(d, resolveTheme(""))
 	e.key(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	e.Paste("λ revised\n")
 	e.key(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl})
@@ -66,7 +66,7 @@ func TestReviewListsTrackedUntrackedAndSpaces(t *testing.T) {
 	git("commit", "-m", "Initial")
 	os.WriteFile(filepath.Join(root, "code.go"), []byte("new\n"), 0644)
 	os.WriteFile(filepath.Join(root, "new file.txt"), []byte("untracked\n"), 0644)
-	r := loadReview(root, 0)
+	r := loadReview(root, 0, resolveTheme(""))
 	if r.err != nil || len(r.files) != 2 {
 		t.Fatalf("review: %+v", r)
 	}
@@ -170,7 +170,7 @@ func TestSearchPasteDoesNotEditDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := newTextEditor(d)
+	e := newTextEditor(d, resolveTheme(""))
 	e.Paste("first λ match and second λ match")
 	original := string(e.text)
 	e.key(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})

@@ -202,12 +202,12 @@ func (m Model) renderPanes() string {
 	}
 	boxes := map[*embeddedTerminal]string{}
 	for _, r := range rects {
-		style := panelStyle
+		style := m.theme.panel
 		if r.terminal == m.embedded && !m.sidebarFocused {
-			style = style.BorderForeground(lipgloss.Color("#D7A84B"))
+			style = style.BorderForeground(m.theme.accentColor)
 		}
 		content := fitPane(r.terminal.emulator.Render(), r.width-4, r.height-2)
-		content = r.terminal.selection.highlight(content, r.width-4)
+		content = r.terminal.selection.highlight(content, r.width-4, m.theme.selected)
 		box := style.Width(r.width).Height(r.height).Render(content)
 		boxes[r.terminal] = withPaneTitle(box, m.paneLabel(r.terminal), r.width, style)
 	}

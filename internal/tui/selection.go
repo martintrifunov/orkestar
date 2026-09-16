@@ -9,8 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var selectionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#111111")).Background(lipgloss.Color("#D7A84B"))
-
 // paneSelection is a range of a terminal pane's visible screen, in the pane's
 // own content coordinates: column 0, row 0 is the first cell inside the
 // border. It selects the way a terminal does, flowing from the first cell to
@@ -89,7 +87,7 @@ func (s paneSelection) text(content string, columns int) string {
 // highlight redraws content with the selected cells in the selection colour.
 // The original styling inside the selection is dropped: a highlight that some
 // cells' own colours punch through does not read as one region.
-func (s paneSelection) highlight(content string, columns int) string {
+func (s paneSelection) highlight(content string, columns int, style lipgloss.Style) string {
 	startX, startY, endX, endY, ok := s.bounds()
 	if !ok {
 		return content
@@ -107,7 +105,7 @@ func (s paneSelection) highlight(content string, columns int) string {
 		if y == endY {
 			to = endX
 		}
-		rows[y] = highlightRange(rows[y], from, min(to, columns), columns)
+		rows[y] = highlightRange(rows[y], from, min(to, columns), columns, style)
 	}
 	return strings.Join(rows, "\n")
 }
@@ -115,13 +113,13 @@ func (s paneSelection) highlight(content string, columns int) string {
 // highlightRange styles one row's columns [from, to). A row is padded out to
 // the range it needs, because a terminal row ends where its text does and the
 // user can select past that.
-func highlightRange(row string, from, to, columns int) string {
+func highlightRange(row string, from, to, columns int, style lipgloss.Style) string {
 	if to <= from || from >= columns {
 		return row
 	}
 	head := pad(ansi.Cut(row, 0, from), from)
 	body := pad(ansi.Strip(ansi.Cut(row, from, to)), to-from)
-	return head + selectionStyle.Render(body) + ansi.TruncateLeft(row, to, "")
+	return head + style.Render(body) + ansi.TruncateLeft(row, to, "")
 }
 
 func pad(s string, width int) string {

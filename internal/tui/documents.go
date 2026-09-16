@@ -32,6 +32,9 @@ type editorSettings struct {
 	// Notifications posts those same two moments to the desktop, and only
 	// while the terminal is not focused.
 	Notifications *bool `json:"notifications,omitempty"`
+	// Theme names a built-in palette. An unknown name falls back to the
+	// default rather than leaving the interface unstyled.
+	Theme string `json:"theme,omitempty"`
 }
 
 func (s editorSettings) syntaxEnabled() bool { return s.Syntax == nil || *s.Syntax }
@@ -152,7 +155,7 @@ func (m *Model) openReview() tea.Cmd {
 	if !m.roomForPane() {
 		return nil
 	}
-	r := &reviewPane{root: root}
+	r := &reviewPane{root: root, theme: m.theme}
 	p := m.localPane("Changes", root, r)
 	p.review = r
 	return m.refreshReview(p, 0)
@@ -394,7 +397,7 @@ func (m Model) promptView() string {
 		if !notificationsSupported() {
 			notifications = "unavailable on this system"
 		}
-		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Key bindings, custom terminal command and max_panes: edit tui.json.\nBindings are \"keys\": {\"prefix\": \"ctrl+a\", \"new-task\": \"N\"} and so on."
+		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\nt  Theme: " + m.theme.name + " — cycles the palette\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Key bindings, custom terminal command and max_panes: edit tui.json.\nBindings are \"keys\": {\"prefix\": \"ctrl+a\", \"new-task\": \"N\"} and so on."
 	}
 	matches := m.matches()
 	var lines []string
@@ -403,7 +406,7 @@ func (m Model) promptView() string {
 	for i := top; i < min(len(matches), top+visible); i++ {
 		path := matches[i]
 		if i == m.fileAt {
-			path = selectedStyle.Render(path)
+			path = m.theme.selected.Render(path)
 		}
 		lines = append(lines, path)
 	}
@@ -469,6 +472,28 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if on {
 				m.notice = "Bell: on"
 			}
+			return m, nil
+		}
+		if k.String() == "t" {
+			names := ThemeNames()
+			current := m.settings.Theme
+			if current == "" {
+				current = names[0]
+			}
+			next := names[0]
+			for index, name := range names {
+				if name == current {
+					next = names[(index+1)%len(names)]
+					break
+				}
+			}
+			m.settings.Theme = next
+			if m.err = m.settings.save(); m.err != nil {
+				return m, nil
+			}
+			m.theme = resolveTheme(next)
+			m.settingsOpen = false
+			m.notice = "Theme: " + next
 			return m, nil
 		}
 		modes := map[string]string{"1": "standard", "2": "vim", "3": "nano"}

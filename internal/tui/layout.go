@@ -28,7 +28,7 @@ func (m Model) renderEmbedded(width, height int) string {
 	_, _, contentWidth, contentHeight := m.contentArea()
 	columns, rows := contentWidth-4, contentHeight-2
 	sidebarWidth := embeddedSidebarWidth(width)
-	sidebar := panelStyle.Width(sidebarWidth).Height(rows + 2).
+	sidebar := m.theme.panel.Width(sidebarWidth).Height(rows + 2).
 		Render(m.renderSidebar(sidebarWidth-4, rows))
 	content := "Open a session\n\nSelect a session or agent and press Enter.\nPress a to launch an agent, or n for a shell."
 	if m.embedded != nil {
@@ -46,9 +46,9 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.pickingAgent {
 		content = m.renderAgentPicker(columns)
 	}
-	paneStyle := panelStyle
+	paneStyle := m.theme.panel
 	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused {
-		paneStyle = paneStyle.BorderForeground(lipgloss.Color("#D7A84B"))
+		paneStyle = paneStyle.BorderForeground(m.theme.accentColor)
 	}
 	pane := paneStyle.Width(columns + 4).Height(rows + 2).Render(fitPane(content, columns, rows))
 	if m.embedded != nil && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() {
@@ -70,15 +70,15 @@ func (m Model) renderEmbedded(width, height int) string {
 		title += "  opening…"
 	}
 	if m.err != nil {
-		title = "  " + errorStyle.Render(m.err.Error())
+		title = "  " + m.theme.error.Render(m.err.Error())
 	}
-	header := ansi.Truncate(accentStyle.Render("Orkestar")+dimStyle.Render(title), width, "…")
+	header := ansi.Truncate(m.theme.accent.Render("Orkestar")+m.theme.dim.Render(title), width, "…")
 	help := m.helpLine()
 	body := []string{sidebar, " ", pane}
 	if files := m.renderFiles(); files != "" {
 		body = append(body, " ", files)
 	}
-	return header + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, body...) + "\n" + ansi.Truncate(dimStyle.Render(help), width, "…")
+	return header + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, body...) + "\n" + ansi.Truncate(m.theme.dim.Render(help), width, "…")
 }
 
 func (m Model) renderSidebar(columns, rows int) string {
@@ -130,7 +130,7 @@ func (m Model) renderSidebar(columns, rows int) string {
 			lines = append([]string{lines[0]}, lines[1+start:1+start+count]...)
 		}
 		if (i == 1 && m.focus == focusSessions || i == 2 && m.focus == focusTasks || i == 3 && m.focus == focusAgents) && (m.embedded == nil || m.sidebarFocused) {
-			lines[0] = accentStyle.Render("› ") + lines[0]
+			lines[0] = m.theme.accent.Render("› ") + lines[0]
 		}
 		sections[i] = fitPane(strings.Join(lines, "\n"), columns, heights[i])
 	}

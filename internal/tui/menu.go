@@ -141,13 +141,13 @@ func (m Model) menuBox() string {
 		gap := max(1, inner-len(item.label)-len(key))
 		text := item.label + strings.Repeat(" ", gap) + key
 		if index == m.menu.at {
-			text = selectedStyle.Render(text)
+			text = m.theme.selected.Render(text)
 		}
 		lines = append(lines, text)
 	}
 	// No explicit width: every line is already padded to the same length, so
 	// the styling sizes the box to its contents rather than reflowing them.
-	return panelStyle.Render(strings.Join(lines, "\n"))
+	return m.theme.panel.Render(strings.Join(lines, "\n"))
 }
 
 // menuBounds is where the menu is drawn, nudged so it stays on screen when it

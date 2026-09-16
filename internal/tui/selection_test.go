@@ -61,17 +61,17 @@ func TestSelectionCountsColumnsThroughStyling(t *testing.T) {
 // of the row alone, including the row's own colours outside it.
 func TestHighlightCoversTheSelectedColumns(t *testing.T) {
 	content := "\x1b[31mred\x1b[m plain"
-	highlighted := selectionOver(4, 0, 8, 0).highlight(content, paneColumns)
+	highlighted := selectionOver(4, 0, 8, 0).highlight(content, paneColumns, resolveTheme("").selected)
 	if plain := ansi.Strip(highlighted); plain != "red plain" {
 		t.Fatalf("highlight changed the text to %q", plain)
 	}
 	if ansi.StringWidth(highlighted) != ansi.StringWidth(content) {
 		t.Fatalf("highlight changed the row width from %d to %d", ansi.StringWidth(content), ansi.StringWidth(highlighted))
 	}
-	if !strings.Contains(highlighted, selectionStyle.Render("plain")) {
+	if !strings.Contains(highlighted, resolveTheme("").selected.Render("plain")) {
 		t.Fatalf("selected columns are not highlighted: %q", highlighted)
 	}
-	if strings.Contains(highlighted, selectionStyle.Render("red")) {
+	if strings.Contains(highlighted, resolveTheme("").selected.Render("red")) {
 		t.Fatalf("unselected columns are highlighted: %q", highlighted)
 	}
 }
@@ -79,7 +79,7 @@ func TestHighlightCoversTheSelectedColumns(t *testing.T) {
 // Selecting past the end of a row must still draw a highlight there, or a drag
 // through blank space looks like it did nothing.
 func TestHighlightPadsShortRows(t *testing.T) {
-	highlighted := selectionOver(0, 0, 9, 0).highlight("ab", paneColumns)
+	highlighted := selectionOver(0, 0, 9, 0).highlight("ab", paneColumns, resolveTheme("").selected)
 	if width := ansi.StringWidth(highlighted); width != 10 {
 		t.Fatalf("highlighted row is %d columns wide, want 10", width)
 	}
@@ -89,7 +89,7 @@ func TestSelectionSurvivesAnEmptyPane(t *testing.T) {
 	if got := selectionOver(0, 4, 3, 6).text("only one row", paneColumns); got != "" {
 		t.Fatalf("got %q for a selection below the content, want empty", got)
 	}
-	if got := selectionOver(0, 4, 3, 6).highlight("only one row", paneColumns); got != "only one row" {
+	if got := selectionOver(0, 4, 3, 6).highlight("only one row", paneColumns, resolveTheme("").selected); got != "only one row" {
 		t.Fatalf("highlight below the content changed the row to %q", got)
 	}
 }
