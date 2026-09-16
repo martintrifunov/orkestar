@@ -24,7 +24,7 @@ func TestTUIProcess(t *testing.T) {
 	if os.Getenv("ORKESTAR_TEST_TUI") != "1" {
 		t.Skip("subprocess helper")
 	}
-	if err := Run(ipc.NewClient(os.Getenv("ORKESTAR_TEST_SOCKET")), os.Getenv("ORKESTAR_TEST_DIRECTORY")); err != nil {
+	if err := Run(ipc.NewClient(os.Getenv("ORKESTAR_TEST_SOCKET")), os.Getenv("ORKESTAR_TEST_DIRECTORY"), ""); err != nil {
 		t.Fatal(err)
 	}
 }

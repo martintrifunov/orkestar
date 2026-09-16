@@ -86,43 +86,51 @@ func openEmbeddedTerminal(client *ipc.Client, terminalID string, columns, rows i
 
 func openEmbeddedTerminalContext(ctx context.Context, client *ipc.Client, terminalID string, columns, rows int) tea.Cmd {
 	return func() tea.Msg {
-		if columns <= 0 {
-			columns = 80
-		}
-		if rows <= 0 {
-			rows = 24
-		}
-
-		dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-
-		var result struct {
-			Screen     terminal.Frame `json:"screen"`
-			Controller bool           `json:"controller"`
-		}
-		stream, err := client.OpenStream(dialCtx, "terminal.attach", map[string]any{"terminal_id": terminalID, "screen": true}, &result)
-		if err != nil {
-			return embeddedReadyMsg{err: err}
-		}
-		view := &remoteScreen{stream: stream, frame: result.Screen, controller: result.Controller}
-		term := &embeddedTerminal{terminalID: terminalID, stream: stream, emulator: view, view: view, events: make(chan tea.Msg, 1), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{})}
-		close(term.writeDone)
-		go func() {
-			select {
-			case <-ctx.Done():
-				term.close()
-			case <-term.done:
-			}
-		}()
-		if result.Controller {
-			if err := stream.Send(resizeCommand(columns, rows)); err != nil {
-				term.close()
-				return embeddedReadyMsg{err: err}
-			}
-		}
-		go embeddedReadLoop(term)
-		return embeddedReadyMsg{terminal: term}
+		term, err := attachEmbeddedTerminal(ctx, client, terminalID, columns, rows)
+		return embeddedReadyMsg{terminal: term, err: err}
 	}
+}
+
+// attachEmbeddedTerminal opens one screen attachment and starts its read loop.
+// It is synchronous so restoring a saved layout can attach several panes and
+// build the tree from what actually came back.
+func attachEmbeddedTerminal(ctx context.Context, client *ipc.Client, terminalID string, columns, rows int) (*embeddedTerminal, error) {
+	if columns <= 0 {
+		columns = 80
+	}
+	if rows <= 0 {
+		rows = 24
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var result struct {
+		Screen     terminal.Frame `json:"screen"`
+		Controller bool           `json:"controller"`
+	}
+	stream, err := client.OpenStream(dialCtx, "terminal.attach", map[string]any{"terminal_id": terminalID, "screen": true}, &result)
+	if err != nil {
+		return nil, err
+	}
+	view := &remoteScreen{stream: stream, frame: result.Screen, controller: result.Controller}
+	term := &embeddedTerminal{terminalID: terminalID, stream: stream, emulator: view, view: view, events: make(chan tea.Msg, 1), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{})}
+	close(term.writeDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			term.close()
+		case <-term.done:
+		}
+	}()
+	if result.Controller {
+		if err := stream.Send(resizeCommand(columns, rows)); err != nil {
+			term.close()
+			return nil, err
+		}
+	}
+	go embeddedReadLoop(term)
+	return term, nil
 }
 
 // embeddedReadLoop applies complete daemon frames and control changes until

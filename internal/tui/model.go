@@ -148,9 +148,15 @@ type Model struct {
 	pickerTaskID string
 
 	// The sidebar stays usable while a terminal attachment is visible.
-	embedded       *embeddedTerminal
-	layout         *splitNode
-	pendingSplit   *splitRequest
+	embedded     *embeddedTerminal
+	layout       *splitNode
+	pendingSplit *splitRequest
+	// layoutPath is where this client remembers its pane layout, empty when
+	// the layout should not be persisted (a remote session).
+	layoutPath string
+	// layoutRestored guards the one attempt to restore a saved layout, made
+	// once the first snapshot has said which terminals are alive.
+	layoutRestored bool
 	sidebarFocused bool
 	opening        bool
 	ctx            context.Context
@@ -179,13 +185,19 @@ func New(client *ipc.Client, directory string) Model {
 	}
 }
 
-func Run(client *ipc.Client, directory string) error {
+func Run(client *ipc.Client, directory, layoutPath string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	model := New(client, directory)
+	model.layoutPath = layoutPath
 	model.ctx = ctx
 	program := tea.NewProgram(model)
-	_, err := program.Run()
+	final, err := program.Run()
+	// The layout is remembered on the way out, which is also when the focused
+	// pane is settled; structural changes are saved as they happen.
+	if ending, ok := final.(Model); ok {
+		ending.persistLayout()
+	}
 	return err
 }
 
@@ -646,11 +658,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err == nil {
 			// Compare before replacing: the bell is about what changed, and
 			// the first snapshot has nothing to have changed from.
-			var ring tea.Cmd
+			var commands []tea.Cmd
 			if m.snapshotLoaded {
 				if notice := bellFor(m.snapshot, message.snapshot); notice != "" {
 					m.notice = notice
-					ring = m.announce(notice)
+					commands = append(commands, m.announce(notice))
 				}
 			}
 			m.snapshotLoaded = true
@@ -664,8 +676,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
 				m.agentSelected = max(0, len(m.snapshot.Agents)-1)
 			}
-			if ring != nil {
-				return m, ring
+			// The saved layout is restored once, now that the snapshot says
+			// which of its terminals are still running.
+			if !m.layoutRestored {
+				m.layoutRestored = true
+				if m.layoutPath != "" && m.client != nil && m.tree() == nil {
+					if saved, ok := loadLayout(m.layoutPath); ok {
+						commands = append(commands, restoreLayout(m.client, saved, runningTerminals(m.snapshot)))
+					}
+				}
+			}
+			if len(commands) > 0 {
+				return m, tea.Batch(commands...)
 			}
 		}
 	case terminalStartedMsg:
@@ -718,6 +740,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = message.err
 		}
 		return m, waitEmbeddedEvent(message.terminal)
+	case layoutRestoredMsg:
+		if message.tree != nil {
+			m.layout = message.tree
+			m.embedded = message.focus
+			m.resizePanes()
+			// Save again: a pane whose terminal did not come back is already
+			// gone from the tree, and the file should say so.
+			m.persistLayout()
+		}
+		commands := make([]tea.Cmd, 0, len(message.panes))
+		for _, pane := range message.panes {
+			commands = append(commands, waitEmbeddedEvent(pane))
+		}
+		if len(commands) > 0 {
+			return m, tea.Batch(commands...)
+		}
 	case tickMsg:
 		commands := []tea.Cmd{m.loadSnapshot(), tick()}
 		if m.filesOpen && !m.filesLoading && time.Since(m.filesLoadedAt) >= filesRefresh {

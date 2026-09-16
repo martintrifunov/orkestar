@@ -101,6 +101,7 @@ func (m *Model) insertPane(p, target *embeddedTerminal, stacked bool) {
 	m.sidebarFocused = false
 	m.filesFocused = false
 	m.resizePanes()
+	m.persistLayout()
 }
 
 // removePane closes p's attachment and collapses its split. Focus moves to the
@@ -123,6 +124,7 @@ func (m *Model) removePane(p *embeddedTerminal) {
 		}
 	}
 	m.resizePanes()
+	m.persistLayout()
 }
 func (m Model) closePanes() {
 	for _, p := range m.visiblePanes() {

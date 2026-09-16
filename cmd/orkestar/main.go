@@ -122,7 +122,7 @@ func runTUI(paths runtimepath.Paths) error {
 	if err != nil {
 		return fmt.Errorf("get current directory: %w", err)
 	}
-	return tui.Run(ipc.NewClient(paths.Socket), directory)
+	return tui.Run(ipc.NewClient(paths.Socket), directory, filepath.Join(paths.Directory, "layout.json"))
 }
 
 // runRemoteTUI attaches to a daemon on another machine. The interface runs
@@ -169,7 +169,10 @@ func runRemoteTUI(host, directory string) error {
 		}
 		directory = snapshot.Workspaces[0].Directory
 	}
-	return tui.Run(client, directory)
+	// A remote session keeps its own layout: this client would attach to
+	// terminals on another machine, and a remembered layout from a local one
+	// would point at IDs that mean nothing there.
+	return tui.Run(client, directory, "")
 }
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
