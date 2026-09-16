@@ -305,12 +305,11 @@ leaves the others usable and never moves the selection.
 
 A marketplace is out of scope in every form: no plugin index, no discovery, no
 install-from-a-repository flow, and no core investment in extension
-distribution. What remains is a single capped decision, and it can be no.
+distribution.
 
-- [ ] Decide whether even a minimal extension manifest (actions, event hooks,
-      panes, keybindings) and a local registry is worth shipping, or whether
-      the core keeps growing instead. Absent a real extension wanting to exist,
-      the answer stays no.
+- [x] Decided 2026-09-16: no extension surface for now. Nothing concrete wants
+      to exist yet, so the core keeps growing instead. Revisit only if a real
+      extension arrives that the CLI, IPC and MCP surfaces cannot express.
 
 Deliberate non-goals, unchanged: any plugin or theme marketplace, tabs as a
 separate concept, a graphics engine, and matching herdr on multiplexer surface
