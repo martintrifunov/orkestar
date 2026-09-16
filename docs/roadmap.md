@@ -176,21 +176,30 @@ independent, so the order can move.
 ### M8: Agent-native control surface
 
 Orkestar's IPC is client-internal and its CLI controls terminals and tasks but
-not panes, and neither can read a pane's output or subscribe to pane events.
-herdr's entire CLI is the agent and plugin API. Without this an agent cannot
-drive Orkestar the way it drives herdr.
+cannot read a terminal's output or subscribe to terminal events. herdr's entire
+CLI is the agent and plugin API. Without this an agent cannot drive Orkestar
+the way it drives herdr.
 
-- [ ] Pane and session control over IPC with CLI wrappers: split, move, swap,
-      zoom, focus, resize, rename, close, and send text or keys.
-- [ ] Read a pane's output: visible, recent, and unwrapped.
-- [ ] Event subscriptions for pane, agent and workspace lifecycle, and extend
-      the existing waits with pane-output and agent-state conditions.
+A note on "pane": in Orkestar the split tree is the TUI's, and each leaf
+attaches to a daemon-owned terminal. So the server-side control surface is
+over terminals and sessions, not panes; pane layout stays a client concern.
+Where herdr has `pane.split`, Orkestar's daemon equivalent is starting another
+terminal (`terminal.start`).
+
+- [ ] Terminal and session control over IPC with CLI wrappers: start, send
+      text or keys, resize, rename, stop, and remove.
+- [ ] Read a terminal's output: visible, recent, and unwrapped.
+      `terminal.read` and `orkestar terminal read --lines N` landed 2026-09-16
+      for visible and recent output; unwrapped output remains.
+- [ ] Event subscriptions for terminal, agent and workspace lifecycle, and
+      extend the existing waits with output and agent-state conditions.
 - [ ] Expose the same surface over MCP so one agent can read and drive another.
 - [ ] `agent explain`: why Orkestar believes an agent is in its current state.
 
-First slice: `terminal read <id> --lines N` and `pane split` over IPC and CLI.
-Acceptance: an agent using only the CLI or socket splits a pane, runs a
-command, reads its output, and waits for another agent to block.
+First slice landed 2026-09-16: `terminal.read` over IPC and `orkestar terminal
+read <id> [--lines N]`, verified against a scratch daemon. Acceptance for the
+milestone remains: an agent using only the CLI or socket starts a terminal,
+runs a command, reads its output, and waits for another agent to block.
 
 ### M9: Session continuity across daemon restart
 
