@@ -170,8 +170,11 @@ type Model struct {
 	// machines are the daemons this interface can attach to, local first.
 	// Switching detaches the current panes and reconnects; each machine keeps
 	// its own layout file.
-	machines       []Machine
-	machineIndex   int
+	machines     []Machine
+	machineIndex int
+	// remote is the board of every machine that is not selected, polled so the
+	// merged agent list and the status lines stay current.
+	remote         []MachineView
 	sidebarFocused bool
 	opening        bool
 	ctx            context.Context
@@ -823,10 +826,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		commands := []tea.Cmd{m.loadSnapshot(), tick()}
+		if poll := m.pollRemotes(); poll != nil {
+			commands = append(commands, poll)
+		}
 		if m.filesOpen && !m.filesLoading && time.Since(m.filesLoadedAt) >= filesRefresh {
 			commands = append(commands, m.loadFiles())
 		}
 		return m, tea.Batch(commands...)
+	case remotesMsg:
+		m.remote = message.views
+		if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
+			m.agentSelected = len(m.snapshot.Agents) - 1
+		}
+		return m, nil
 	case diffMsg:
 		m.err = message.err
 		m.diffErr = message.err
@@ -928,24 +940,47 @@ func (m Model) renderAgentPicker(width int) string {
 
 func (m Model) renderAgents() string {
 	lines := []string{accentStyle.Render("Agents")}
-	if len(m.snapshot.Agents) == 0 {
+	agents := m.allAgents()
+	if len(agents) == 0 {
 		lines = append(lines, dimStyle.Render("No agent sessions."))
 	}
-	for index, agent := range m.snapshot.Agents {
+	multiple := len(m.machines) > 1
+	for index, scoped := range agents {
+		agent := scoped.Agent
 		line := fmt.Sprintf("%s  %s", agent.Adapter, agent.State)
-		if m.focus == focusAgents && index == m.agentSelected {
+		if multiple {
+			// A machine column, so a merged row says where the agent runs.
+			line += "  [" + scoped.MachineLabel + "]"
+		}
+		switch {
+		case !scoped.Remote && m.focus == focusAgents && index == m.agentSelected:
 			line = selectedStyle.Render(" " + line + " ")
-		} else {
+		case scoped.Remote:
+			// Another machine's agent is shown, not driven from here: select
+			// that machine (ctrl+b g) to act on it.
+			line = "  " + dimStyle.Render(line)
+		default:
 			line = "  " + line
 		}
 		lines = append(lines, line)
 		// An agent's task is the most useful thing to know about it after its
 		// state: it says what the session is for, not just that it exists.
-		if title := m.taskTitleOf(agent.TaskID); title != "" {
+		if title := m.taskTitleOfScoped(scoped); title != "" {
 			lines = append(lines, dimStyle.Render("    on "+title))
 		}
 		if agent.AttentionReason != "" {
 			lines = append(lines, errorStyle.Render("    "+agent.AttentionReason))
+		}
+	}
+
+	if len(m.remote) > 0 {
+		lines = append(lines, "", accentStyle.Render("Other machines"))
+		for _, view := range m.remote {
+			detail := view.State
+			if view.Err != "" {
+				detail = "offline"
+			}
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  %s  %s", view.Label, detail)))
 		}
 	}
 
