@@ -666,7 +666,8 @@ func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
 		"workspace_create", "task_create", "task_create_worktree", "task_start",
 		"task_wait", "agent_wait", "agent_prompt", "task_set_status",
 		"task_update", "task_diff", "artifact_create", "agent_list",
-		"resource_acquire",
+		"resource_acquire", "terminal_start", "terminal_list", "terminal_read",
+		"terminal_send",
 	} {
 		if !strings.Contains(instructions, tool) {
 			t.Errorf("the instructions never mention %s", tool)
@@ -685,7 +686,7 @@ func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
 	for _, word := range strings.Fields(strings.NewReplacer(",", " ", ".", " ", "\n", " ").Replace(instructions)) {
 		if strings.HasPrefix(word, "task_") || strings.HasPrefix(word, "agent_") ||
 			strings.HasPrefix(word, "artifact_") || strings.HasPrefix(word, "workspace_") ||
-			strings.HasPrefix(word, "resource_") {
+			strings.HasPrefix(word, "resource_") || strings.HasPrefix(word, "terminal_") {
 			if !available[word] {
 				t.Errorf("the instructions name %q, which is not a tool", word)
 			}
@@ -696,5 +697,66 @@ func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
 	// instructions have to say so outright.
 	if !strings.Contains(instructions, "polling") && !strings.Contains(instructions, "in a loop") {
 		t.Error("the instructions never tell the agent to stop polling")
+	}
+}
+
+// The terminal tools are the read and drive half of the agent-native control
+// surface: an agent can run a command, read what it printed, send it input,
+// and see it listed, without attaching to a pty.
+func TestMCPServerTerminalControl(t *testing.T) {
+	t.Parallel()
+
+	daemonClient := startTestDaemon(t)
+	session := connectMCP(t, daemonClient)
+
+	workspace := callTool[daemon.Workspace](t, session, "workspace_create", map[string]any{
+		"directory": t.TempDir(),
+	})
+
+	terminal := callTool[daemon.Terminal](t, session, "terminal_start", map[string]any{
+		"workspace_id": workspace.ID,
+		"command":      []string{"/bin/sh", "-c", `printf 'mcp-hello\n'; while IFS= read -r line; do printf 'got:%s\n' "$line"; done`},
+	})
+	if terminal.ID == "" {
+		t.Fatalf("terminal_start returned no id: %#v", terminal)
+	}
+
+	type readResult struct {
+		Text string `json:"text"`
+	}
+	waitForText := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			read := callTool[readResult](t, session, "terminal_read", map[string]any{"terminal_id": terminal.ID})
+			if strings.Contains(read.Text, want) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("terminal output never contained %q: %q", want, read.Text)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitForText("mcp-hello")
+
+	callTool[map[string]string](t, session, "terminal_send", map[string]any{
+		"terminal_id": terminal.ID,
+		"text":        "ping",
+		"enter":       true,
+	})
+	waitForText("got:ping")
+
+	listed := callTool[struct {
+		Terminals []daemon.Terminal `json:"terminals"`
+	}](t, session, "terminal_list", map[string]any{})
+	found := false
+	for _, entry := range listed.Terminals {
+		if entry.ID == terminal.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("terminal_list did not include %s: %#v", terminal.ID, listed.Terminals)
 	}
 }

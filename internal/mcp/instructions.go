@@ -42,6 +42,10 @@ While work is running:
 - task_diff shows what a task changed, and any reviewer verdict recorded
   against it.
 - agent_prompt sends a follow-up to a session that is already running.
+- terminal_start runs an argv command as a daemon-owned terminal, so it keeps
+  running while nobody is attached. terminal_list shows the terminals,
+  terminal_read returns the last lines one has printed, and terminal_send types
+  into one while no client is holding its input.
 
 Finishing:
 

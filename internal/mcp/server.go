@@ -98,6 +98,26 @@ func NewServer(client *ipc.Client) *sdk.Server {
 	}, agentList(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "terminal_start",
+		Description: "Run an argv command in a workspace as a daemon-owned terminal and return it. The process keeps running while nobody is attached.",
+	}, terminalStart(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "terminal_list",
+		Description: "List the terminals the daemon is running, optionally filtered to one workspace.",
+	}, terminalList(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "terminal_read",
+		Description: "Read a terminal's recent output as plain text instead of attaching to it, to see what a command or an agent's pane is showing.",
+	}, terminalRead(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "terminal_send",
+		Description: "Type into a terminal. It is refused while a client holds the terminal's input controller, so it cannot race a person typing.",
+	}, terminalSend(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_assign",
 		Description: "Assign a task to an agent by ID.",
 	}, taskAssign(client))
@@ -437,6 +457,91 @@ func agentList(client *ipc.Client) sdk.ToolHandlerFor[agentListInput, agentListO
 			return nil, agentListOutput{}, fmt.Errorf("system.snapshot: %w", err)
 		}
 		return nil, agentListOutput{Agents: snapshot.Agents, Adapters: snapshot.Adapters}, nil
+	}
+}
+
+type terminalStartInput struct {
+	WorkspaceID string   `json:"workspace_id"`
+	Command     []string `json:"command" jsonschema:"argv to run; the first element is the executable"`
+	Directory   string   `json:"directory,omitempty" jsonschema:"defaults to the workspace directory"`
+	Columns     int      `json:"columns,omitempty" jsonschema:"terminal width; defaults to 80"`
+	Rows        int      `json:"rows,omitempty" jsonschema:"terminal height; defaults to 24"`
+}
+
+func terminalStart(client *ipc.Client) sdk.ToolHandlerFor[terminalStartInput, daemon.Terminal] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in terminalStartInput) (*sdk.CallToolResult, daemon.Terminal, error) {
+		return callIPC[daemon.Terminal](ctx, client, "terminal.start", map[string]any{
+			"workspace_id": in.WorkspaceID,
+			"command":      in.Command,
+			"directory":    in.Directory,
+			"columns":      in.Columns,
+			"rows":         in.Rows,
+		})
+	}
+}
+
+type terminalListInput struct {
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+type terminalListOutput struct {
+	Terminals []daemon.Terminal `json:"terminals"`
+}
+
+func terminalList(client *ipc.Client) sdk.ToolHandlerFor[terminalListInput, terminalListOutput] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in terminalListInput) (*sdk.CallToolResult, terminalListOutput, error) {
+		var snapshot daemon.Snapshot
+		if err := client.Call(ctx, "system.snapshot", nil, &snapshot); err != nil {
+			return nil, terminalListOutput{}, fmt.Errorf("system.snapshot: %w", err)
+		}
+		if in.WorkspaceID == "" {
+			return nil, terminalListOutput{Terminals: snapshot.Terminals}, nil
+		}
+		filtered := make([]daemon.Terminal, 0, len(snapshot.Terminals))
+		for _, terminal := range snapshot.Terminals {
+			if terminal.WorkspaceID == in.WorkspaceID {
+				filtered = append(filtered, terminal)
+			}
+		}
+		return nil, terminalListOutput{Terminals: filtered}, nil
+	}
+}
+
+type terminalReadInput struct {
+	TerminalID string `json:"terminal_id"`
+	Lines      int    `json:"lines,omitempty" jsonschema:"how many recent lines to return; defaults to 200, capped at 2000"`
+}
+
+type terminalReadOutput struct {
+	TerminalID string `json:"terminal_id"`
+	Text       string `json:"text"`
+	Lines      int    `json:"lines"`
+	Columns    int    `json:"columns"`
+	Rows       int    `json:"rows"`
+}
+
+func terminalRead(client *ipc.Client) sdk.ToolHandlerFor[terminalReadInput, terminalReadOutput] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in terminalReadInput) (*sdk.CallToolResult, terminalReadOutput, error) {
+		return callIPC[terminalReadOutput](ctx, client, "terminal.read", map[string]any{
+			"terminal_id": in.TerminalID,
+			"lines":       in.Lines,
+		})
+	}
+}
+
+type terminalSendInput struct {
+	TerminalID string `json:"terminal_id"`
+	Text       string `json:"text,omitempty"`
+	Enter      bool   `json:"enter,omitempty" jsonschema:"append a carriage return to submit the text"`
+}
+
+func terminalSend(client *ipc.Client) sdk.ToolHandlerFor[terminalSendInput, map[string]string] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in terminalSendInput) (*sdk.CallToolResult, map[string]string, error) {
+		return callIPC[map[string]string](ctx, client, "terminal.send", map[string]any{
+			"terminal_id": in.TerminalID,
+			"text":        in.Text,
+			"enter":       in.Enter,
+		})
 	}
 }
 
