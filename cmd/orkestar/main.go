@@ -19,6 +19,7 @@ import (
 	"github.com/martintrifunov/orkestar/internal/agent/codex"
 	"github.com/martintrifunov/orkestar/internal/agent/cursor"
 	"github.com/martintrifunov/orkestar/internal/agent/grok"
+	"github.com/martintrifunov/orkestar/internal/agent/manifest"
 	"github.com/martintrifunov/orkestar/internal/agent/opencode"
 	"github.com/martintrifunov/orkestar/internal/attach"
 	"github.com/martintrifunov/orkestar/internal/daemon"
@@ -417,11 +418,36 @@ func serveDaemon(paths runtimepath.Paths) error {
 	// can see, since neither CLI's hook contract has been verified.
 	server.RegisterAdapter(cursor.New(""))
 	server.RegisterAdapter(grok.New(""))
+	registerManifestAdapters(server)
 	// OpenCode is the reviewer adapter because its managed mode returns a
 	// structured reply; Claude Code's interactive PTY adapter has no
 	// discrete response to parse a verdict from.
 	server.SetReviewerAdapter("opencode")
 	return server.Serve(ctx)
+}
+
+// registerManifestAdapters loads the user's declarative agent manifests and
+// registers them. A manifest may take a built-in adapter's name, which is how
+// a user points one at a different executable or adds a resume command. A bad
+// manifest is reported and skipped rather than stopping the daemon.
+func registerManifestAdapters(server *daemon.Server) {
+	directory, err := runtimepath.AgentManifestDirectory()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "orkestar: agent manifests: %v\n", err)
+		return
+	}
+	manifests, err := manifest.LoadDir(directory)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
+	}
+	for _, descriptor := range manifests {
+		adapter, err := manifest.New(descriptor)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
+			continue
+		}
+		server.RegisterAdapter(adapter)
+	}
 }
 
 func stopDaemon(paths runtimepath.Paths) error {

@@ -9,6 +9,24 @@ import (
 
 const runtimeDirectoryEnvironment = "ORKESTAR_RUNTIME_DIR"
 
+// agentManifestDirectoryEnvironment overrides where declarative agent
+// manifests are read from, which is what tests and unusual installs need.
+const agentManifestDirectoryEnvironment = "ORKESTAR_AGENT_MANIFESTS_DIR"
+
+// AgentManifestDirectory is where declarative agent manifests live. It is
+// configuration rather than runtime state, so it sits under the user config
+// directory rather than beside the socket.
+func AgentManifestDirectory() (string, error) {
+	if directory := os.Getenv(agentManifestDirectoryEnvironment); directory != "" {
+		return directory, nil
+	}
+	configDirectory, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("find user config directory: %w", err)
+	}
+	return filepath.Join(configDirectory, "orkestar", "agents"), nil
+}
+
 type Paths struct {
 	Directory string
 	Socket    string
