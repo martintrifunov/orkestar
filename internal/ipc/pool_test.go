@@ -268,7 +268,7 @@ func TestParseRemote(t *testing.T) {
 // The ssh command line is where a missing option costs a handshake per call
 // and a missing -- lets a host name become an ssh option.
 func TestSSHArguments(t *testing.T) {
-	arguments := ipc.SSHArguments("user@box", "orkestar")
+	arguments := ipc.SSHArguments("user@box", "orkestar", "")
 	joined := strings.Join(arguments, " ")
 
 	for _, required := range []string{
@@ -280,6 +280,13 @@ func TestSSHArguments(t *testing.T) {
 		if !strings.Contains(joined, required) {
 			t.Errorf("the command line is missing %q: %v", required, arguments)
 		}
+	}
+
+	// A named session is selected before the verb, the same way the client
+	// reads --session on its own command line.
+	named := strings.Join(ipc.SSHArguments("user@box", "orkestar", "agents"), " ")
+	if !strings.Contains(named, "--session agents daemon proxy") {
+		t.Errorf("a named session is not selected on the far side: %v", named)
 	}
 
 	// Everything after -- is the host and the command, so nothing there can be

@@ -35,6 +35,9 @@ type Remote struct {
 	// Executable is the orkestar binary on the far side, for the case where it
 	// is not on a non-interactive PATH.
 	Executable string
+	// Session selects a named daemon session on the far side. Empty means the
+	// default session.
+	Session string
 }
 
 // ParseRemote reads the --remote form. It deliberately accepts only what ssh
@@ -60,7 +63,7 @@ func NewRemoteClient(remote Remote) *Client {
 		executable = "orkestar"
 	}
 	client := NewClientWithDialer("ssh "+remote.Host, func(ctx context.Context, _ time.Duration) (net.Conn, error) {
-		return dialSSH(ctx, remote.Host, executable)
+		return dialSSH(ctx, remote.Host, executable, remote.Session)
 	})
 	client.remote = true
 	return client
@@ -69,17 +72,22 @@ func NewRemoteClient(remote Remote) *Client {
 // sshArguments is the command line each connection runs. It is separate so a
 // test can check it without an sshd: the options here decide whether every
 // pooled connection pays a fresh handshake, and the -- decides whether a host
-// can pass ssh options of its own.
-func sshArguments(host, executable string) []string {
-	return []string{
+// can pass ssh options of its own. A named session is selected before the
+// verb, the way --session is read on the command line.
+func sshArguments(host, executable, session string) []string {
+	arguments := []string{
 		"-o", "BatchMode=yes",
 		// Share one authenticated connection between sessions, and hold it
 		// briefly after the last, so a burst of calls pays for one handshake.
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=" + controlPathTemplate,
 		"-o", "ControlPersist=60",
-		"--", host, executable, "daemon", "proxy",
+		"--", host, executable,
 	}
+	if session != "" {
+		arguments = append(arguments, "--session", session)
+	}
+	return append(arguments, "daemon", "proxy")
 }
 
 // dialSSH starts one ssh session and presents its stdio as a connection.
@@ -90,11 +98,11 @@ func sshArguments(host, executable string) []string {
 // kills ssh the moment the call that opened it returns, which would leave a
 // remote pane dead before its first frame and make pooling impossible. A
 // connection's lifetime is the connection's, and Close ends it.
-func dialSSH(ctx context.Context, host, executable string) (net.Conn, error) {
+func dialSSH(ctx context.Context, host, executable, session string) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return startSSHCommand(exec.Command("ssh", sshArguments(host, executable)...), host)
+	return startSSHCommand(exec.Command("ssh", sshArguments(host, executable, session)...), host)
 }
 
 // net.Pipe supplies real, independent read/write deadlines on all platforms.
@@ -196,4 +204,6 @@ func (a sshAddr) Network() string { return "ssh" }
 func (a sshAddr) String() string  { return string(a) }
 
 // SSHArguments exposes the command line for tests in other packages.
-func SSHArguments(host, executable string) []string { return sshArguments(host, executable) }
+func SSHArguments(host, executable, session string) []string {
+	return sshArguments(host, executable, session)
+}
