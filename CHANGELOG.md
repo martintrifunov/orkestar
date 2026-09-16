@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+A bug-fix pass after 0.4.2. Cursor and Grok research is recorded in
+`docs/validation.md`.
+
+- Name an untracked binary or oversized file in a diff instead of failing the
+  whole diff, which had permanently blocked the done transition on an
+  auto-review task.
+- Reject a lease `duration_ms` that is negative or overflows, which could turn
+  a bounded exclusive lease into a permanent one.
+- Only unlink a daemon socket when the startup probe gets a refused
+  connection, not when it times out against a live but busy daemon.
+- Recover from a panic in the terminal output pump, in the PTY wait, and in
+  agent session exit watching, and stop reading a screen whose buffer a
+  recovered render panic left corrupt.
+- End `agent.attach` streams when the session ends, and forget a
+  half-launched agent when terminal setup fails.
+- Forget the old agent record, hook token and terminal when resuming.
+- Parse git output from stdout only, so a warning on a successful command is
+  not read as a changed file or a worktree.
+- Stop `permission.list` from rewriting the snapshot on every poll.
+
 ## 0.4.2
 
 A crash in one terminal pane's rendering used to take the whole daemon down
