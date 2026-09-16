@@ -667,7 +667,7 @@ func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
 		"task_wait", "agent_wait", "agent_prompt", "task_set_status",
 		"task_update", "task_diff", "artifact_create", "agent_list",
 		"resource_acquire", "terminal_start", "terminal_list", "terminal_read",
-		"terminal_send",
+		"terminal_send", "terminal_wait",
 	} {
 		if !strings.Contains(instructions, tool) {
 			t.Errorf("the instructions never mention %s", tool)
@@ -746,6 +746,18 @@ func TestMCPServerTerminalControl(t *testing.T) {
 		"enter":       true,
 	})
 	waitForText("got:ping")
+
+	waited := callTool[struct {
+		Text string `json:"text"`
+	}](t, session, "terminal_wait", map[string]any{
+		"terminal_id": terminal.ID, "contains": "got:ping", "timeout_seconds": 5,
+	})
+	if !strings.Contains(waited.Text, "got:ping") {
+		t.Fatalf("terminal_wait returned without the matched output: %q", waited.Text)
+	}
+	callToolExpectError(t, session, "terminal_wait", map[string]any{
+		"terminal_id": terminal.ID, "contains": "never-printed", "timeout_seconds": 1,
+	})
 
 	listed := callTool[struct {
 		Terminals []daemon.Terminal `json:"terminals"`

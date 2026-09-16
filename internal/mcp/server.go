@@ -118,6 +118,11 @@ func NewServer(client *ipc.Client) *sdk.Server {
 	}, terminalSend(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "terminal_wait",
+		Description: "Block until a terminal's output contains text, or fail if the terminal stops or the wait times out. Use this instead of calling terminal_read in a loop.",
+	}, terminalWait(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_assign",
 		Description: "Assign a task to an agent by ID.",
 	}, taskAssign(client))
@@ -541,6 +546,34 @@ func terminalSend(client *ipc.Client) sdk.ToolHandlerFor[terminalSendInput, map[
 			"terminal_id": in.TerminalID,
 			"text":        in.Text,
 			"enter":       in.Enter,
+		})
+	}
+}
+
+type terminalWaitInput struct {
+	TerminalID     string `json:"terminal_id"`
+	Contains       string `json:"contains" jsonschema:"text to look for in the terminal's output"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"how long to wait before giving up; defaults to 300"`
+}
+
+type terminalWaitOutput struct {
+	TerminalID string `json:"terminal_id"`
+	State      string `json:"state"`
+	Text       string `json:"text"`
+}
+
+func terminalWait(client *ipc.Client) sdk.ToolHandlerFor[terminalWaitInput, terminalWaitOutput] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in terminalWaitInput) (*sdk.CallToolResult, terminalWaitOutput, error) {
+		seconds := in.TimeoutSeconds
+		if seconds <= 0 {
+			seconds = waitSeconds
+		}
+		ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds+15)*time.Second)
+		defer cancel()
+		return callIPC[terminalWaitOutput](ctx, client, "terminal.wait", map[string]any{
+			"terminal_id":     in.TerminalID,
+			"contains":        in.Contains,
+			"timeout_seconds": seconds,
 		})
 	}
 }

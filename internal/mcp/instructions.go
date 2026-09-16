@@ -45,7 +45,9 @@ While work is running:
 - terminal_start runs an argv command as a daemon-owned terminal, so it keeps
   running while nobody is attached. terminal_list shows the terminals,
   terminal_read returns the last lines one has printed, and terminal_send types
-  into one while no client is holding its input.
+  into one while no client is holding its input. terminal_wait blocks until a
+  terminal's output contains text, so waiting for a command to reach a point
+  does not need terminal_read in a loop.
 
 Finishing:
 
