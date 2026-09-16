@@ -221,20 +221,23 @@ herdr restores the screen shape after a server restart and can resume eligible
 agent conversations; Orkestar restores metadata, marks everything interrupted,
 and keeps PTY output memory-only.
 
-- [ ] Persist the split tree, focus and per-workspace directory, and rebuild
-      it on daemon start.
-- [ ] Optional scrollback persistence, with the secrets caveat stated.
+- [x] Remember the split tree and focus, and return them on the next start.
+      The client owns the layout, so it persists `<runtime>/layout.json` and
+      rebuilds it against the terminals the daemon is still running.
+- [x] Optional scrollback persistence, with the secrets caveat stated.
 - [x] Automatic native session restore for adapters that reported an ID, with
       an explicit opt-out.
 
-Progress 2026-09-16: automatic native session restore landed, and the client
-now remembers its pane layout. When the first client connects after a daemon
-restart the daemon relaunches every interrupted agent that reported a native
-session ID; `ORKESTAR_AUTO_RESUME=0` disables it, and a plain command is still
-never restarted. The TUI stores its split tree and focused pane in
-`<runtime>/layout.json` (terminal panes only) and restores them on start
-against the terminals the daemon is still running; a pane whose terminal is
-gone is dropped. Optional scrollback persistence remains.
+Progress 2026-09-16: automatic native session restore, client-side pane layout
+persistence and opt-in pane history landed. When the first client connects
+after a daemon restart the daemon relaunches every interrupted agent that
+reported a native session ID; `ORKESTAR_AUTO_RESUME=0` disables it, and a plain
+command is still never restarted. The TUI stores its split tree and focused
+pane in `<runtime>/layout.json` (terminal panes only) and restores them on
+start against the terminals the daemon is still running; a pane whose terminal
+is gone is dropped. With `ORKESTAR_PANE_HISTORY=1` the daemon also persists
+each terminal's bounded recent text and restores it into `terminal.read`, with
+the secrets caveat documented.
 
 Acceptance: restart the daemon; layout, labels and supported agent
 conversations return without typing a resume command.
