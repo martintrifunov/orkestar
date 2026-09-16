@@ -15,6 +15,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/agent/claude"
 	"github.com/martintrifunov/orkestar/internal/agent/codex"
 	"github.com/martintrifunov/orkestar/internal/agent/cursor"
@@ -416,14 +417,16 @@ func serveDaemon(paths runtimepath.Paths) error {
 	server.SetVersion(version)
 	server.SetAutoResume(autoResumeEnabled())
 	server.SetPaneHistory(paneHistoryEnabled())
-	server.RegisterAdapter(claude.New(""))
-	server.RegisterAdapter(codex.New(""))
-	server.RegisterAdapter(opencode.New("", "", nil))
-	// Registered so they can be launched; each reports only what a PTY session
-	// can see, since neither CLI's hook contract has been verified.
-	server.RegisterAdapter(cursor.New(""))
-	server.RegisterAdapter(grok.New(""))
-	registerManifestAdapters(server)
+	adapters, err := buildAdapters()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
+	}
+	for _, adapter := range adapters {
+		server.RegisterAdapter(adapter)
+	}
+	// A reload rebuilds the whole set, so a changed or removed manifest takes
+	// effect without restarting the daemon.
+	server.SetAdapterLoader(buildAdapters)
 	// OpenCode is the reviewer adapter because its managed mode returns a
 	// structured reply; Claude Code's interactive PTY adapter has no
 	// discrete response to parse a verdict from.
@@ -431,19 +434,24 @@ func serveDaemon(paths runtimepath.Paths) error {
 	return server.Serve(ctx)
 }
 
-// registerManifestAdapters loads the user's declarative agent manifests and
-// registers them. A manifest may take a built-in adapter's name, which is how
-// a user points one at a different executable or adds a resume command. A bad
-// manifest is reported and skipped rather than stopping the daemon.
-func registerManifestAdapters(server *daemon.Server) {
+// buildAdapters returns the whole adapter set: the built-ins, then the user's
+// declarative manifests, which may take a built-in's name. A bad manifest is
+// reported and skipped rather than stopping the daemon.
+func buildAdapters() ([]agent.Adapter, error) {
+	adapters := []agent.Adapter{
+		claude.New(""),
+		codex.New(""),
+		opencode.New("", "", nil),
+		cursor.New(""),
+		grok.New(""),
+	}
 	directory, err := runtimepath.AgentManifestDirectory()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "orkestar: agent manifests: %v\n", err)
-		return
+		return adapters, err
 	}
-	manifests, err := manifest.LoadDir(directory)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
+	manifests, manifestErr := manifest.LoadDir(directory)
+	if manifestErr != nil {
+		fmt.Fprintf(os.Stderr, "orkestar: %v\n", manifestErr)
 	}
 	for _, descriptor := range manifests {
 		adapter, err := manifest.New(descriptor)
@@ -451,8 +459,9 @@ func registerManifestAdapters(server *daemon.Server) {
 			fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
 			continue
 		}
-		server.RegisterAdapter(adapter)
+		adapters = append(adapters, adapter)
 	}
+	return adapters, nil
 }
 
 // autoResumeEnabled reports whether the daemon may relaunch the agent sessions

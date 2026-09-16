@@ -230,6 +230,30 @@ func (s *Server) RegisterAdapter(adapter agent.Adapter) {
 	s.adapters[adapter.Capabilities().Name] = adapter
 }
 
+// reloadAdapters rebuilds the adapter set from the configured loader, so a
+// changed or removed agent manifest takes effect without a restart. Running
+// sessions are unaffected; only the next launch sees the new set.
+func (s *Server) reloadAdapters() ([]agent.Capabilities, error) {
+	if s.adapterLoader == nil {
+		return nil, errors.New("adapter reload is not configured; restart the daemon to load manifests")
+	}
+	adapters, err := s.adapterLoader()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.adapters = make(map[string]agent.Adapter, len(adapters))
+	capabilities := make([]agent.Capabilities, 0, len(adapters))
+	for _, adapter := range adapters {
+		registered := adapter.Capabilities()
+		s.adapters[registered.Name] = adapter
+		capabilities = append(capabilities, registered)
+	}
+	s.mu.Unlock()
+	sort.Slice(capabilities, func(left, right int) bool { return capabilities[left].Name < capabilities[right].Name })
+	return capabilities, nil
+}
+
 // launchParams is everything a launch needs. It is a named type because a
 // template applies one without an IPC request to decode.
 type launchParams struct {

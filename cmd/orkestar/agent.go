@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/daemonclient"
 	"github.com/martintrifunov/orkestar/internal/ipc"
@@ -46,7 +47,7 @@ func runHook() error {
 }
 func runAgent(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <claude-code|opencode|codex> | resume <agent-id> | explain <agent-id> | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")
+		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <claude-code|opencode|codex> | resume <agent-id> | explain <agent-id> | reload | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -108,6 +109,12 @@ func runAgent(paths runtimepath.Paths, args []string) error {
 			return err
 		}
 		result = explanation
+	case "reload":
+		var capabilities []agent.Capabilities
+		if err := client.Call(ctx, "agent.reloadAdapters", nil, &capabilities); err != nil {
+			return err
+		}
+		result = capabilities
 	default:
 		return fmt.Errorf("unknown agent command %q", args[0])
 	}

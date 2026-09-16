@@ -60,6 +60,9 @@ type Server struct {
 	// paneHistory persists bounded terminal text across a restart. Off by
 	// default: terminal output can hold secrets, tokens and prompts.
 	paneHistory bool
+	// adapterLoader rebuilds the full adapter set, built-ins and manifests,
+	// when a reload is requested. Nil means reload is not configured.
+	adapterLoader func() ([]agent.Adapter, error)
 
 	mu              sync.RWMutex
 	listener        net.Listener
@@ -87,6 +90,11 @@ func (s *Server) SetAutoResume(enabled bool) { s.autoResume = enabled }
 // daemon restart. Call before Serve. Off by default because pane output can
 // contain secrets.
 func (s *Server) SetPaneHistory(enabled bool) { s.paneHistory = enabled }
+
+// SetAdapterLoader supplies the function a reload uses to rebuild the whole
+// adapter set. Rebuilding from scratch is what lets a removed or changed
+// manifest take effect, rather than only adding to what is registered.
+func (s *Server) SetAdapterLoader(loader func() ([]agent.Adapter, error)) { s.adapterLoader = loader }
 
 func NewServer(socketPath string) *Server {
 	return &Server{
@@ -294,6 +302,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.resumeAgent(context.Background(), request.Params)
 	case "agent.explain":
 		result, err = s.explainAgent(request.Params)
+	case "agent.reloadAdapters":
+		result, err = s.reloadAdapters()
 	case "agent.prompt":
 		result, err = s.promptAgent(context.Background(), request.Params)
 	case "agent.interrupt":
@@ -375,7 +385,7 @@ func readOnlyMethod(method string) bool {
 // lifecycle writes.
 func volatileMethod(method string) bool {
 	switch method {
-	case "terminal.send":
+	case "terminal.send", "agent.reloadAdapters":
 		return true
 	default:
 		return false
