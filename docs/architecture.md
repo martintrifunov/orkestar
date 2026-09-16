@@ -211,7 +211,10 @@ focused pane; hidden attachments remain alive and cycle with F6. Mouse clicks an
 the content area. Git review and standard file editing have their own persistent
 panes; native Vim/Nano use daemon-owned terminals. The standard editor colors
 source and configuration files, lexing in the background so typing never waits
-for it. See
+for it. The client remembers its layout in `<runtime>/layout.json` — the split
+tree and focused pane, terminal panes only, since editor and review panes live
+in memory — and restores it on start against the terminals the daemon is still
+running; a pane whose terminal is gone is dropped. See
 [ADR 0004](decisions/0004-review-and-editor-panes.md) and
 [ADR 0005](decisions/0005-nested-split-panes.md).
 

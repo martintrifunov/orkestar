@@ -227,11 +227,14 @@ and keeps PTY output memory-only.
 - [x] Automatic native session restore for adapters that reported an ID, with
       an explicit opt-out.
 
-Progress 2026-09-16: automatic native session restore landed. When the first
-client connects after a daemon restart, the daemon relaunches every interrupted
-agent that reported a native session ID; `ORKESTAR_AUTO_RESUME=0` disables it,
-and a plain command is still never restarted. Layout persistence and optional
-scrollback remain.
+Progress 2026-09-16: automatic native session restore landed, and the client
+now remembers its pane layout. When the first client connects after a daemon
+restart the daemon relaunches every interrupted agent that reported a native
+session ID; `ORKESTAR_AUTO_RESUME=0` disables it, and a plain command is still
+never restarted. The TUI stores its split tree and focused pane in
+`<runtime>/layout.json` (terminal panes only) and restores them on start
+against the terminals the daemon is still running; a pane whose terminal is
+gone is dropped. Optional scrollback persistence remains.
 
 Acceptance: restart the daemon; layout, labels and supported agent
 conversations return without typing a resume command.
