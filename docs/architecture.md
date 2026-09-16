@@ -31,8 +31,11 @@ and unchanged, and the merged board prefixes nothing, so the machine ID, not a
 rewritten ID, is what a caller routes on. The interface opens every saved
 machine and switches between them (`Ctrl+b g`): the current panes are detached
 and the selected machine's own layout is restored, and each pane attaches
-through that machine's client, so input follows the selection. A single merged
-sidebar across machines is not built.
+through that machine's client, so input follows the selection. The sidebar
+merges every machine's agents into one list with a machine column and a status
+line per machine, but a remote agent is shown rather than driven from here —
+resuming or stopping it means switching to its machine first, because the
+client that owns it is a different one.
 
 ## Core concepts
 

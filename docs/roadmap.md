@@ -306,9 +306,11 @@ and no saved machines.
       machine goes offline without moving the others.
 - [ ] A combined workspace and agent list with an attention rollup, and input
       routed to the selected machine. The merged board and attention rollup
-      exist (`federation.Manager.Board`, `machine board`); the TUI now selects
-      a machine (`Ctrl+b g`) and routes input to it, keeping each machine's own
-      layout, but a single merged sidebar across machines is not built.
+      exist (`federation.Manager.Board`, `machine board`); the TUI shows every
+      machine's agents inline in one sidebar with a machine column and a status
+      line per machine, selects a machine (`Ctrl+b g`) and routes input to it,
+      keeping each machine's own layout. What remains is driving a remote
+      agent's row directly (resume/stop) without selecting its machine first.
 - [ ] No local command, config or secret is copied to a remote.
 
 Depends on M11's negotiation. Acceptance: local plus two remotes; losing one
@@ -316,11 +318,13 @@ leaves the others usable and never moves the selection.
 
 Progress 2026-09-16: the saved-machine catalog, the federation manager
 (connections, health, backoff, merged board, routing), `machine
-status|board|call` and a TUI machine switcher landed, tested against
-in-process daemons. The interface opens every saved machine, switches with
-`Ctrl+b g`, detaches the current panes and restores the selected machine's own
-layout; each pane attaches through that machine's client, so input follows the
-selection. ssh against a real host still cannot be verified here (no sshd).
+status|board|call`, a TUI machine switcher and a merged agent sidebar landed,
+tested against in-process daemons. The sidebar lists every machine's agents
+with a machine column and a per-machine status line; switching with `Ctrl+b g`
+detaches the current panes and restores the selected machine's own layout, and
+each pane attaches through that machine's client, so input follows the
+selection. A remote agent row is shown but not driven from here yet, and ssh
+against a real host cannot be verified on this machine (no sshd).
 
 ### M13: Pane layout and daily-use parity
 
