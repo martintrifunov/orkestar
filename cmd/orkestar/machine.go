@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/martintrifunov/orkestar/internal/federation"
+	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/machine"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
 )
@@ -13,14 +17,17 @@ import (
 var errMachineUsage = errors.New(`usage:
   orkestar machine add <[user@]host> [--label NAME] [--remote-session NAME]
   orkestar machine list [--json]
+  orkestar machine status
+  orkestar machine board
+  orkestar machine call <machine-id> <method> [json-params]
   orkestar machine rename <machine-id> <label>
   orkestar machine enable|disable <machine-id>
   orkestar machine remove <machine-id>`)
 
-// runMachine manages the saved ssh machines. Everything here is local
-// configuration; connecting to a machine is what --remote does, and the
-// catalog never holds a credential.
-func runMachine(args []string) error {
+// runMachine manages the saved ssh machines and the combined view across them.
+// Everything local here is configuration; connecting to a machine is what
+// --remote does, and the catalog never holds a credential.
+func runMachine(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
 		return errMachineUsage
 	}
@@ -125,6 +132,61 @@ func runMachine(args []string) error {
 		}
 		fmt.Printf("%s removed\n", args[1])
 		return nil
+	case "status":
+		if len(args) != 1 {
+			return errMachineUsage
+		}
+		manager := federation.New("Local", ipc.NewClient(paths.Socket), nil)
+		manager.SetMachines(catalog.List())
+		defer manager.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		manager.Refresh(ctx)
+		for _, status := range manager.Status() {
+			host := status.Machine.Host
+			if status.Local {
+				host = "-"
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", status.Machine.Label, status.Machine.ID, status.State, host, status.Err)
+		}
+		return nil
+	case "board":
+		if len(args) != 1 {
+			return errMachineUsage
+		}
+		manager := federation.New("Local", ipc.NewClient(paths.Socket), nil)
+		manager.SetMachines(catalog.List())
+		defer manager.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		manager.Refresh(ctx)
+		return json.NewEncoder(os.Stdout).Encode(manager.Board())
+	case "call":
+		if len(args) < 3 || len(args) > 4 {
+			return errMachineUsage
+		}
+		saved, err := catalog.Find(args[1])
+		if err != nil {
+			return err
+		}
+		var params any = map[string]any{}
+		if len(args) == 4 {
+			if err := json.Unmarshal([]byte(args[3]), &params); err != nil {
+				return fmt.Errorf("params are not valid JSON: %w", err)
+			}
+		}
+		client, err := federation.RemoteDialer(context.Background(), saved)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var result any
+		if err := client.Call(ctx, args[2], params, &result); err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(result)
 	default:
 		return errMachineUsage
 	}

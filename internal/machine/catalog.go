@@ -111,6 +111,15 @@ func (c *Catalog) Add(label, host, session string) (Machine, error) {
 	return machine, nil
 }
 
+// Find returns a saved machine by ID.
+func (c *Catalog) Find(id string) (Machine, error) {
+	index, err := c.index(id)
+	if err != nil {
+		return Machine{}, err
+	}
+	return c.Machines[index], nil
+}
+
 // Rename changes a machine's displayed label.
 func (c *Catalog) Rename(id, label string) (Machine, error) {
 	label = strings.TrimSpace(label)
