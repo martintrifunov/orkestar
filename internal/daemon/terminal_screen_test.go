@@ -132,3 +132,48 @@ func TestDaemonAnswersQueriesWithoutClientAndArbitratesViewers(t *testing.T) {
 		t.Fatal("authoritative screen lost latest output")
 	}
 }
+
+// terminal.read is the read half of the agent-native control surface: a
+// script or agent sees a terminal's recent output as plain text without
+// attaching. It must be bounded to the requested line count and ignore the
+// blank rows that pad a screen.
+func TestTerminalReadReturnsBoundRecentOutput(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-read-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	_, client, _ := serveRecoveryTest(t, filepath.Join(dir, "socket"))
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": dir}, &w)
+	var started Terminal
+	callRecovery(t, client, "terminal.start", map[string]any{
+		"workspace_id": w.ID,
+		"command":      []string{"/bin/sh", "-c", "printf 'alpha\\nbeta\\ngamma\\n'; sleep 5"},
+	}, &started)
+
+	var read struct {
+		Text  string `json:"text"`
+		Lines int    `json:"lines"`
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		callRecovery(t, client, "terminal.read", map[string]any{"terminal_id": started.ID, "lines": 2}, &read)
+		if strings.Contains(read.Text, "gamma") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("terminal output never became readable: %q", read.Text)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if read.Lines != 2 {
+		t.Fatalf("expected two lines, got %d: %q", read.Lines, read.Text)
+	}
+	if strings.Contains(read.Text, "alpha") {
+		t.Fatalf("expected only the last two lines, got %q", read.Text)
+	}
+	if !strings.Contains(read.Text, "beta") || !strings.Contains(read.Text, "gamma") {
+		t.Fatalf("expected beta and gamma, got %q", read.Text)
+	}
+}

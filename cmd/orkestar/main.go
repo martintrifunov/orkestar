@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -171,7 +172,7 @@ func runRemoteTUI(host, directory string) error {
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | stop <terminal-id> | remove <terminal-id>")
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | stop <terminal-id> | remove <terminal-id>")
 	}
 
 	switch args[0] {
@@ -198,6 +199,38 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 			return err
 		}
 		fmt.Printf("%s\t%s\t%s\n", terminal.ID, terminal.State, terminal.Command[0])
+		return nil
+	case "read":
+		if len(args) < 2 {
+			return errors.New("usage: orkestar terminal read <terminal-id> [--lines N]")
+		}
+		terminalID := args[1]
+		lineCount := 0
+		for index := 2; index < len(args); index++ {
+			if args[index] != "--lines" || index+1 >= len(args) {
+				return errors.New("usage: orkestar terminal read <terminal-id> [--lines N]")
+			}
+			count, err := strconv.Atoi(args[index+1])
+			if err != nil {
+				return fmt.Errorf("--lines needs a number: %w", err)
+			}
+			lineCount = count
+			index++
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var result struct {
+			Text    string `json:"text"`
+			Columns int    `json:"columns"`
+			Rows    int    `json:"rows"`
+		}
+		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal.read", map[string]any{
+			"terminal_id": terminalID,
+			"lines":       lineCount,
+		}, &result); err != nil {
+			return err
+		}
+		fmt.Println(result.Text)
 		return nil
 	case "stop", "remove":
 		if len(args) != 2 {

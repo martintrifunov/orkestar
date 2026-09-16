@@ -243,6 +243,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.createWorkspace(request.Params)
 	case "terminal.history":
 		result, err = s.terminalHistory(request.Params)
+	case "terminal.read":
+		result, err = s.terminalRead(request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
 	case "terminal.stop":
@@ -321,7 +323,7 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 func readOnlyMethod(method string) bool {
 	switch method {
 	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
-		"task.wait", "agent.wait", "template.list", "permission.list":
+		"terminal.read", "task.wait", "agent.wait", "template.list", "permission.list":
 		return true
 	default:
 		return false

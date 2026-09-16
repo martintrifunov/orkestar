@@ -120,6 +120,21 @@ func (s *terminalSession) frame() terminal.Frame {
 	return f
 }
 
+// history returns the scrollback, or nil once a recovered render panic has
+// made the emulator unsafe to read. Callers must hold s.mu.
+func (s *terminalSession) history() []string {
+	if s.renderBroken {
+		return nil
+	}
+	var lines []string
+	if err := recoverPanic(fmt.Sprintf("terminal %s history", s.metadata.ID), func() {
+		lines = s.screen.History()
+	}); err != nil {
+		s.renderBroken = true
+	}
+	return lines
+}
+
 // frameEvent encodes the current screen the way subscriber wants it. Callers
 // must hold s.mu.
 func (s *terminalSession) frameEvent(screen bool, terminalID string) (string, []byte) {
