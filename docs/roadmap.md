@@ -252,7 +252,9 @@ per-agent resume commands, so a new CLI works without code.
       rules, and supported modes.
 - [ ] Screen-detection fallback that infers working, blocked or idle from the
       pane when no hook channel exists.
-- [ ] Manifest registry with reload and local overrides.
+- [x] Manifest registry with reload and local overrides. Landed 2026-09-16:
+      manifests load at startup and a manifest may take a built-in adapter's
+      name; `agent.reloadAdapters` (CLI `agent reload`) rebuilds the whole set.
 - [ ] Move Cursor and Grok onto manifests with their documented resume flags
       and verify against the installed CLIs.
 - [ ] Hooks stay authoritative when they exist; detection is the fallback.
