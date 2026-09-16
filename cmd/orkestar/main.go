@@ -147,10 +147,13 @@ func runRemoteTUI(host, directory string) error {
 	if err := client.Call(ctx, "system.ping", nil, &status); err != nil {
 		return err
 	}
-	if remoteVersion := status["version"]; remoteVersion != "" && remoteVersion != version {
+	// Compatibility is the protocol generation, not the build: two builds on
+	// the same protocol interoperate, so only a real protocol difference is
+	// refused, and the message names it.
+	if compatible, detail := protocolCompatible(status); !compatible {
 		return fmt.Errorf(
-			"this is orkestar %s and %s runs %s; the two speak the same protocol only by accident, so upgrade one of them",
-			version, remote.Host, remoteVersion)
+			"this is orkestar %s (protocol %d) and %s speaks %s; the two cannot talk until one side is upgraded",
+			version, ipc.Version, remote.Host, detail)
 	}
 
 	// The interface needs a directory to create workspaces, tasks and shells
@@ -475,6 +478,23 @@ func autoResumeEnabled() bool {
 // restart. Off by default: pane output can contain secrets.
 func paneHistoryEnabled() bool {
 	return os.Getenv("ORKESTAR_PANE_HISTORY") == "1"
+}
+
+// protocolCompatible reports whether this client can talk to the daemon whose
+// ping status it has. A daemon that advertises a protocol generation must
+// match; one too old to advertise it is judged by build version, which is all
+// it had.
+func protocolCompatible(status map[string]string) (bool, string) {
+	if remoteProtocol := status["protocol"]; remoteProtocol != "" {
+		if remoteProtocol != strconv.Itoa(ipc.Version) {
+			return false, "protocol " + remoteProtocol
+		}
+		return true, ""
+	}
+	if remoteVersion := status["version"]; remoteVersion != "" && remoteVersion != version {
+		return false, "version " + remoteVersion
+	}
+	return true, ""
 }
 
 func stopDaemon(paths runtimepath.Paths) error {

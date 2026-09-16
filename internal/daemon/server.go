@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -270,7 +271,7 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 
 	switch request.Method {
 	case "system.ping":
-		result = map[string]string{"status": "ok", "version": s.buildVersion}
+		result = map[string]string{"status": "ok", "version": s.buildVersion, "protocol": strconv.Itoa(ipc.Version)}
 	case "system.snapshot":
 		result = s.snapshot()
 	case "system.reset":
