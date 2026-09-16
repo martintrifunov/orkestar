@@ -172,11 +172,15 @@ Leases and pending permission channels expire when their daemon disappears.
 
 Client reattachment retains the live process, authoritative screen and bounded
 scrollback. Daemon restart restores metadata and marks previously active agents
-and terminals interrupted. It never automatically restarts a command. Native
-resume is explicit (`agent.resume`, CLI `agent resume`, or `u` in Agents), creates
-a new local agent/terminal ID and passes the saved native session ID to the
-adapter. No native ID means no resume; launch a new agent instead. PTY output and
-screens are currently memory-only and are unavailable after daemon restart.
+and terminals interrupted. When the first client connects after a restart, the
+daemon relaunches every interrupted agent that reported a native session ID, so
+the conversations come back without a command; `ORKESTAR_AUTO_RESUME=0` turns
+that off. A restart never automatically restarts a plain command, and PTY
+output and screens remain memory-only and unavailable after daemon restart.
+Native resume can also be issued explicitly (`agent.resume`, CLI `agent
+resume`, or `u` in Agents), which creates a new local agent/terminal ID and
+passes the saved native session ID to the adapter. No native ID means no
+resume; launch a new agent instead.
 
 ## Dependency boundaries
 

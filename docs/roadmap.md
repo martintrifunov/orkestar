@@ -224,8 +224,14 @@ and keeps PTY output memory-only.
 - [ ] Persist the split tree, focus and per-workspace directory, and rebuild
       it on daemon start.
 - [ ] Optional scrollback persistence, with the secrets caveat stated.
-- [ ] Automatic native session restore for adapters that reported an ID, with
+- [x] Automatic native session restore for adapters that reported an ID, with
       an explicit opt-out.
+
+Progress 2026-09-16: automatic native session restore landed. When the first
+client connects after a daemon restart, the daemon relaunches every interrupted
+agent that reported a native session ID; `ORKESTAR_AUTO_RESUME=0` disables it,
+and a plain command is still never restarted. Layout persistence and optional
+scrollback remain.
 
 Acceptance: restart the daemon; layout, labels and supported agent
 conversations return without typing a resume command.
