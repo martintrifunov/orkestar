@@ -187,7 +187,10 @@ Where herdr has `pane.split`, Orkestar's daemon equivalent is starting another
 terminal (`terminal.start`).
 
 - [ ] Terminal and session control over IPC with CLI wrappers: start, send
-      text or keys, resize, rename, stop, and remove.
+      text or keys, resize, rename, stop, and remove. `terminal.start`,
+      `terminal.send`, `terminal.stop` and `terminal.remove` landed 2026-09-16;
+      resize happens through an attachment, and a terminal has no name to
+      rename (pane labels are client-side).
 - [ ] Read a terminal's output: visible, recent, and unwrapped.
       `terminal.read` and `orkestar terminal read --lines N` landed 2026-09-16
       for visible and recent output; unwrapped output remains.
@@ -196,10 +199,13 @@ terminal (`terminal.start`).
 - [ ] Expose the same surface over MCP so one agent can read and drive another.
 - [ ] `agent explain`: why Orkestar believes an agent is in its current state.
 
-First slice landed 2026-09-16: `terminal.read` over IPC and `orkestar terminal
-read <id> [--lines N]`, verified against a scratch daemon. Acceptance for the
-milestone remains: an agent using only the CLI or socket starts a terminal,
-runs a command, reads its output, and waits for another agent to block.
+First slices landed 2026-09-16: `terminal.read` and `terminal.send` over IPC,
+with `orkestar terminal read <id> [--lines N]` and `orkestar terminal send
+<id> [--enter] <text>`, verified against a scratch daemon. `terminal.send`
+refuses while a client holds the input controller, so a script cannot race a
+person typing. Acceptance for the milestone remains: an agent using only the
+CLI or socket starts a terminal, runs a command, reads its output, and waits
+for another agent to block.
 
 ### M9: Session continuity across daemon restart
 
