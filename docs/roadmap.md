@@ -196,7 +196,9 @@ terminal (`terminal.start`).
       for visible and recent output; unwrapped output remains.
 - [ ] Event subscriptions for terminal, agent and workspace lifecycle, and
       extend the existing waits with output and agent-state conditions.
-- [ ] Expose the same surface over MCP so one agent can read and drive another.
+- [x] Expose the same surface over MCP so one agent can read and drive another.
+      `terminal_start`, `terminal_list`, `terminal_read` and `terminal_send`
+      landed 2026-09-16, and the connect instructions teach them.
 - [ ] `agent explain`: why Orkestar believes an agent is in its current state.
 
 First slices landed 2026-09-16: `terminal.read` and `terminal.send` over IPC,
