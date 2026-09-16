@@ -11,7 +11,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os/exec"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -126,6 +128,9 @@ func (s *Session) Close() error {
 
 func (s *Session) watchExit() {
 	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("agent session %s: recovered panic watching process exit: %v\n%s", s.id, r, debug.Stack())
+		}
 		s.mu.Lock()
 		s.closed = true
 		close(s.events)
