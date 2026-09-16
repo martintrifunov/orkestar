@@ -98,6 +98,11 @@ func NewServer(client *ipc.Client) *sdk.Server {
 	}, agentList(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "agent_explain",
+		Description: "Explain why Orkestar believes an agent is in its current state: its signal source, the permission it is waiting on, whether it is live, and whether it can be resumed.",
+	}, agentExplain(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "terminal_start",
 		Description: "Run an argv command in a workspace as a daemon-owned terminal and return it. The process keeps running while nobody is attached.",
 	}, terminalStart(client))
@@ -462,6 +467,16 @@ func agentList(client *ipc.Client) sdk.ToolHandlerFor[agentListInput, agentListO
 			return nil, agentListOutput{}, fmt.Errorf("system.snapshot: %w", err)
 		}
 		return nil, agentListOutput{Agents: snapshot.Agents, Adapters: snapshot.Adapters}, nil
+	}
+}
+
+type agentExplainInput struct {
+	AgentID string `json:"agent_id"`
+}
+
+func agentExplain(client *ipc.Client) sdk.ToolHandlerFor[agentExplainInput, daemon.AgentExplanation] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in agentExplainInput) (*sdk.CallToolResult, daemon.AgentExplanation, error) {
+		return callIPC[daemon.AgentExplanation](ctx, client, "agent.explain", map[string]string{"agent_id": in.AgentID})
 	}
 }
 

@@ -667,7 +667,7 @@ func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
 		"task_wait", "agent_wait", "agent_prompt", "task_set_status",
 		"task_update", "task_diff", "artifact_create", "agent_list",
 		"resource_acquire", "terminal_start", "terminal_list", "terminal_read",
-		"terminal_send", "terminal_wait",
+		"terminal_send", "terminal_wait", "agent_explain",
 	} {
 		if !strings.Contains(instructions, tool) {
 			t.Errorf("the instructions never mention %s", tool)
@@ -771,4 +771,13 @@ func TestMCPServerTerminalControl(t *testing.T) {
 	if !found {
 		t.Fatalf("terminal_list did not include %s: %#v", terminal.ID, listed.Terminals)
 	}
+}
+
+// agent_explain is wired and forwards to the daemon; a missing agent is the
+// error path a caller hits when the ID is stale.
+func TestMCPServerAgentExplainForAMissingAgent(t *testing.T) {
+	t.Parallel()
+
+	session := connectMCP(t, startTestDaemon(t))
+	callToolExpectError(t, session, "agent_explain", map[string]any{"agent_id": "missing"})
 }

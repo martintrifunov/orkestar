@@ -37,6 +37,9 @@ While work is running:
 - agent_wait until "blocked" tells you when an agent genuinely cannot continue
   without a person. That is the moment worth surfacing to the user, and it is
   usually the only one.
+- agent_explain says why Orkestar believes an agent is in its current state:
+  its signal source, the permission it is waiting on, and whether it can be
+  resumed. Reach for it when a state is surprising.
 - task_wait until "startable" is how to hold a task that depends on others:
   it returns when nothing blocks it any more.
 - task_diff shows what a task changed, and any reviewer verdict recorded
