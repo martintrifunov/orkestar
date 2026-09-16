@@ -59,22 +59,15 @@ func (s *Server) terminalRead(raw json.RawMessage) (map[string]any, error) {
 
 	term.mu.Lock()
 	defer term.mu.Unlock()
-	lines := append(term.history(), strings.Split(term.frame().Content, "\n")...)
-	// Trailing blank rows are screen padding rather than output, and a caller
-	// asking for the last N lines should not have them counted.
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	for i, line := range lines {
-		lines[i] = strings.TrimRight(line, " ")
-	}
-	if len(lines) > limit {
-		lines = lines[len(lines)-limit:]
+	text := term.text(limit)
+	lines := 0
+	if text != "" {
+		lines = strings.Count(text, "\n") + 1
 	}
 	return map[string]any{
 		"terminal_id": p.TerminalID,
-		"text":        strings.Join(lines, "\n"),
-		"lines":       len(lines),
+		"text":        text,
+		"lines":       lines,
 		"columns":     term.metadata.Columns,
 		"rows":        term.metadata.Rows,
 	}, nil

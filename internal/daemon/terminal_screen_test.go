@@ -233,3 +233,50 @@ func TestTerminalSendDrivesAnUnattendedTerminal(t *testing.T) {
 		t.Fatal("terminal.send should be refused while a controller is attached")
 	}
 }
+
+// terminal.wait is the output-condition wait an orchestrator needs instead of
+// polling terminal.read: it returns as soon as the output matches, and fails
+// once the wait can no longer be satisfied rather than sitting out its timeout.
+func TestTerminalWaitReturnsWhenOutputMatches(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-wait-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	_, client, _ := serveRecoveryTest(t, filepath.Join(dir, "socket"))
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": dir}, &w)
+	var started Terminal
+	callRecovery(t, client, "terminal.start", map[string]any{
+		"workspace_id": w.ID,
+		"command":      []string{"/bin/sh", "-c", "sleep 0.2; printf 'wait-marker\\n'; sleep 5"},
+	}, &started)
+
+	var result struct {
+		Text  string `json:"text"`
+		State string `json:"state"`
+	}
+	matchContext, matchCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer matchCancel()
+	if err := client.Call(matchContext, "terminal.wait", map[string]any{
+		"terminal_id": started.ID, "contains": "wait-marker", "timeout_seconds": 2,
+	}, &result); err != nil {
+		t.Fatalf("terminal wait: %v", err)
+	}
+	if !strings.Contains(result.Text, "wait-marker") {
+		t.Fatalf("expected the matched output, got %q", result.Text)
+	}
+
+	timeoutContext, timeoutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer timeoutCancel()
+	startedAt := time.Now()
+	err = client.Call(timeoutContext, "terminal.wait", map[string]any{
+		"terminal_id": started.ID, "contains": "never-printed", "timeout_seconds": 2,
+	}, &result)
+	if err == nil {
+		t.Fatal("expected waiting for output that never arrives to fail")
+	}
+	if elapsed := time.Since(startedAt); elapsed < 1500*time.Millisecond {
+		t.Fatalf("wait returned in %s; it should hold until its timeout", elapsed)
+	}
+}

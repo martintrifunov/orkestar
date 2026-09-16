@@ -247,6 +247,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 		result, err = s.terminalRead(request.Params)
 	case "terminal.send":
 		result, err = s.terminalSend(request.Params)
+	case "terminal.wait":
+		result, err = s.waitForTerminal(context.Background(), request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
 	case "terminal.stop":
@@ -325,7 +327,8 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 func readOnlyMethod(method string) bool {
 	switch method {
 	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
-		"terminal.read", "task.wait", "agent.wait", "template.list", "permission.list":
+		"terminal.read", "terminal.wait", "task.wait", "agent.wait", "template.list",
+		"permission.list":
 		return true
 	default:
 		return false

@@ -2,11 +2,13 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,6 +135,22 @@ func (s *terminalSession) history() []string {
 		s.renderBroken = true
 	}
 	return lines
+}
+
+// text returns bounded plain-text output: scrollback then the visible screen,
+// trailing padding removed and at most limit lines. Callers must hold s.mu.
+func (s *terminalSession) text(limit int) string {
+	lines := append(s.history(), strings.Split(s.frame().Content, "\n")...)
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // frameEvent encodes the current screen the way subscriber wants it. Callers
@@ -369,6 +387,86 @@ func (s *Server) terminalSend(raw json.RawMessage) (map[string]string, error) {
 	}
 	term.screen.Input([]byte(text))
 	return map[string]string{"status": "sent"}, nil
+}
+
+// waitForTerminal blocks until a terminal's output contains text, so an
+// orchestrator can wait for a command to reach a point instead of polling
+// terminal.read. It attaches as a viewer, never as the input controller, and
+// fails rather than sitting once the terminal has stopped without a match.
+func (s *Server) waitForTerminal(ctx context.Context, raw json.RawMessage) (map[string]any, error) {
+	var p struct {
+		TerminalID string `json:"terminal_id"`
+		Contains   string `json:"contains"`
+		Timeout    int    `json:"timeout_seconds"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("decode terminal wait params: %w", err)
+	}
+	if p.Contains == "" {
+		return nil, errors.New("terminal wait needs text to look for")
+	}
+	timeout, err := waitTimeout(p.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	session := s.terminals[p.TerminalID]
+	s.mu.RUnlock()
+	if session == nil {
+		return nil, fmt.Errorf("unknown terminal")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	go guard("terminal.wait-cancel", func() {
+		select {
+		case <-s.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	})
+
+	_, sub, detach, err := session.subscribe(false, true)
+	if err != nil {
+		return nil, err
+	}
+	defer detach()
+
+	snapshot := func() map[string]any {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		return map[string]any{
+			"terminal_id": p.TerminalID,
+			"state":       session.metadata.State,
+			"text":        session.text(maxReadLines),
+		}
+	}
+	settled := func() (bool, bool) {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		return strings.Contains(session.text(maxReadLines), p.Contains), finishedState(session.metadata.State)
+	}
+
+	for {
+		if matched, stopped := settled(); matched {
+			return snapshot(), nil
+		} else if stopped {
+			return snapshot(), fmt.Errorf("terminal %q stopped before its output contained %q", p.TerminalID, p.Contains)
+		}
+		select {
+		case event, open := <-sub.events:
+			if !open {
+				return snapshot(), fmt.Errorf("terminal %q is no longer being watched", p.TerminalID)
+			}
+			if event.Name == "terminal.exit" {
+				return snapshot(), fmt.Errorf("terminal %q stopped before its output contained %q", p.TerminalID, p.Contains)
+			}
+		case <-ctx.Done():
+			return snapshot(), fmt.Errorf("waiting for terminal %q output: %w", p.TerminalID, ctx.Err())
+		case <-s.stop:
+			return snapshot(), errors.New("daemon is shutting down")
+		}
+	}
 }
 
 func (s *Server) startTerminal(raw json.RawMessage) (Terminal, error) {

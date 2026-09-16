@@ -173,7 +173,7 @@ func runRemoteTUI(host, directory string) error {
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] <text> | stop <terminal-id> | remove <terminal-id>")
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] <text> | wait <terminal-id> --contains <text> [--timeout N] | stop <terminal-id> | remove <terminal-id>")
 	}
 
 	switch args[0] {
@@ -258,6 +258,58 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 			return err
 		}
 		fmt.Printf("%s sent\n", terminalID)
+		return nil
+	case "wait":
+		if len(args) < 2 {
+			return errors.New("usage: orkestar terminal wait <terminal-id> --contains <text> [--timeout N]")
+		}
+		terminalID := args[1]
+		contains := ""
+		timeoutSeconds := 0
+		for index := 2; index < len(args); index++ {
+			switch args[index] {
+			case "--contains":
+				if index+1 >= len(args) {
+					return errors.New("--contains needs a value")
+				}
+				contains = args[index+1]
+				index++
+			case "--timeout":
+				if index+1 >= len(args) {
+					return errors.New("--timeout needs a number")
+				}
+				seconds, err := strconv.Atoi(args[index+1])
+				if err != nil {
+					return fmt.Errorf("--timeout needs a number: %w", err)
+				}
+				timeoutSeconds = seconds
+				index++
+			default:
+				return fmt.Errorf("unknown option %q", args[index])
+			}
+		}
+		if contains == "" {
+			return errors.New("terminal wait needs --contains <text>")
+		}
+		// The daemon owns the wait, so the call's deadline has to outlast it.
+		callTimeout := 5*time.Minute + 15*time.Second
+		if timeoutSeconds > 0 {
+			callTimeout = time.Duration(timeoutSeconds)*time.Second + 15*time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		var result struct {
+			Text  string `json:"text"`
+			State string `json:"state"`
+		}
+		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal.wait", map[string]any{
+			"terminal_id":     terminalID,
+			"contains":        contains,
+			"timeout_seconds": timeoutSeconds,
+		}, &result); err != nil {
+			return err
+		}
+		fmt.Println(result.Text)
 		return nil
 	case "stop", "remove":
 		if len(args) != 2 {
