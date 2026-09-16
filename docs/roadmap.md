@@ -197,7 +197,9 @@ terminal (`terminal.start`).
 - [ ] Event subscriptions for terminal, agent and workspace lifecycle, and
       extend the existing waits with output and agent-state conditions.
       `terminal.wait` on an output condition landed 2026-09-16 over IPC, CLI
-      and MCP; lifecycle event subscriptions remain.
+      and MCP; `task.attach` streams the board over IPC and CLI. Terminal and
+      agent lifecycle already stream through their attach methods. Workspace
+      lifecycle events remain.
 - [x] Expose the same surface over MCP so one agent can read and drive another.
       `terminal_start`, `terminal_list`, `terminal_read` and `terminal_send`
       landed 2026-09-16, and the connect instructions teach them.
