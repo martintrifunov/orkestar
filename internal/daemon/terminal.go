@@ -57,6 +57,10 @@ type terminalSession struct {
 	done       chan struct{}
 	inputDone  chan struct{}
 	closeOnce  sync.Once
+	// renderBroken records that a render panic was recovered. The emulator's
+	// buffer is then in an unknown state, so every later screen read is
+	// skipped rather than risking another panic on corrupt data.
+	renderBroken bool
 }
 
 func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSession {
@@ -95,12 +99,22 @@ func newTerminalSession(metadata Terminal, process *pty.Process) *terminalSessio
 func (s *terminalSession) snapshot() Terminal { s.mu.Lock(); defer s.mu.Unlock(); return s.metadata }
 
 // frame renders the screen, reusing the last render while the revision has
-// not moved. Callers must hold s.mu.
+// not moved. Callers must hold s.mu. Once a render panic has been recovered
+// the emulator is left alone and a blank frame of the right size is served,
+// so a corrupt screen cannot take a connection down with it.
 func (s *terminalSession) frame() terminal.Frame {
 	if s.renderedAt == s.revision && s.renderedAt != 0 {
 		return s.rendered
 	}
-	f := s.screen.Frame()
+	f := terminal.Frame{Columns: s.metadata.Columns, Rows: s.metadata.Rows}
+	if !s.renderBroken {
+		if err := recoverPanic(fmt.Sprintf("terminal %s frame", s.metadata.ID), func() {
+			f = s.screen.Frame()
+		}); err != nil {
+			s.renderBroken = true
+			f = terminal.Frame{Columns: s.metadata.Columns, Rows: s.metadata.Rows}
+		}
+	}
 	f.Revision = s.revision
 	s.rendered, s.renderedAt = f, s.revision
 	return f
@@ -198,6 +212,9 @@ func (s *terminalSession) resize(columns, rows int) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.renderBroken {
+		return errors.New("terminal screen is no longer available")
+	}
 	if s.process == nil {
 		return errors.New("terminal is no longer running")
 	}
@@ -268,10 +285,14 @@ func (s *terminalSession) captureOutput() {
 func (s *terminalSession) renderOutput(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return recoverPanic(fmt.Sprintf("terminal %s render", s.metadata.ID), func() {
+	err := recoverPanic(fmt.Sprintf("terminal %s render", s.metadata.ID), func() {
 		_, _ = s.screen.Write(data)
 		s.publish()
 	})
+	if err != nil {
+		s.renderBroken = true
+	}
+	return err
 }
 func (s *terminalSession) finish(err error) {
 	s.mu.Lock()

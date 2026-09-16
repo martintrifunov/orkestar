@@ -39,3 +39,26 @@ func TestRenderOutputHappyPath(t *testing.T) {
 		t.Fatalf("renderOutput on ordinary output returned an error: %v", err)
 	}
 }
+
+// TestRecoveredRenderPanicStopsReadingTheScreen pins the containment half of
+// the frame fix: once a render panic is recovered the emulator is left alone,
+// so a corrupt buffer cannot panic again on the next frame, history or resize
+// request and drop the client's connection. A session with no screen stands in
+// for that corrupt emulator.
+func TestRecoveredRenderPanicStopsReadingTheScreen(t *testing.T) {
+	s := &terminalSession{metadata: Terminal{ID: "term_1", Columns: 80, Rows: 24}}
+	if err := s.renderOutput([]byte("output")); err == nil {
+		t.Fatal("expected the render panic to be recovered into an error")
+	}
+	if !s.renderBroken {
+		t.Fatal("a recovered render panic should mark the screen unusable")
+	}
+
+	frame := s.frame()
+	if frame.Columns != 80 || frame.Rows != 24 {
+		t.Fatalf("fallback frame has the wrong size: %#v", frame)
+	}
+	if err := s.resize(100, 50); err == nil {
+		t.Fatal("resize should refuse a screen that is no longer readable")
+	}
+}

@@ -20,5 +20,13 @@ func (s *Server) terminalHistory(raw json.RawMessage) (map[string]any, error) {
 	}
 	term.mu.Lock()
 	defer term.mu.Unlock()
-	return map[string]any{"history": term.screen.History(), "screen": term.frame()}, nil
+	var history []string
+	if !term.renderBroken {
+		if err := recoverPanic(fmt.Sprintf("terminal %s history", term.metadata.ID), func() {
+			history = term.screen.History()
+		}); err != nil {
+			term.renderBroken = true
+		}
+	}
+	return map[string]any{"history": history, "screen": term.frame()}, nil
 }
