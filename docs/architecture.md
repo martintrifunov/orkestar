@@ -28,7 +28,11 @@ per-machine backoff, merges their boards into a single view that names the
 source machine, and routes a call to the machine that owns an entity. The
 manager is a client-side layer: the daemon on each machine stays authoritative
 and unchanged, and the merged board prefixes nothing, so the machine ID, not a
-rewritten ID, is what a caller routes on.
+rewritten ID, is what a caller routes on. The interface opens every saved
+machine and switches between them (`Ctrl+b g`): the current panes are detached
+and the selected machine's own layout is restored, and each pane attaches
+through that machine's client, so input follows the selection. A single merged
+sidebar across machines is not built.
 
 ## Core concepts
 

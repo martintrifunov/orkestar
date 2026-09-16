@@ -306,19 +306,21 @@ and no saved machines.
       machine goes offline without moving the others.
 - [ ] A combined workspace and agent list with an attention rollup, and input
       routed to the selected machine. The merged board and attention rollup
-      exist (`federation.Manager.Board`, `machine board`) and routing is a
-      primitive (`ClientFor`, `machine call`), but the TUI is not yet wired to
-      several machines.
+      exist (`federation.Manager.Board`, `machine board`); the TUI now selects
+      a machine (`Ctrl+b g`) and routes input to it, keeping each machine's own
+      layout, but a single merged sidebar across machines is not built.
 - [ ] No local command, config or secret is copied to a remote.
 
 Depends on M11's negotiation. Acceptance: local plus two remotes; losing one
 leaves the others usable and never moves the selection.
 
 Progress 2026-09-16: the saved-machine catalog, the federation manager
-(connections, health, backoff, merged board, routing) and `machine
-status|board|call` landed, tested against in-process daemons. A remote session
-can also be selected per machine. The TUI "one window" integration and ssh
-against a real host remain; there is no sshd on this machine to verify ssh.
+(connections, health, backoff, merged board, routing), `machine
+status|board|call` and a TUI machine switcher landed, tested against
+in-process daemons. The interface opens every saved machine, switches with
+`Ctrl+b g`, detaches the current panes and restores the selected machine's own
+layout; each pane attaches through that machine's client, so input follows the
+selection. ssh against a real host still cannot be verified here (no sshd).
 
 ### M13: Pane layout and daily-use parity
 
