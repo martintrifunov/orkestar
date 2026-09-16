@@ -201,7 +201,9 @@ terminal (`terminal.start`).
 - [x] Expose the same surface over MCP so one agent can read and drive another.
       `terminal_start`, `terminal_list`, `terminal_read` and `terminal_send`
       landed 2026-09-16, and the connect instructions teach them.
-- [ ] `agent explain`: why Orkestar believes an agent is in its current state.
+- [x] `agent explain`: why Orkestar believes an agent is in its current state.
+      Landed 2026-09-16 over IPC, CLI and MCP: signal source, live process,
+      resumability, pending permissions, and the reasons behind the state.
 
 First slices landed 2026-09-16: `terminal.read` and `terminal.send` over IPC,
 with `orkestar terminal read <id> [--lines N]` and `orkestar terminal send
