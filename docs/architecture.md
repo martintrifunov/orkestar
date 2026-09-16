@@ -129,6 +129,16 @@ implementation (`internal/agent/ptysession`) so a future interactive adapter
 does not reimplement PTY lifecycle, prompt/interrupt, or lifecycle-event
 plumbing.
 
+A new CLI does not require a new Go package. `internal/agent/manifest` turns a
+small JSON description — name, executable, launch arguments, and a resume
+template — into an adapter, and the daemon registers the manifests found in
+`<user config>/orkestar/agents` at startup. A manifest is a PTY adapter:
+interactive, never managed, prompt and interrupt on by default, and resume
+declared only when the CLI documents a resume command. A manifest may take a
+built-in adapter's name to point it at a different executable. Structured
+lifecycle still comes from hooks where an adapter has them; a manifest gets
+what a process can observe.
+
 An interactive agent session is not a second, parallel notion of "terminal
 output". A session whose adapter exposes the underlying PTY process
 (`agent.ProcessSession`) is bridged by the daemon into the same terminal

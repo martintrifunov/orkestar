@@ -245,6 +245,13 @@ per-agent resume commands, so a new CLI works without code.
       and verify against the installed CLIs.
 - [ ] Hooks stay authoritative when they exist; detection is the fallback.
 
+Progress 2026-09-16: `internal/agent/manifest` and the registry landed. A
+manifest is name, executable, arguments and a resume template; the daemon
+loads `<user config>/orkestar/agents/*.json` at startup (override with
+`ORKESTAR_AGENT_MANIFESTS_DIR`), and a manifest may replace a built-in adapter
+of the same name. A manifest agent was launched end to end. Detection rules,
+reload, and the Cursor/Grok manifests remain.
+
 Acceptance: adding an agent is a config file plus a fixture test, and Cursor
 and Grok report attention and resume.
 
