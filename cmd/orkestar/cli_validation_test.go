@@ -26,3 +26,12 @@ func TestAgentListAndReloadRejectTrailingArgsWithoutDaemon(t *testing.T) {
 	}
 }
 
+func TestMachineAddAcceptsEqualsForm(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ORKESTAR_MACHINES_FILE", dir+"/machines.json")
+	var paths runtimepath.Paths
+	if err := runMachine(paths, []string{"add", "user@example.com", "--label=ci-box", "--remote-session=work"}); err != nil {
+		t.Fatalf("machine add with = flags: %v", err)
+	}
+}
+

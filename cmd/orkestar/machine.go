@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/federation"
@@ -48,6 +49,20 @@ func runMachine(paths runtimepath.Paths, args []string) error {
 		host := args[1]
 		label, session := "", ""
 		for index := 2; index < len(args); index++ {
+			if value, ok := strings.CutPrefix(args[index], "--label="); ok {
+				if value == "" {
+					return errors.New("--label needs a value")
+				}
+				label = value
+				continue
+			}
+			if value, ok := strings.CutPrefix(args[index], "--remote-session="); ok {
+				if value == "" {
+					return errors.New("--remote-session needs a value")
+				}
+				session = value
+				continue
+			}
 			switch args[index] {
 			case "--label":
 				if index+1 >= len(args) {
