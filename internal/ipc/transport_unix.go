@@ -47,6 +47,16 @@ func prepareListener(path string, dial func(string, time.Duration) (net.Conn, er
 	if !errors.Is(err, syscall.ECONNREFUSED) && !errors.Is(err, syscall.ENOTSOCK) {
 		return ErrAlreadyRunning
 	}
+	// A refused connection normally means a stale socket, but while another
+	// daemon is between bind and listen the path exists and refuses. Probe
+	// again briefly so we do not unlink a daemon that is still coming up.
+	for attempt := 0; attempt < 3; attempt++ {
+		time.Sleep(20 * time.Millisecond)
+		if retry, retryErr := dial(path, socketProbeTimeout); retryErr == nil {
+			retry.Close()
+			return ErrAlreadyRunning
+		}
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale daemon socket: %w", err)
 	}
