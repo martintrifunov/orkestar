@@ -23,6 +23,9 @@ type snapshotMsg struct {
 type terminalStartedMsg struct {
 	terminal daemon.Terminal
 	err      error
+	// machineID is the machine the command ran against, so a reply that lands
+	// after a switch is not written into the new machine's board.
+	machineID string
 }
 
 type permissionActionMsg struct {
@@ -30,8 +33,9 @@ type permissionActionMsg struct {
 }
 
 type agentLaunchedMsg struct {
-	agent daemon.Agent
-	err   error
+	agent     daemon.Agent
+	err       error
+	machineID string
 }
 
 type tickMsg time.Time
@@ -168,7 +172,10 @@ type Model struct {
 	machineIndex int
 	// remote is the board of every machine that is not selected, polled so the
 	// merged agent list and the status lines stay current.
-	remote         []MachineView
+	remote []MachineView
+	// polling is true while a remote-board poll is in flight, so a slow machine
+	// cannot stack up poll goroutines and ssh connections.
+	polling        bool
 	sidebarFocused bool
 	opening        bool
 	ctx            context.Context
@@ -255,6 +262,17 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.snapshotLoaded = false
 	m.loading = true
 	m.err = nil
+	// The new machine has its own board and its own mode; nothing selected or
+	// open here means anything there.
+	m.remote = nil
+	m.selected = 0
+	m.taskSelected = 0
+	m.agentSelected = 0
+	m.opening = false
+	m.pickingAgent = false
+	m.pickerTaskID = ""
+	m.viewingDiff = false
+	m.viewingHistory = false
 	m.machineIndex = (m.machineIndex + delta + len(m.machines)) % len(m.machines)
 	selected := m.machines[m.machineIndex]
 	m.client = selected.Client
@@ -754,6 +772,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case terminalStartedMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			// The machine changed while this launch was in flight.
+			return m, nil
+		}
 		m.opening = false
 		m.loading = false
 		m.err = message.err
@@ -821,17 +843,25 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		commands := []tea.Cmd{m.loadSnapshot(), tick()}
-		if poll := m.pollRemotes(); poll != nil {
-			commands = append(commands, poll)
+		if !m.polling {
+			if poll := m.pollRemotes(); poll != nil {
+				m.polling = true
+				commands = append(commands, poll)
+			}
 		}
 		if m.filesOpen && !m.filesLoading && time.Since(m.filesLoadedAt) >= filesRefresh {
 			commands = append(commands, m.loadFiles())
 		}
 		return m, tea.Batch(commands...)
 	case remotesMsg:
+		m.polling = false
+		// A poll taken for a previous selection names the wrong machines.
+		if message.machineIndex != m.machineIndex {
+			return m, nil
+		}
 		m.remote = message.views
-		if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
-			m.agentSelected = len(m.snapshot.Agents) - 1
+		if m.agentSelected >= len(m.snapshot.Agents) {
+			m.agentSelected = max(0, len(m.snapshot.Agents)-1)
 		}
 		return m, nil
 	case diffMsg:
@@ -860,6 +890,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadSnapshot()
 		}
 	case agentLaunchedMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		m.opening = false
 		m.err = message.err
 		if message.err != nil {
@@ -1109,7 +1142,7 @@ func (m Model) startTerminal(command []string) tea.Cmd {
 
 		workspaceID, err := m.ensureWorkspace(ctx)
 		if err != nil {
-			return terminalStartedMsg{err: err}
+			return terminalStartedMsg{machineID: m.currentMachine().ID, err: err}
 		}
 
 		var started daemon.Terminal
@@ -1119,7 +1152,7 @@ func (m Model) startTerminal(command []string) tea.Cmd {
 			"columns":      max(m.width, 80),
 			"rows":         max(m.height, 24),
 		}, &started)
-		return terminalStartedMsg{terminal: started, err: err}
+		return terminalStartedMsg{machineID: m.currentMachine().ID, terminal: started, err: err}
 	}
 }
 
@@ -1152,7 +1185,7 @@ func (m Model) launchPickedAgent() tea.Cmd {
 			workspaceID, err = m.ensureWorkspace(ctx)
 		}
 		if err != nil {
-			return agentLaunchedMsg{err: err}
+			return agentLaunchedMsg{machineID: m.currentMachine().ID, err: err}
 		}
 
 		params := map[string]any{
@@ -1167,12 +1200,12 @@ func (m Model) launchPickedAgent() tea.Cmd {
 		}
 		var launched daemon.Agent
 		err = m.client.Call(ctx, "agent.launch", params, &launched)
-		return agentLaunchedMsg{agent: launched, err: err}
+		return agentLaunchedMsg{machineID: m.currentMachine().ID, agent: launched, err: err}
 	}
 }
 
 func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
-	if m.focus != focusAgents || len(m.snapshot.Agents) == 0 || m.agentSelected >= len(m.snapshot.Agents) {
+	if m.focus != focusAgents || m.agentSelected < 0 || len(m.snapshot.Agents) == 0 || m.agentSelected >= len(m.snapshot.Agents) {
 		return nil
 	}
 	agentID := m.snapshot.Agents[m.agentSelected].ID

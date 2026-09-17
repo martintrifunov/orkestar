@@ -221,7 +221,7 @@ func (m *Model) assignSelectedTask() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if m.agentSelected >= len(m.snapshot.Agents) {
+	if m.agentSelected < 0 || m.agentSelected >= len(m.snapshot.Agents) {
 		m.notice = "No agent to assign. Launch one with a, then select it in Agents."
 		return nil
 	}

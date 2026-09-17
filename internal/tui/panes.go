@@ -424,12 +424,13 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m Model) resumeSelected() tea.Cmd {
-	if m.opening || m.focus != focusAgents || m.agentSelected >= len(m.snapshot.Agents) {
+	if m.opening || m.focus != focusAgents || m.agentSelected < 0 || m.agentSelected >= len(m.snapshot.Agents) {
 		return nil
 	}
 	id := m.snapshot.Agents[m.agentSelected].ID
 	return func() tea.Msg {
 		var result agentLaunchedMsg
+		result.machineID = m.currentMachine().ID
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		result.err = m.client.Call(ctx, "agent.resume", map[string]string{"agent_id": id}, &result.agent)

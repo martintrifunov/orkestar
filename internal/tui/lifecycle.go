@@ -33,7 +33,7 @@ func (m Model) lifecycleTarget() (lifecycleTarget, bool) {
 			return lifecycleTarget{"terminal", t.ID, t.ID, label, t.State}, true
 		}
 	case focusAgents:
-		if m.agentSelected < len(m.snapshot.Agents) {
+		if m.agentSelected >= 0 && m.agentSelected < len(m.snapshot.Agents) {
 			a := m.snapshot.Agents[m.agentSelected]
 			return lifecycleTarget{"agent", a.ID, a.TerminalID, a.Adapter, a.State}, true
 		}

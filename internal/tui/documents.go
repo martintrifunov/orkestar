@@ -119,7 +119,7 @@ func (m Model) paneRoot() string {
 			}
 		}
 	}
-	if m.focus == focusAgents && m.agentSelected < len(m.snapshot.Agents) {
+	if m.focus == focusAgents && m.agentSelected >= 0 && m.agentSelected < len(m.snapshot.Agents) {
 		a := m.snapshot.Agents[m.agentSelected]
 		for _, w := range m.snapshot.Workspaces {
 			if w.ID == a.WorkspaceID {
@@ -201,7 +201,7 @@ func (m Model) openDocument(root, name string) tea.Cmd {
 		}
 		var t daemon.Terminal
 		err = m.client.Call(ctx, "terminal.start", map[string]any{"workspace_id": w.ID, "command": command, "columns": 80, "rows": 24}, &t)
-		return terminalStartedMsg{terminal: t, err: err}
+		return terminalStartedMsg{machineID: m.currentMachine().ID, terminal: t, err: err}
 	}
 }
 func (m *Model) roomForPane() bool {
@@ -492,6 +492,16 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.theme = resolveTheme(next)
+			// Open editor and review panes cached the old palette when they
+			// were built; move them to the new one too.
+			for _, pane := range m.visiblePanes() {
+				if pane.editor != nil {
+					pane.editor.theme = m.theme
+				}
+				if pane.review != nil {
+					pane.review.theme = m.theme
+				}
+			}
 			m.settingsOpen = false
 			m.notice = "Theme: " + next
 			return m, nil

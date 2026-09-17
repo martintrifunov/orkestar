@@ -65,8 +65,11 @@ func (m Model) taskTitleOfScoped(scoped scopedAgent) string {
 }
 
 // remotesMsg carries the polled boards of the machines that are not selected.
+// machineIndex is the selection the poll was taken for, so a poll that lands
+// after a switch can be dropped rather than showing the wrong set of machines.
 type remotesMsg struct {
-	views []MachineView
+	views        []MachineView
+	machineIndex int
 }
 
 // pollRemotes refreshes every other machine's board. The selected machine is
@@ -97,6 +100,6 @@ func (m Model) pollRemotes() tea.Cmd {
 			}
 			views = append(views, view)
 		}
-		return remotesMsg{views: views}
+		return remotesMsg{views: views, machineIndex: active}
 	}
 }
