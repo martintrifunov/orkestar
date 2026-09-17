@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -89,7 +90,8 @@ func (s *Server) savePaneHistory() {
 }
 
 func (s *Server) openStore() error {
-	db, err := store.Open(filepath.Join(filepath.Dir(s.socketPath), "metadata.db"))
+	metadataPath := filepath.Join(filepath.Dir(s.socketPath), "metadata.db")
+	db, err := store.Open(metadataPath)
 	if err != nil {
 		return err
 	}
@@ -98,14 +100,20 @@ func (s *Server) openStore() error {
 	defer cancel()
 	b, err := db.Load(ctx)
 	if err != nil {
-		return err
+		// A metadata row the daemon cannot read must not brick it: a version it
+		// does not understand or a corrupt blob would otherwise leave no way
+		// back in, since reset needs a running daemon. Move it aside and start
+		// empty, leaving the old database for recovery.
+		log.Printf("metadata is unreadable (%v); moving it aside and starting empty", err)
+		return s.quarantineStore(metadataPath)
 	}
 	if len(b) == 0 {
 		return nil
 	}
 	var saved Snapshot
 	if err := json.Unmarshal(b, &saved); err != nil {
-		return fmt.Errorf("decode persisted metadata: %w", err)
+		log.Printf("metadata is unreadable (%v); moving it aside and starting empty", err)
+		return s.quarantineStore(metadataPath)
 	}
 	for _, w := range saved.Workspaces {
 		s.workspaces[w.ID] = w
@@ -133,6 +141,30 @@ func (s *Server) openStore() error {
 	s.loadPaneHistory()
 	return nil
 }
+
+// quarantineStore moves an unreadable metadata database aside and opens a
+// fresh one, so the daemon can start and be reset rather than failing to
+// serve. The old file is kept as metadata.db.corrupt; nothing is deleted.
+func (s *Server) quarantineStore(path string) error {
+	if s.store != nil {
+		_ = s.store.Close()
+		s.store = nil
+	}
+	backup := path + ".corrupt"
+	_ = os.Remove(backup)
+	if err := os.Rename(path, backup); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("quarantine metadata database: %w", err)
+	}
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
+	reopened, err := store.Open(path)
+	if err != nil {
+		return err
+	}
+	s.store = reopened
+	return nil
+}
+
 func (s *Server) persist() error {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()

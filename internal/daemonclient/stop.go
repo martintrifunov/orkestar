@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/ipc"
@@ -13,9 +15,14 @@ import (
 // Stop waits for the daemon process to exit, not merely for its listener to
 // close: shutdown still has to stop children and flush SQLite after that.
 // The OS identifies the peer, so this also works with unversioned daemons.
+// A daemon that is not running (no socket, or a stale one) is not an error:
+// stopping is already done.
 func Stop(ctx context.Context, path string) error {
 	conn, err := ipc.Dial(ctx, path, time.Second)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+			return nil
+		}
 		return fmt.Errorf("connect to daemon for shutdown: %w", err)
 	}
 	defer conn.Close()

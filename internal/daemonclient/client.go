@@ -64,6 +64,10 @@ func Ensure(ctx context.Context, paths runtimepath.Paths) error {
 func daemonAvailable(parent context.Context, socketPath string) bool {
 	ctx, cancel := context.WithTimeout(parent, 150*time.Millisecond)
 	defer cancel()
+	// Close the probe client so its pooled connection (and file descriptor)
+	// does not outlive the check in a long-running process.
+	client := ipc.NewClient(socketPath)
+	defer client.Close()
 	var result map[string]string
-	return ipc.NewClient(socketPath).Call(ctx, "system.ping", nil, &result) == nil
+	return client.Call(ctx, "system.ping", nil, &result) == nil
 }
