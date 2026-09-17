@@ -123,6 +123,17 @@ func runTUI(paths runtimepath.Paths) error {
 	if err := daemonclient.Ensure(ctx, paths); err != nil {
 		return err
 	}
+	// A stale daemon from before an upgrade owns every PTY, so Homebrew
+	// cannot replace it while it runs. Say plainly that the two sides
+	// cannot talk, the way --remote does, rather than failing per call.
+	var status map[string]string
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "system.ping", nil, &status); err == nil {
+		if compatible, detail := protocolCompatible(status); !compatible {
+			return fmt.Errorf(
+				"this is orkestar %s (protocol %d) and the running daemon speaks %s; the two cannot talk until one side is upgraded",
+				version, ipc.Version, detail)
+		}
+	}
 	directory, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get current directory: %w", err)
