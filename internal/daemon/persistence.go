@@ -264,6 +264,13 @@ func (s *Server) autoResumeInterrupted() {
 			log.Printf("auto-resume agent %s: %v", id, err)
 			continue
 		}
+		// resumeAgent runs outside handleRequest here, so nothing persists
+		// the new agent and the forgotten old one. Without this a second
+		// crash before the next mutating call resurrects the old
+		// interrupted record and loses the resumed session.
+		if err := s.persist(); err != nil {
+			log.Printf("auto-resume agent %s: save metadata: %v", id, err)
+		}
 		log.Printf("auto-resumed agent %s", id)
 	}
 }
