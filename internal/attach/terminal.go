@@ -148,6 +148,12 @@ func forwardInput(stream *ipc.Stream, input io.Reader, result chan<- error) {
 						result <- nil
 						return
 					}
+					if character == detachPrefix {
+						// Prefix twice passes one literal prefix through, the
+						// way the TUI does, rather than a doubled byte.
+						outgoing = append(outgoing, detachPrefix)
+						continue
+					}
 					outgoing = append(outgoing, detachPrefix, character)
 					continue
 				}
