@@ -122,6 +122,15 @@ func (m *Manager) SetMachines(machines []machine.Machine) {
 	}
 	for id, saved := range wanted {
 		if existing, ok := m.remotes[id]; ok {
+			if existing.Machine.Host != saved.Host || existing.Machine.Session != saved.Session {
+				// The saved target moved under a stable ID: the old client
+				// still dials the old host, so drop it and dial fresh.
+				if existing.client != nil {
+					closing = append(closing, existing.client)
+				}
+				m.remotes[id] = &Connection{Machine: saved, State: Offline}
+				continue
+			}
 			existing.Machine = saved
 			continue
 		}

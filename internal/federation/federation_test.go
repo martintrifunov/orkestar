@@ -267,6 +267,35 @@ func TestBackoffNeverExceedsOneMinute(t *testing.T) {
 		t.Fatalf("expected about a minute of backoff, got %s", wait)
 	}
 }
+
+// A catalog edit that moves a host under a stable ID must drop the old
+// client: otherwise calls keep going to the old machine.
+func TestSetMachinesRedialsWhenHostChanges(t *testing.T) {
+	local, _ := serveFederationDaemon(t)
+	one, _ := serveFederationDaemon(t)
+	two, _ := serveFederationDaemon(t)
+	var dialed []string
+	dial := func(_ context.Context, saved machine.Machine) (*ipc.Client, error) {
+		dialed = append(dialed, saved.Host)
+		return map[string]*ipc.Client{"one": one, "two": two}[saved.Host], nil
+	}
+
+	manager := New("Local", local, dial)
+	manager.SetMachines([]machine.Machine{{ID: "m1", Label: "One", Host: "one", Enabled: true}})
+	manager.Refresh(context.Background())
+	if client, ok := manager.ClientFor("m1"); !ok || client != one {
+		t.Fatal("expected routing to the first host")
+	}
+
+	manager.SetMachines([]machine.Machine{{ID: "m1", Label: "One", Host: "two", Enabled: true}})
+	if connection := manager.remotes["m1"]; connection.client != nil {
+		t.Fatal("the old host's client survived the move")
+	}
+	manager.Refresh(context.Background())
+	if client, ok := manager.ClientFor("m1"); !ok || client != two {
+		t.Fatal("expected routing to the moved host")
+	}
+}
 func TestIsAttention(t *testing.T) {
 	for state, want := range map[string]bool{
 		"waiting_input": true, "waiting_permission": true, "waiting_resource": true,
