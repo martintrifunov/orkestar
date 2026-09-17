@@ -56,20 +56,30 @@ func persistedTree(node *splitNode) *persistedNode {
 
 // rebuiltTree restores a saved tree against the terminals that actually
 // attached. A leaf whose terminal did not come back is dropped, and a split
-// with no children left disappears with it.
+// with no children left disappears with it. A terminal named twice is kept
+// once: two leaves would hold the same attachment, which closes under one of
+// them.
 func rebuiltTree(node *persistedNode, panes map[string]*embeddedTerminal) *splitNode {
+	return rebuiltTreeSeen(node, panes, map[string]bool{})
+}
+
+func rebuiltTreeSeen(node *persistedNode, panes map[string]*embeddedTerminal, seen map[string]bool) *splitNode {
 	if node == nil {
 		return nil
 	}
 	if node.Terminal != "" {
+		if seen[node.Terminal] {
+			return nil
+		}
 		pane := panes[node.Terminal]
 		if pane == nil {
 			return nil
 		}
+		seen[node.Terminal] = true
 		return &splitNode{pane: pane}
 	}
-	first := rebuiltTree(node.First, panes)
-	second := rebuiltTree(node.Second, panes)
+	first := rebuiltTreeSeen(node.First, panes, seen)
+	second := rebuiltTreeSeen(node.Second, panes, seen)
 	switch {
 	case first == nil:
 		return second

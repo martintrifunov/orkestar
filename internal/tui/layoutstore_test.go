@@ -79,6 +79,24 @@ func TestPersistLayoutWritesTheModel(t *testing.T) {
 	Model{layout: &splitNode{pane: leaf}}.persistLayout()
 }
 
+// A saved structure must not restore the same terminal twice: two leaves would
+// share one attachment, and closing one would leave the other dangling.
+func TestRestoreKeepsADuplicatedTerminalOnce(t *testing.T) {
+	persisted := &persistedNode{
+		Stacked: true,
+		First:   &persistedNode{Terminal: "term_1"},
+		Second:  &persistedNode{Terminal: "term_1"},
+	}
+	panes := map[string]*embeddedTerminal{"term_1": terminalLeaf("term_1").pane}
+	tree := rebuiltTree(persisted, panes)
+	if tree == nil || tree.pane == nil || tree.pane.terminalID != "term_1" {
+		t.Fatalf("expected a single surviving pane, got %#v", tree)
+	}
+	if leaves := tree.leaves(nil); len(leaves) != 1 {
+		t.Fatalf("the terminal was restored %d times", len(leaves))
+	}
+}
+
 // A saved layout is restored against the terminals a real daemon is still
 // running: alive ones come back, dead ones are dropped, and a split with no
 // live child collapses away.
