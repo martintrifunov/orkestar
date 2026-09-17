@@ -170,9 +170,19 @@ func (m *Manager) Refresh(ctx context.Context) {
 	// Sort by the id copied under the lock; reading Connection.Machine here
 	// would race a concurrent SetMachines.
 	sort.Slice(targets, func(left, right int) bool { return targets[left].id < targets[right].id })
+	// Refresh concurrently: one slow or dead host must not stall the others
+	// behind its dial and ping timeouts. Each machine carries its own
+	// timeouts and backoff, so a refresh costs the slowest machine, not the
+	// sum of them.
+	var wg sync.WaitGroup
 	for _, target := range targets {
-		m.refreshRemote(ctx, target.id, target.connection)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.refreshRemote(ctx, target.id, target.connection)
+		}()
 	}
+	wg.Wait()
 }
 
 func (m *Manager) refreshLocal(ctx context.Context) {

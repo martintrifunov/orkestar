@@ -221,6 +221,44 @@ func TestSetMachinesForgetsDisabled(t *testing.T) {
 	}
 }
 
+// Two machines must be dialed concurrently: a serial refresh pays every
+// dead host's timeouts before reaching the next machine.
+func TestRefreshDialsMachinesConcurrently(t *testing.T) {
+	local, _ := serveFederationDaemon(t)
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	dial := func(_ context.Context, _ machine.Machine) (*ipc.Client, error) {
+		entered <- struct{}{}
+		<-release
+		return nil, errors.New("host unreachable")
+	}
+
+	manager := New("Local", local, dial)
+	manager.SetMachines([]machine.Machine{
+		{ID: "m1", Label: "One", Host: "one", Enabled: true},
+		{ID: "m2", Label: "Two", Host: "two", Enabled: true},
+	})
+	done := make(chan struct{})
+	go func() { manager.Refresh(context.Background()); close(done) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(entered) < 2 {
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("the second machine was not dialed until the first finished")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh did not finish")
+	}
+}
+
+// The backoff loop can double once past its cap; retryAt must still promise
+// no more than a minute out.
 func TestIsAttention(t *testing.T) {
 	for state, want := range map[string]bool{
 		"waiting_input": true, "waiting_permission": true, "waiting_resource": true,
