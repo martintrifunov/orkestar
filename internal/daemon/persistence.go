@@ -96,6 +96,12 @@ func (s *Server) openStore() error {
 		return err
 	}
 	s.store = db
+	// Remove any pane-history file left by an earlier opt-in before the early
+	// returns below, so disabling the feature always clears it even when the
+	// metadata blob is empty or quarantined.
+	if !s.paneHistory {
+		_ = os.Remove(s.paneHistoryPath())
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	b, err := db.Load(ctx)
@@ -128,8 +134,9 @@ func (s *Server) openStore() error {
 	for _, a := range saved.Agents {
 		if a.State != "stopped" && a.State != "crashed" {
 			a.State = "interrupted"
-			// Only an interrupted agent with somewhere to resume to deserves
-			// the attention line; a finished one has nothing to act on.
+			// Clear any attention reason saved before the restart; only an
+			// interrupted agent with somewhere to resume to gets the notice.
+			a.AttentionReason = ""
 			if a.NativeSessionID != "" {
 				a.AttentionReason = "daemon restarted; select resume to relaunch native session"
 			}
