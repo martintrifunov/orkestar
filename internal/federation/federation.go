@@ -58,6 +58,8 @@ type Connection struct {
 	client   *ipc.Client
 	failures int
 	retryAt  time.Time
+	// dialing guards against two refreshes dialing the same machine at once.
+	dialing bool
 }
 
 // Manager owns the local connection and the remote ones.
@@ -103,17 +105,17 @@ func (m *Manager) SetBackoff(base time.Duration) {
 // is already connected keeps its client and snapshot.
 func (m *Manager) SetMachines(machines []machine.Machine) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	wanted := make(map[string]machine.Machine, len(machines))
 	for _, saved := range machines {
 		if saved.Enabled {
 			wanted[saved.ID] = saved
 		}
 	}
+	var closing []*ipc.Client
 	for id, connection := range m.remotes {
 		if _, keep := wanted[id]; !keep {
 			if connection.client != nil {
-				connection.client.Close()
+				closing = append(closing, connection.client)
 			}
 			delete(m.remotes, id)
 		}
@@ -125,17 +127,27 @@ func (m *Manager) SetMachines(machines []machine.Machine) {
 		}
 		m.remotes[id] = &Connection{Machine: saved, State: Offline}
 	}
+	m.mu.Unlock()
+	// Closing a remote client reaps its ssh child, which can block; do it with
+	// the lock released so it cannot stall every other machine.
+	for _, client := range closing {
+		client.Close()
+	}
 }
 
 // Close releases every remote connection.
 func (m *Manager) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var closing []*ipc.Client
 	for _, connection := range m.remotes {
 		if connection.client != nil {
-			connection.client.Close()
+			closing = append(closing, connection.client)
 			connection.client = nil
 		}
+	}
+	m.mu.Unlock()
+	for _, client := range closing {
+		client.Close()
 	}
 }
 
@@ -146,16 +158,20 @@ func (m *Manager) Refresh(ctx context.Context) {
 	m.refreshLocal(ctx)
 
 	m.mu.Lock()
-	connections := make([]*Connection, 0, len(m.remotes))
-	for _, connection := range m.remotes {
-		connections = append(connections, connection)
+	type target struct {
+		id         string
+		connection *Connection
+	}
+	targets := make([]target, 0, len(m.remotes))
+	for id, connection := range m.remotes {
+		targets = append(targets, target{id, connection})
 	}
 	m.mu.Unlock()
-	sort.Slice(connections, func(left, right int) bool {
-		return connections[left].Machine.ID < connections[right].Machine.ID
-	})
-	for _, connection := range connections {
-		m.refreshRemote(ctx, connection)
+	// Sort by the id copied under the lock; reading Connection.Machine here
+	// would race a concurrent SetMachines.
+	sort.Slice(targets, func(left, right int) bool { return targets[left].id < targets[right].id })
+	for _, target := range targets {
+		m.refreshRemote(ctx, target.id, target.connection)
 	}
 }
 
@@ -191,25 +207,48 @@ func (m *Manager) refreshLocal(ctx context.Context) {
 	}
 }
 
-func (m *Manager) refreshRemote(ctx context.Context, connection *Connection) {
+func (m *Manager) refreshRemote(ctx context.Context, id string, connection *Connection) {
 	m.mu.Lock()
+	if m.remotes[id] != connection {
+		m.mu.Unlock()
+		return
+	}
 	if !connection.retryAt.IsZero() && time.Now().Before(connection.retryAt) {
 		m.mu.Unlock()
 		return
 	}
 	client := connection.client
 	saved := connection.Machine
+	if client == nil {
+		if connection.dialing {
+			// Another refresh is already dialing this machine.
+			m.mu.Unlock()
+			return
+		}
+		connection.dialing = true
+	}
 	m.mu.Unlock()
 
 	if client == nil {
 		dialed, err := m.dial(ctx, saved)
+		m.mu.Lock()
+		connection.dialing = false
 		if err != nil {
-			m.recordFailure(connection, err)
+			detached := m.recordFailureLocked(connection, err)
+			m.mu.Unlock()
+			if detached != nil {
+				detached.Close()
+			}
 			return
 		}
+		if m.remotes[id] != connection {
+			// The machine was removed while dialing; do not leak the client.
+			m.mu.Unlock()
+			dialed.Close()
+			return
+		}
+		connection.client = dialed
 		client = dialed
-		m.mu.Lock()
-		connection.client = client
 		m.mu.Unlock()
 	}
 
@@ -242,12 +281,22 @@ func (m *Manager) refreshRemote(ctx context.Context, connection *Connection) {
 
 func (m *Manager) recordFailure(connection *Connection, err error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	client := m.recordFailureLocked(connection, err)
+	m.mu.Unlock()
+	if client != nil {
+		client.Close()
+	}
+}
+
+// recordFailureLocked records the failure and detaches the connection's client
+// so the caller can close it with the lock released. m.mu must be held.
+func (m *Manager) recordFailureLocked(connection *Connection, err error) *ipc.Client {
 	connection.failures++
 	connection.State = Offline
 	connection.Err = err.Error()
+	var client *ipc.Client
 	if connection.client != nil {
-		connection.client.Close()
+		client = connection.client
 		connection.client = nil
 	}
 	backoff := m.backoffBase
@@ -255,6 +304,7 @@ func (m *Manager) recordFailure(connection *Connection, err error) {
 		backoff *= 2
 	}
 	connection.retryAt = time.Now().Add(backoff)
+	return client
 }
 
 // MachineStatus is one machine's health, for a status line.
