@@ -170,6 +170,9 @@ func TestDetectionRulesParseAndValidate(t *testing.T) {
 	if err := (manifest.Manifest{Name: "x", Executable: "x", Detection: []manifest.DetectionRule{{State: "working"}}}).Validate(); err == nil {
 		t.Fatal("expected a detection rule without contains to be rejected")
 	}
+	if err := (manifest.Manifest{Name: "x", Executable: "x", Detection: []manifest.DetectionRule{{State: "working", Contains: "   "}}}).Validate(); err == nil {
+		t.Fatal("expected a blank detection rule to be rejected")
+	}
 }
 
 func TestManifestTrimsPaddedFields(t *testing.T) {

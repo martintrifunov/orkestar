@@ -60,8 +60,11 @@ func (m Manifest) Validate() error {
 		return errors.New("resume.arguments cannot be empty when resume is set")
 	}
 	for _, rule := range m.Detection {
-		if rule.Contains == "" {
-			return errors.New("a detection rule needs a contains string")
+		if strings.TrimSpace(rule.Contains) == "" {
+			// A blank substring matches every pane with a space in it and
+			// would pin the agent in that rule's state; matching nothing
+			// is never what a rule means.
+			return errors.New("a detection rule needs a non-blank contains string")
 		}
 		switch agent.State(rule.State) {
 		case agent.StateWorking, agent.StateWaitingInput, agent.StateWaitingPermission,
