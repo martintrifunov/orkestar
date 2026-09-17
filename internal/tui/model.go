@@ -18,6 +18,9 @@ import (
 type snapshotMsg struct {
 	snapshot daemon.Snapshot
 	err      error
+	// machineID is the machine the snapshot was read from, so a poll that
+	// lands after a switch is not applied to the new machine's board.
+	machineID string
 }
 
 type terminalStartedMsg struct {
@@ -734,6 +737,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.resolveSelectedPermission("deny")
 		}
 	case snapshotMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			// The machine changed while this snapshot was in flight.
+			return m, nil
+		}
 		m.loading = false
 		m.err = message.err
 		if message.err == nil {
@@ -1114,7 +1121,7 @@ func (m Model) loadSnapshot() tea.Cmd {
 		defer cancel()
 		var snapshot daemon.Snapshot
 		err := m.client.Call(ctx, "system.snapshot", nil, &snapshot)
-		return snapshotMsg{snapshot: snapshot, err: err}
+		return snapshotMsg{machineID: m.currentMachine().ID, snapshot: snapshot, err: err}
 	}
 }
 

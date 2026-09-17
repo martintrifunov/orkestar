@@ -34,6 +34,27 @@ func TestRenderAgentsShowsMergedMachines(t *testing.T) {
 	}
 }
 
+// A snapshot read from the old machine must not be applied after a switch.
+func TestStaleSnapshotIsDropped(t *testing.T) {
+	local := ipc.NewClient("local")
+	m := New(local, t.TempDir())
+	m.machines = []Machine{
+		{ID: "local", Label: "Local", Client: local},
+		{ID: "m1", Label: "Build", Client: ipc.NewClient("remote")},
+	}
+	m.machineIndex = 1
+	m.snapshot = daemon.Snapshot{Agents: []daemon.Agent{{ID: "keep"}}}
+
+	updated, _ := m.Update(snapshotMsg{
+		machineID: "local",
+		snapshot:  daemon.Snapshot{Agents: []daemon.Agent{{ID: "stale"}}},
+	})
+	m = updated.(Model)
+	if len(m.snapshot.Agents) != 1 || m.snapshot.Agents[0].ID != "keep" {
+		t.Fatalf("a snapshot from another machine was applied: %#v", m.snapshot.Agents)
+	}
+}
+
 // A poll that lands after the board emptied must not leave the agent cursor
 // out of range: several key handlers index it. Regression for a -1 index.
 func TestRemotesMsgClampsTheAgentSelection(t *testing.T) {
