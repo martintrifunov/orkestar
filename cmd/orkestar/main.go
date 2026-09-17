@@ -637,11 +637,16 @@ Usage:
   orkestar workspace create [directory]
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>
+  orkestar terminal read <terminal-id> [--lines N]
+  orkestar terminal send <terminal-id> [--enter] <text>
+  orkestar terminal wait <terminal-id> --contains <text> [--timeout N]
   orkestar terminal stop <terminal-id>
   orkestar terminal remove <terminal-id>
   orkestar agent list
-  orkestar agent launch <workspace-id> <claude-code|codex|opencode> [--task=<task-id>]
+  orkestar agent launch <workspace-id> <adapter> [--task=<task-id>]
   orkestar agent resume <agent-id>
+  orkestar agent explain <agent-id>
+  orkestar agent reload
   orkestar agent stop <agent-id>
   orkestar agent remove <agent-id>
   orkestar agent interrupt <agent-id>
@@ -653,6 +658,7 @@ Usage:
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
+  orkestar task watch
   orkestar task diff <task-id>
   orkestar template list <workspace-id>
   orkestar template apply <workspace-id> <name> [--start]
