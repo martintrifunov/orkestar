@@ -277,6 +277,20 @@ func (s *Server) reloadAdapters() ([]agent.Capabilities, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(adapters) == 0 {
+		return nil, errors.New("adapter reload returned no adapters; keeping the current set")
+	}
+	seen := make(map[string]struct{}, len(adapters))
+	for _, adapter := range adapters {
+		name := adapter.Capabilities().Name
+		if name == "" {
+			return nil, errors.New("adapter reload returned an adapter with no name; keeping the current set")
+		}
+		if _, dup := seen[name]; dup {
+			return nil, fmt.Errorf("adapter reload returned duplicate adapter %q; keeping the current set", name)
+		}
+		seen[name] = struct{}{}
+	}
 	s.mu.Lock()
 	s.adapters = make(map[string]agent.Adapter, len(adapters))
 	capabilities := make([]agent.Capabilities, 0, len(adapters))

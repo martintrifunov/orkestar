@@ -46,3 +46,33 @@ func TestReloadAdaptersWithoutALoaderFailsClearly(t *testing.T) {
 		t.Fatal("expected a reload without a loader to fail")
 	}
 }
+
+// An empty or duplicate reload must keep the current set: wiping every
+// adapter, or silently letting one shadow another, breaks the next launch
+// and can break the reviewer that runs on task completion.
+func TestReloadAdaptersRejectsEmptyAndDuplicateSets(t *testing.T) {
+	server := NewServer(filepath.Join(t.TempDir(), "socket"))
+	server.RegisterAdapter(agent.NewFakeAdapter(agent.Capabilities{Name: "keep", SupportsInteractive: true}))
+
+	server.SetAdapterLoader(func() ([]agent.Adapter, error) { return nil, nil })
+	if _, err := server.reloadAdapters(); err == nil {
+		t.Fatal("expected an empty reload to fail")
+	}
+
+	server.SetAdapterLoader(func() ([]agent.Adapter, error) {
+		return []agent.Adapter{
+			agent.NewFakeAdapter(agent.Capabilities{Name: "dup", SupportsInteractive: true}),
+			agent.NewFakeAdapter(agent.Capabilities{Name: "dup", SupportsInteractive: true}),
+		}, nil
+	})
+	if _, err := server.reloadAdapters(); err == nil {
+		t.Fatal("expected a duplicate reload to fail")
+	}
+
+	server.mu.RLock()
+	_, kept := server.adapters["keep"]
+	server.mu.RUnlock()
+	if !kept {
+		t.Fatal("a rejected reload changed the current adapter set")
+	}
+}
