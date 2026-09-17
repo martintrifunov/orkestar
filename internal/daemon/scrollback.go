@@ -21,6 +21,13 @@ func (s *Server) terminalHistory(raw json.RawMessage) (map[string]any, error) {
 	}
 	term.mu.Lock()
 	defer term.mu.Unlock()
+	// A recovered render panic leaves the emulator unsafe to read: say so
+	// rather than returning blank output that looks like an empty pane. The
+	// streaming attach path still serves a blank frame, since dropping a
+	// live connection is worse than an empty repaint.
+	if term.renderBroken {
+		return nil, fmt.Errorf("terminal screen is no longer available")
+	}
 	return map[string]any{"history": term.history(), "screen": term.frame()}, nil
 }
 
@@ -59,6 +66,9 @@ func (s *Server) terminalRead(raw json.RawMessage) (map[string]any, error) {
 
 	term.mu.Lock()
 	defer term.mu.Unlock()
+	if term.renderBroken {
+		return nil, fmt.Errorf("terminal screen is no longer available")
+	}
 	text := term.text(limit)
 	lines := 0
 	if text != "" {

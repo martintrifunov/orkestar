@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -63,5 +66,28 @@ func TestRecoveredRenderPanicStopsReadingTheScreen(t *testing.T) {
 	}
 	if err := s.resize(100, 50); err == nil {
 		t.Fatal("resize should refuse a screen that is no longer readable")
+	}
+}
+
+// Point-in-time reads must fail honestly on that same pane: a blank result
+// looks like an empty pane, while the streaming attach path keeps its blank
+// frame so a live connection is never dropped for a corrupt screen.
+func TestRenderBrokenReadsFailHonestly(t *testing.T) {
+	server := NewServer(filepath.Join(t.TempDir(), "socket"))
+	s := &terminalSession{metadata: Terminal{ID: "term_1", Columns: 80, Rows: 24}}
+	if err := s.renderOutput([]byte("output")); err == nil {
+		t.Fatal("expected the render panic to be recovered into an error")
+	}
+	server.terminals["term_1"] = s
+
+	raw, err := json.Marshal(map[string]string{"terminal_id": "term_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.terminalRead(raw); err == nil || !strings.Contains(err.Error(), "no longer available") {
+		t.Fatalf("terminal.read on a broken screen should fail honestly, got %v", err)
+	}
+	if _, err := server.terminalHistory(raw); err == nil || !strings.Contains(err.Error(), "no longer available") {
+		t.Fatalf("terminal.history on a broken screen should fail honestly, got %v", err)
 	}
 }
