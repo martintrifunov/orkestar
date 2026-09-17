@@ -259,6 +259,14 @@ func TestRefreshDialsMachinesConcurrently(t *testing.T) {
 
 // The backoff loop can double once past its cap; retryAt must still promise
 // no more than a minute out.
+func TestBackoffNeverExceedsOneMinute(t *testing.T) {
+	manager := New("Local", nil, nil)
+	connection := &Connection{failures: 10}
+	manager.recordFailureLocked(connection, errors.New("boom"))
+	if wait := time.Until(connection.retryAt); wait > time.Minute+5*time.Second || wait < 55*time.Second {
+		t.Fatalf("expected about a minute of backoff, got %s", wait)
+	}
+}
 func TestIsAttention(t *testing.T) {
 	for state, want := range map[string]bool{
 		"waiting_input": true, "waiting_permission": true, "waiting_resource": true,

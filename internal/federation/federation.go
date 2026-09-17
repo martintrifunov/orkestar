@@ -313,6 +313,11 @@ func (m *Manager) recordFailureLocked(connection *Connection, err error) *ipc.Cl
 	for attempt := 1; attempt < connection.failures && backoff < time.Minute; attempt++ {
 		backoff *= 2
 	}
+	// The loop above can double once past the cap (64s from a 2s base), so
+	// clamp: retryAt is a promise about the next attempt, not an estimate.
+	if backoff > time.Minute {
+		backoff = time.Minute
+	}
 	connection.retryAt = time.Now().Add(backoff)
 	return client
 }
