@@ -103,7 +103,26 @@ func saveLayout(path string, tree *splitNode, focus string) {
 		return
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
-	_ = os.WriteFile(path, encoded, 0o600)
+	// Write beside the target and rename, so a crash mid-write cannot
+	// leave a torn layout that loads as lost.
+	temp, err := os.CreateTemp(filepath.Dir(path), "layout-*.json")
+	if err != nil {
+		return
+	}
+	name := temp.Name()
+	if _, err := temp.Write(encoded); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(name)
+		return
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(name)
+		return
+	}
+	_ = os.Chmod(name, 0o600)
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+	}
 }
 
 func loadLayout(path string) (persistedLayout, bool) {
