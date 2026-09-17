@@ -255,6 +255,13 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 		m.notice = "No other machines. Add one with `orkestar machine add`."
 		return nil
 	}
+	// Switching detaches the current panes; a dirty editor would lose edits
+	// with no warning, so refuse the switch the way closing a pane does.
+	for _, pane := range m.visiblePanes() {
+		if !m.canClose(pane) {
+			return nil
+		}
+	}
 	m.persistLayout()
 	m.closePanes()
 	m.layout = nil
@@ -265,6 +272,14 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.snapshotLoaded = false
 	m.loading = true
 	m.err = nil
+	// The local file viewer reads this machine's filesystem; over another
+	// machine it would show local files as if they were that machine's.
+	m.filesOpen = false
+	m.filesFocused = false
+	m.filesLoading = false
+	m.filesTree = nil
+	m.filesRoot = ""
+	m.filesCursor = ""
 	// The new machine has its own board and its own mode; nothing selected or
 	// open here means anything there.
 	m.remote = nil
@@ -770,7 +785,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.layoutRestored = true
 				if m.layoutPath != "" && m.client != nil && m.tree() == nil {
 					if saved, ok := loadLayout(m.layoutPath); ok {
-						commands = append(commands, restoreLayout(m.client, saved, runningTerminals(m.snapshot)))
+						commands = append(commands, restoreLayout(m.client, m.currentMachine().ID, saved, runningTerminals(m.snapshot)))
 					}
 				}
 			}
@@ -833,6 +848,21 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitEmbeddedEvent(message.terminal)
 	case layoutRestoredMsg:
+		// A restore that finishes after a machine switch, or after the user
+		// has already opened a pane, must not take over the board: close what
+		// it attached instead of installing it.
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			for _, pane := range message.panes {
+				pane.close()
+			}
+			return m, nil
+		}
+		if m.tree() != nil {
+			for _, pane := range message.panes {
+				pane.close()
+			}
+			return m, nil
+		}
 		if message.tree != nil {
 			m.layout = message.tree
 			m.embedded = message.focus

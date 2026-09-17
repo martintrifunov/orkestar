@@ -139,6 +139,9 @@ type layoutRestoredMsg struct {
 	tree  *splitNode
 	focus *embeddedTerminal
 	panes []*embeddedTerminal
+	// machineID is the machine the panes were attached to, so a restore that
+	// lands after a switch is not installed into the wrong board.
+	machineID string
 }
 
 // runningTerminals is the set of terminal IDs a restored layout may attach to.
@@ -156,7 +159,7 @@ func runningTerminals(snapshot daemon.Snapshot) map[string]bool {
 // rebuilds the tree from the ones that answer. Attachment is sequential and
 // synchronous so the first pane to attach is the input controller, and the
 // tree is built from what actually succeeded rather than what was saved.
-func restoreLayout(client *ipc.Client, saved persistedLayout, running map[string]bool) tea.Cmd {
+func restoreLayout(client *ipc.Client, machineID string, saved persistedLayout, running map[string]bool) tea.Cmd {
 	return func() tea.Msg {
 		panes := map[string]*embeddedTerminal{}
 		var opened []*embeddedTerminal
@@ -194,6 +197,6 @@ func restoreLayout(client *ipc.Client, saved persistedLayout, running map[string
 				focus = leaves[len(leaves)-1]
 			}
 		}
-		return layoutRestoredMsg{tree: tree, focus: focus, panes: opened}
+		return layoutRestoredMsg{tree: tree, focus: focus, panes: opened, machineID: machineID}
 	}
 }

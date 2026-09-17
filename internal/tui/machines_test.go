@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/martintrifunov/orkestar/internal/files"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 )
 
@@ -42,6 +43,81 @@ func TestSwitchMachineRepointsTheClientAndLayout(t *testing.T) {
 	}
 	if m.currentMachine().Label != "Build" {
 		t.Fatalf("unexpected current machine: %#v", m.currentMachine())
+	}
+}
+
+func TestSwitchMachineRefusesWhenAnEditorIsDirty(t *testing.T) {
+	m := New(ipc.NewClient("local"), t.TempDir())
+	m.machines = []Machine{
+		{ID: "local", Label: "Local", Client: ipc.NewClient("a")},
+		{ID: "m1", Label: "Build", Client: ipc.NewClient("b")},
+	}
+	editor := newTextEditor(&files.Document{Path: "notes.txt", Text: "saved"}, resolveTheme(""))
+	editor.text = []rune("changed")
+	pane := &embeddedTerminal{editor: editor}
+	m.layout = &splitNode{pane: pane}
+	m.embedded = pane
+
+	if cmd := m.switchMachine(1); cmd != nil {
+		t.Fatal("switching machines with a dirty editor should be refused")
+	}
+	if m.machineIndex != 0 {
+		t.Fatal("the machine changed despite a dirty editor")
+	}
+	if !strings.Contains(m.notice, "Unsaved") {
+		t.Fatalf("no warning was shown: %q", m.notice)
+	}
+}
+
+func TestSwitchMachineClosesTheLocalFileViewer(t *testing.T) {
+	m := New(ipc.NewClient("local"), t.TempDir())
+	m.machines = []Machine{
+		{ID: "local", Label: "Local", Client: ipc.NewClient("a")},
+		{ID: "m1", Label: "Build", Client: ipc.NewClient("b")},
+	}
+	m.filesOpen = true
+	m.filesFocused = true
+	m.filesRoot = t.TempDir()
+
+	_ = m.switchMachine(1)
+	if m.filesOpen || m.filesFocused {
+		t.Fatal("the local file viewer survived a machine switch")
+	}
+}
+
+func TestStaleLayoutRestoreIsDropped(t *testing.T) {
+	m := New(ipc.NewClient("local"), t.TempDir())
+	m.machines = []Machine{
+		{ID: "local", Label: "Local", Client: ipc.NewClient("a")},
+		{ID: "m1", Label: "Build", Client: ipc.NewClient("b")},
+	}
+	m.machineIndex = 1
+	stale := fakePane(t, "old")
+
+	updated, _ := m.Update(layoutRestoredMsg{
+		machineID: "local", tree: &splitNode{pane: stale}, focus: stale,
+		panes: []*embeddedTerminal{stale},
+	})
+	m = updated.(Model)
+	if m.layout != nil || m.embedded != nil {
+		t.Fatal("a layout restore for another machine was installed")
+	}
+}
+
+func TestLayoutRestoreDoesNotReplaceAnOpenPane(t *testing.T) {
+	m := New(ipc.NewClient("local"), t.TempDir())
+	open := fakePane(t, "mine")
+	m.layout = &splitNode{pane: open}
+	m.embedded = open
+	restored := fakePane(t, "restored")
+
+	updated, _ := m.Update(layoutRestoredMsg{
+		machineID: m.currentMachine().ID, tree: &splitNode{pane: restored}, focus: restored,
+		panes: []*embeddedTerminal{restored},
+	})
+	m = updated.(Model)
+	if m.embedded != open {
+		t.Fatal("a layout restore replaced an already-open pane")
 	}
 }
 

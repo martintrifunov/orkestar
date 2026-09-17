@@ -113,7 +113,7 @@ func TestRestoreLayoutAttachesLiveTerminals(t *testing.T) {
 		t.Fatal("saved layout did not load")
 	}
 
-	restored := restoreLayout(client, saved, map[string]bool{first.ID: true, second.ID: true})().(layoutRestoredMsg)
+	restored := restoreLayout(client, "local", saved, map[string]bool{first.ID: true, second.ID: true})().(layoutRestoredMsg)
 	if restored.tree == nil || len(restored.panes) != 2 {
 		t.Fatalf("expected both live terminals to come back, got %#v", restored)
 	}
@@ -124,7 +124,7 @@ func TestRestoreLayoutAttachesLiveTerminals(t *testing.T) {
 		pane.close()
 	}
 
-	collapsed := restoreLayout(client, saved, map[string]bool{first.ID: true})().(layoutRestoredMsg)
+	collapsed := restoreLayout(client, "local", saved, map[string]bool{first.ID: true})().(layoutRestoredMsg)
 	if collapsed.tree == nil || collapsed.tree.pane == nil || collapsed.tree.pane.terminalID != first.ID {
 		t.Fatalf("expected the tree to collapse to the running pane, got %#v", collapsed.tree)
 	}
