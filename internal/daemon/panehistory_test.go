@@ -106,4 +106,15 @@ func TestPaneHistoryIsOffByDefault(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, paneHistoryFile)); !os.IsNotExist(err) {
 		t.Fatalf("pane history was written while disabled: %v", err)
 	}
+
+	// A file left behind by an earlier opt-in is removed when the feature is
+	// off, so disabling it does not leave terminal output on disk.
+	path := filepath.Join(dir, paneHistoryFile)
+	if err := os.WriteFile(path, []byte(`{"term_1":["secret"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server.loadPaneHistory()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("pane history should be removed when disabled: %v", err)
+	}
 }

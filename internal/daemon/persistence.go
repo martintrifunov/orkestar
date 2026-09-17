@@ -28,6 +28,10 @@ func (s *Server) paneHistoryPath() string {
 // daemon last stopped. Only terminals that are still known are given history.
 func (s *Server) loadPaneHistory() {
 	if !s.paneHistory {
+		// Turning the feature off should also remove what it left on disk:
+		// pane output can hold secrets, and the promise is that it is only
+		// written while opt-in.
+		_ = os.Remove(s.paneHistoryPath())
 		return
 	}
 	encoded, err := os.ReadFile(s.paneHistoryPath())
@@ -116,8 +120,12 @@ func (s *Server) openStore() error {
 	for _, a := range saved.Agents {
 		if a.State != "stopped" && a.State != "crashed" {
 			a.State = "interrupted"
+			// Only an interrupted agent with somewhere to resume to deserves
+			// the attention line; a finished one has nothing to act on.
+			if a.NativeSessionID != "" {
+				a.AttentionReason = "daemon restarted; select resume to relaunch native session"
+			}
 		}
-		a.AttentionReason = "daemon restarted; select resume to relaunch native session"
 		s.agents[a.ID] = newAgentSession(a, nil)
 	}
 	s.tasks.Restore(saved.Tasks)
@@ -164,6 +172,13 @@ func (s *Server) resumeAgent(ctx context.Context, raw json.RawMessage) (Agent, e
 	if old.NativeSessionID == "" {
 		return Agent{}, fmt.Errorf("agent %s has no native session ID to resume", old.ID)
 	}
+	// Only one resume may run for an agent: a manual resume and an automatic
+	// one could otherwise both launch a session from the same interrupted
+	// record.
+	if !entry.beginResume() {
+		return Agent{}, fmt.Errorf("agent %s is already being resumed", old.ID)
+	}
+	defer entry.endResume()
 	params, _ := json.Marshal(map[string]string{"workspace_id": old.WorkspaceID, "adapter": old.Adapter, "mode": old.Mode, "resume_session_id": old.NativeSessionID, "task_id": old.TaskID})
 	resumed, err := s.launchAgent(ctx, params)
 	if err != nil {
@@ -197,6 +212,10 @@ func (s *Server) autoResumeInterrupted() {
 	s.mu.RUnlock()
 	sort.Strings(ids)
 
+	// The same exclusion a mutation request takes, so an auto-resume cannot
+	// interleave with a reset that would clear the board underneath it.
+	s.mutationMu.RLock()
+	defer s.mutationMu.RUnlock()
 	for _, id := range ids {
 		params, err := json.Marshal(map[string]string{"agent_id": id})
 		if err != nil {
