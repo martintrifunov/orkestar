@@ -81,6 +81,23 @@ func TestCatalogDefaultsLabelToHost(t *testing.T) {
 	}
 }
 
+func TestCatalogAddTrimsHost(t *testing.T) {
+	catalog, err := machine.Load(filepath.Join(t.TempDir(), "machines.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := catalog.Add("box", "  workbox  ", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.Host != "workbox" {
+		t.Fatalf("the host was not trimmed: %q", added.Host)
+	}
+	if _, err := catalog.Add("duplicate", "workbox", ""); err == nil {
+		t.Fatal("a padded duplicate should be rejected once trimmed")
+	}
+}
+
 func TestCatalogListIsSortedByLabel(t *testing.T) {
 	catalog, err := machine.Load(filepath.Join(t.TempDir(), "machines.json"))
 	if err != nil {

@@ -107,8 +107,17 @@ func (r Resume) resumeArguments(id string) []string {
 // Adapter launches the manifest's CLI through the shared PTY session.
 type Adapter struct{ manifest Manifest }
 
+// normalized trims the fields a user may have padded, so validation, the
+// adapter and duplicate detection all see the same value.
+func (m Manifest) normalized() Manifest {
+	m.Name = strings.TrimSpace(m.Name)
+	m.Executable = strings.TrimSpace(m.Executable)
+	return m
+}
+
 // New validates a manifest and returns an adapter for it.
 func New(m Manifest) (*Adapter, error) {
+	m = m.normalized()
 	if err := m.Validate(); err != nil {
 		return nil, fmt.Errorf("agent manifest %q: %w", m.Name, err)
 	}
@@ -158,6 +167,7 @@ func Load(path string) (Manifest, error) {
 	if err := decoder.Decode(&manifest); err != nil {
 		return Manifest{}, fmt.Errorf("decode agent manifest %s: %w", path, err)
 	}
+	manifest = manifest.normalized()
 	if err := manifest.Validate(); err != nil {
 		return Manifest{}, fmt.Errorf("agent manifest %s: %w", path, err)
 	}
@@ -166,7 +176,9 @@ func Load(path string) (Manifest, error) {
 
 // LoadDir reads every *.json manifest in dir, sorted by name. A missing
 // directory is not an error: manifests are optional. Invalid files are skipped
-// and returned together as one error, so one typo does not hide the rest.
+// and returned together as one error, so one typo does not hide the rest. Two
+// manifests claiming the same name are a problem too: the second is skipped
+// rather than silently shadowing the first.
 func LoadDir(dir string) ([]Manifest, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -176,6 +188,7 @@ func LoadDir(dir string) ([]Manifest, error) {
 		return nil, fmt.Errorf("read agent manifest directory %s: %w", dir, err)
 	}
 	manifests := make([]Manifest, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
 	var problems []error
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
@@ -186,6 +199,11 @@ func LoadDir(dir string) ([]Manifest, error) {
 			problems = append(problems, err)
 			continue
 		}
+		if seen[manifest.Name] {
+			problems = append(problems, fmt.Errorf("agent manifest %s: duplicate name %q", entry.Name(), manifest.Name))
+			continue
+		}
+		seen[manifest.Name] = true
 		manifests = append(manifests, manifest)
 	}
 	sort.Slice(manifests, func(left, right int) bool { return manifests[left].Name < manifests[right].Name })

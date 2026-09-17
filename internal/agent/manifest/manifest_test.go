@@ -172,6 +172,42 @@ func TestDetectionRulesParseAndValidate(t *testing.T) {
 	}
 }
 
+func TestManifestTrimsPaddedFields(t *testing.T) {
+	executable := fixtureExecutable(t)
+	adapter, err := manifest.New(manifest.Manifest{Name: "  padded  ", Executable: "  " + executable + "  "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.Capabilities().Name != "padded" {
+		t.Fatalf("the name was not trimmed: %q", adapter.Capabilities().Name)
+	}
+	session, err := adapter.Launch(context.Background(), agent.LaunchOptions{
+		Mode: agent.ModeInteractive, Directory: t.TempDir(), Columns: 80, Rows: 24,
+		Environment: []string{"ARGS_FILE=" + filepath.Join(t.TempDir(), "args")},
+	})
+	if err != nil {
+		t.Fatalf("a padded executable should still launch: %v", err)
+	}
+	_ = session.Close()
+}
+
+func TestLoadDirRejectsDuplicateNames(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "one.json"), []byte(`{"name":"dup","executable":"a"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "two.json"), []byte(`{"name":" dup ","executable":"b"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifests, err := manifest.LoadDir(dir)
+	if err == nil {
+		t.Fatal("expected a duplicate name to be reported")
+	}
+	if len(manifests) != 1 {
+		t.Fatalf("expected one manifest kept, got %#v", manifests)
+	}
+}
+
 func TestLoadDirSkipsInvalidFilesAndSorts(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{

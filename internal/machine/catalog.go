@@ -89,6 +89,9 @@ func (c *Catalog) List() []Machine {
 // Add saves a machine, defaulting its label to the host and rejecting a
 // duplicate target. The host is validated the way --remote validates it.
 func (c *Catalog) Add(label, host, session string) (Machine, error) {
+	// Trim first so validation, duplicate detection and the stored value all
+	// agree: otherwise " workbox" and "workbox" would look like two machines.
+	host = strings.TrimSpace(host)
 	if _, err := ipc.ParseRemote(host); err != nil {
 		return Machine{}, err
 	}
