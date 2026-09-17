@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -81,25 +82,44 @@ func (m Model) pollRemotes() tea.Cmd {
 	}
 	machines := m.machines
 	active := m.machineIndex
+	parent := m.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
 	return func() tea.Msg {
-		views := make([]MachineView, 0, len(machines)-1)
+		views := make([]MachineView, len(machines))
+		var wg sync.WaitGroup
 		for index, machine := range machines {
 			if index == active {
 				continue
 			}
-			view := MachineView{ID: machine.ID, Label: machine.Label, State: "online"}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			var snapshot daemon.Snapshot
-			err := machine.Client.Call(ctx, "system.snapshot", nil, &snapshot)
-			cancel()
-			if err != nil {
-				view.State = "offline"
-				view.Err = err.Error()
-			} else {
-				view.Snapshot = snapshot
-			}
-			views = append(views, view)
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				// One slow machine must not stall the others behind its
+				// timeout, and quitting must not leave polls dialing: each
+				// poll carries its own timeout under the interface context.
+				view := MachineView{ID: machine.ID, Label: machine.Label, State: "online"}
+				ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+				defer cancel()
+				var snapshot daemon.Snapshot
+				if err := machine.Client.Call(ctx, "system.snapshot", nil, &snapshot); err != nil {
+					view.State = "offline"
+					view.Err = err.Error()
+				} else {
+					view.Snapshot = snapshot
+				}
+				views[index] = view
+			}(index)
 		}
-		return remotesMsg{views: views, machineIndex: active}
+		wg.Wait()
+		ordered := make([]MachineView, 0, len(machines)-1)
+		for index, view := range views {
+			if index == active {
+				continue
+			}
+			ordered = append(ordered, view)
+		}
+		return remotesMsg{views: ordered, machineIndex: active}
 	}
 }
