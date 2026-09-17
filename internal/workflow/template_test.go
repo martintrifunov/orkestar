@@ -49,6 +49,17 @@ func TestParseTemplate(t *testing.T) {
 
 // A template is rejected whole. Anything caught only partway through applying
 // leaves a board someone has to clean up by hand.
+// A second JSON value or trailing garbage must be rejected rather than
+// silently running the first template.
+func TestParseTemplateRejectsTrailingData(t *testing.T) {
+	if _, err := workflow.ParseTemplate([]byte(releaseTemplate + releaseTemplate)); err == nil {
+		t.Fatal("expected a template followed by another value to be rejected")
+	}
+	if _, err := workflow.ParseTemplate([]byte(releaseTemplate + "\ngarbage")); err == nil {
+		t.Fatal("expected trailing garbage to be rejected")
+	}
+}
+
 func TestParseTemplateRejectsWhatWouldFailHalfway(t *testing.T) {
 	for _, test := range []struct{ name, document, wants string }{
 		{"no name", `{"tasks":[{"key":"a","title":"A"}]}`, "name is required"},

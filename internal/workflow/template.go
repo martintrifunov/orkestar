@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -48,6 +49,12 @@ func ParseTemplate(data []byte) (Template, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&template); err != nil {
 		return Template{}, fmt.Errorf("parse template: %w", err)
+	}
+	// A second JSON value or trailing garbage would otherwise be ignored, so a
+	// botched hand-edit would silently run the wrong template.
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return Template{}, fmt.Errorf("parse template: unexpected trailing data")
 	}
 	if err := template.validate(); err != nil {
 		return Template{}, err
