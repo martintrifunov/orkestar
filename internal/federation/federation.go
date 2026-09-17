@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -17,6 +18,21 @@ import (
 	"github.com/martintrifunov/orkestar/internal/machine"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
+
+// protocolMismatch reports whether a ping reply comes from a daemon this
+// client cannot talk to. Only known generations are judged: a reply without
+// one predates the handshake and is left to fail per-call, the way --remote
+// treats old builds, rather than marking a working machine offline.
+func protocolMismatch(status map[string]string) error {
+	protocol, ok := status["protocol"]
+	if !ok || protocol == "" {
+		return nil
+	}
+	if protocol != strconv.Itoa(ipc.Version) {
+		return fmt.Errorf("machine speaks protocol %s, this client speaks %d; upgrade one side", protocol, ipc.Version)
+	}
+	return nil
+}
 
 // LocalID names the machine this client runs on.
 const LocalID = "local"
@@ -211,6 +227,13 @@ func (m *Manager) refreshLocal(ctx context.Context) {
 		m.mu.Unlock()
 		return
 	}
+	if err := protocolMismatch(status); err != nil {
+		m.mu.Lock()
+		m.local.State = Offline
+		m.local.Err = err.Error()
+		m.mu.Unlock()
+		return
+	}
 	var snapshot daemon.Snapshot
 	snapshotContext, snapshotCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer snapshotCancel()
@@ -276,6 +299,13 @@ func (m *Manager) refreshRemote(ctx context.Context, id string, connection *Conn
 	err := client.Call(pingContext, "system.ping", nil, &status)
 	cancel()
 	if err != nil {
+		m.recordFailure(connection, err)
+		return
+	}
+	// A generation gap never heals by retrying, but it does heal when either
+	// side upgrades, so record it as a failure (with backoff) rather than
+	// merging a board this client cannot read.
+	if err := protocolMismatch(status); err != nil {
 		m.recordFailure(connection, err)
 		return
 	}

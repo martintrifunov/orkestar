@@ -1,11 +1,15 @@
 package federation
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -296,6 +300,81 @@ func TestSetMachinesRedialsWhenHostChanges(t *testing.T) {
 		t.Fatal("expected routing to the moved host")
 	}
 }
+
+func TestProtocolMismatch(t *testing.T) {
+	current := map[string]string{"version": "9.9.9", "protocol": fmt.Sprintf("%d", ipc.Version)}
+	if err := protocolMismatch(current); err != nil {
+		t.Fatalf("matching generation refused: %v", err)
+	}
+	// Replies that predate the handshake carry no generation and are left
+	// to fail per-call, not marked offline here.
+	if err := protocolMismatch(map[string]string{"version": "0.1.0"}); err != nil {
+		t.Fatalf("generation-less reply refused: %v", err)
+	}
+	if err := protocolMismatch(map[string]string{"protocol": "9999"}); err == nil {
+		t.Fatal("a foreign generation was accepted")
+	}
+}
+
+// A daemon on another protocol generation must read as offline with a plain
+// reason, not merge a board this client cannot interpret.
+func TestRefreshMarksProtocolMismatchOffline(t *testing.T) {
+	// /tmp, not t.TempDir: macOS socket paths must stay short.
+	dir, err := os.MkdirTemp("/tmp", "orkestar-oldproto-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "old.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer connection.Close()
+				scanner := bufio.NewScanner(connection)
+				encoder := json.NewEncoder(connection)
+				for scanner.Scan() {
+					var request ipc.Request
+					if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
+						return
+					}
+					result, _ := json.Marshal(map[string]string{"version": "0.9.0", "protocol": "9999"})
+					_ = encoder.Encode(ipc.Response{ID: request.ID, Version: ipc.Version, Result: result})
+				}
+			}()
+		}
+	}()
+
+	manager := New("Local", nil, func(_ context.Context, _ machine.Machine) (*ipc.Client, error) {
+		return ipc.NewClient(socket), nil
+	})
+	manager.SetMachines([]machine.Machine{{ID: "m1", Label: "Old", Host: "old", Enabled: true}})
+	manager.Refresh(context.Background())
+
+	statuses := manager.Status()
+	if len(statuses) != 2 {
+		t.Fatalf("expected local and one remote, got %#v", statuses)
+	}
+	remote := statuses[1]
+	if remote.State != Offline {
+		t.Fatalf("a foreign generation should be offline, got %#v", remote)
+	}
+	if !strings.Contains(remote.Err, "protocol") {
+		t.Fatalf("the reason should name the protocol gap, got %q", remote.Err)
+	}
+	if len(manager.Board().Workspaces) != 0 {
+		t.Fatal("a mismatched board must not merge")
+	}
+}
+
 func TestIsAttention(t *testing.T) {
 	for state, want := range map[string]bool{
 		"waiting_input": true, "waiting_permission": true, "waiting_resource": true,
