@@ -143,6 +143,21 @@ func (s *terminalSession) frame() terminal.Frame {
 	return f
 }
 
+// screenUsable reports whether input commands can reach a live screen, the
+// way terminal.send and resize already do. Callers must hold s.mu.
+func (s *terminalSession) screenUsable() error {
+	if s.renderBroken {
+		return errors.New("terminal screen is no longer available")
+	}
+	// A live process is never nil'd after it exits, so the state is what
+	// says the terminal has ended; writing to a closed screen would be
+	// discarded while the client believed it typed.
+	if s.process == nil || finishedState(s.metadata.State) {
+		return errors.New("terminal is no longer running")
+	}
+	return nil
+}
+
 // history returns the scrollback, or nil once a recovered render panic has
 // made the emulator unsafe to read. Callers must hold s.mu.
 func (s *terminalSession) history() []string {
@@ -675,17 +690,29 @@ func (s *Server) handleTerminalAttach(conn net.Conn, scanner *bufio.Scanner, enc
 			if !control {
 				continue
 			}
-			switch c.Command {
-			case "input":
-				err = session.input(c.Data)
-			case "mouse":
-				session.screen.Mouse(c.Kind, c.X, c.Y, c.Button, c.Modifiers)
-			case "paste":
-				session.screen.Paste(c.Text)
-			case "key":
-				session.screen.Navigation(c.Code, c.Modifiers)
-			case "resize":
-				err = session.resize(c.Columns, c.Rows)
+			// Checked without holding the lock across the screen call: the
+			// state can only move toward finished, so a terminal that was
+			// alive here stays meaningful, while one already ended gets a
+			// clear error instead of silently discarded input.
+			session.mu.Lock()
+			usable := session.screenUsable()
+			session.mu.Unlock()
+			if usable != nil && c.Command != "resize" {
+				// Resize reports its own equivalent errors.
+				err = usable
+			} else {
+				switch c.Command {
+				case "input":
+					err = session.input(c.Data)
+				case "mouse":
+					session.screen.Mouse(c.Kind, c.X, c.Y, c.Button, c.Modifiers)
+				case "paste":
+					session.screen.Paste(c.Text)
+				case "key":
+					session.screen.Navigation(c.Code, c.Modifiers)
+				case "resize":
+					err = session.resize(c.Columns, c.Rows)
+				}
 			}
 			if err != nil {
 				b, _ := json.Marshal(map[string]string{"message": err.Error()})

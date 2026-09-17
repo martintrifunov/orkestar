@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,6 +309,75 @@ func TestTerminalWaitReturnsWhenOutputMatches(t *testing.T) {
 	if elapsed := time.Since(startedAt); elapsed < 1500*time.Millisecond {
 		t.Fatalf("wait returned in %s; it should hold until its timeout", elapsed)
 	}
+}
+
+// Typing into an attached terminal that has already ended must fail the way
+// terminal.send does, rather than being silently discarded: the client
+// believes it typed, and nothing ever will.
+func TestAttachInputToStoppedTerminalErrors(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-dead-input-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	_, client, _ := serveRecoveryTest(t, filepath.Join(dir, "socket"))
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": dir}, &w)
+	var started Terminal
+	callRecovery(t, client, "terminal.start", map[string]any{
+		"workspace_id": w.ID,
+		"command":      []string{"/bin/sh", "-c", "sleep 60"},
+	}, &started)
+	var stopped Terminal
+	callRecovery(t, client, "terminal.stop", map[string]string{"terminal_id": started.ID}, &stopped)
+	if stopped.State != "stopped" {
+		t.Fatalf("expected a stopped terminal, got %q", stopped.State)
+	}
+
+	connection, err := net.Dial("unix", filepath.Join(dir, "socket"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	params, _ := json.Marshal(map[string]any{"terminal_id": started.ID, "screen": true})
+	attach := ipc.Request{ID: "req_attach", Version: ipc.Version, Method: "terminal.attach", Params: params}
+	if err := json.NewEncoder(connection).Encode(attach); err != nil {
+		t.Fatal(err)
+	}
+	scanner := bufio.NewScanner(connection)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	if !scanner.Scan() {
+		t.Fatal("no attach reply")
+	}
+	var reply ipc.Response
+	if err := json.Unmarshal(scanner.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Error != nil {
+		t.Fatalf("attach: %v", reply.Error)
+	}
+	command, _ := json.Marshal(map[string]any{"version": ipc.Version, "command": "input", "data": base64.StdEncoding.EncodeToString([]byte("x"))})
+	if _, err := connection.Write(append(command, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for scanner.Scan() {
+		var event ipc.Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+		if event.Event == "terminal.error" {
+			var message struct {
+				Message string `json:"message"`
+			}
+			_ = json.Unmarshal(event.Data, &message)
+			if !strings.Contains(message.Message, "no longer running") {
+				t.Fatalf("unexpected dead-terminal error: %q", message.Message)
+			}
+			return
+		}
+	}
+	t.Fatal("typing into a stopped terminal reported no error")
 }
 
 // A command that prints its marker and exits at once must still satisfy a
