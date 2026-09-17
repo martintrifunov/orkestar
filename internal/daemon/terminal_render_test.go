@@ -22,9 +22,12 @@ func TestRenderOutputSurvivesAPanicAndUnlocksTheSession(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		s.mu.Lock()
-		s.mu.Unlock()
-		close(done)
+		// TryLock reports whether the mutex is free: if it is, renderOutput
+		// released it after the recovered panic.
+		if s.mu.TryLock() {
+			s.mu.Unlock()
+			close(done)
+		}
 	}()
 	select {
 	case <-done:

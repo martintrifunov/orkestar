@@ -293,10 +293,10 @@ func TestTaskPromptCancelsAndIgnoresAnEmptyTitle(t *testing.T) {
 	}
 	// An empty title creates nothing, and the prompt stays open saying why:
 	// closing it would silently discard a description already typed.
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = updated.(Model)
 	m = typeText(t, m, "why this exists")
-	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatal("an empty title created a task")
