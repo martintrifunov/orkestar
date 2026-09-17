@@ -59,7 +59,7 @@ func startTestDaemon(t *testing.T) *ipc.Client {
 func connectMCP(t *testing.T, daemonClient *ipc.Client) *sdk.ClientSession {
 	t.Helper()
 
-	server := orkestarmcp.NewServer(daemonClient)
+	server := orkestarmcp.NewServer(daemonClient, "v0.0.0-test")
 	client := sdk.NewClient(&sdk.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
 
 	serverTransport, clientTransport := sdk.NewInMemoryTransports()

@@ -450,7 +450,7 @@ func runMCP(paths runtimepath.Paths, args []string) error {
 		return err
 	}
 
-	server := orkestarmcp.NewServer(ipc.NewClient(paths.Socket))
+	server := orkestarmcp.NewServer(ipc.NewClient(paths.Socket), version)
 	runCtx, runCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer runCancel()
 	return server.Run(runCtx, &sdk.StdioTransport{})

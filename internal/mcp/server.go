@@ -26,14 +26,19 @@ import (
 func Instructions() string { return instructions }
 
 // NewServer returns an MCP server whose tools are backed by the daemon
-// reachable through client. The caller is responsible for running it over
-// a transport (see sdk.Transport implementations, such as sdk.StdioTransport).
-func NewServer(client *ipc.Client) *sdk.Server {
+// reachable through client. version is the build identity reported to clients,
+// so it never drifts from the binary. The caller is responsible for running it
+// over a transport (see sdk.Transport implementations, such as
+// sdk.StdioTransport).
+func NewServer(client *ipc.Client, version string) *sdk.Server {
+	if version == "" {
+		version = "dev"
+	}
 	// Instructions reach a client at connection time, which is the one moment
 	// an agent reliably reads anything about a server. Tool descriptions cover
 	// a call each and never the shape of the work.
 	server := sdk.NewServer(
-		&sdk.Implementation{Name: "orkestar", Version: "v0.5.0"},
+		&sdk.Implementation{Name: "orkestar", Version: version},
 		&sdk.ServerOptions{Instructions: instructions},
 	)
 
