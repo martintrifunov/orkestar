@@ -174,18 +174,31 @@ func (a *agentSession) applyLifecycle(event agent.LifecycleEvent, hook bool) (Ag
 	return a.applyLifecycleIf(event, hook, "")
 }
 func (a *agentSession) applyLifecycleIf(event agent.LifecycleEvent, hook bool, expected agent.State) (Agent, bool) {
+	metadata, permissionCleared, applied := a.recordLifecycleIf(event, hook, expected)
+	if applied {
+		a.publishLifecycle(metadata)
+	}
+	return metadata, permissionCleared
+}
+
+// recordLifecycleIf records the event on the entry without notifying
+// subscribers. The caller publishes once its own bookkeeping for the event
+// is done, so a stream never reports a state the permission list does not
+// reflect yet. applied is false when the event was rejected and there is
+// nothing to publish.
+func (a *agentSession) recordLifecycleIf(event agent.LifecycleEvent, hook bool, expected agent.State) (Agent, bool, bool) {
 	a.mu.Lock()
 	if expected != "" && a.metadata.State != string(expected) {
 		metadata := a.metadata
 		a.mu.Unlock()
-		return metadata, false
+		return metadata, false, false
 	}
 	// Process-ready is a launch acknowledgement; hooks own turn state once seen.
 	if (a.metadata.State == "stopped" || a.metadata.State == "crashed") && event.State != agent.StateStopped && event.State != agent.StateCrashed ||
 		(!hook && a.metadata.SignalSource == "hooks" && event.State == agent.StateReady) {
 		metadata := a.metadata
 		a.mu.Unlock()
-		return metadata, false
+		return metadata, false, false
 	}
 	a.metadata.State = string(event.State)
 	if isAttentionState(event.State) {
@@ -199,13 +212,17 @@ func (a *agentSession) applyLifecycleIf(event agent.LifecycleEvent, hook bool, e
 		a.permissionID = ""
 	}
 	a.mu.Unlock()
+	return metadata, permissionCleared, true
+}
 
+// publishLifecycle notifies attach subscribers of an accepted event. It runs
+// after the caller's bookkeeping, never before it.
+func (a *agentSession) publishLifecycle(metadata Agent) {
 	payload, err := json.Marshal(metadata)
 	if err != nil {
-		return metadata, permissionCleared
+		return
 	}
 	a.broadcast(agentEvent{Name: "agent.lifecycle", Data: payload})
-	return metadata, permissionCleared
 }
 
 func (a *agentSession) broadcast(event agentEvent) {
@@ -509,11 +526,17 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 		return
 	}
 	for event := range session.Events() {
-		metadata, permissionCleared := entry.applyLifecycleEvent(event)
+		// The permission list is updated before the event is published: a
+		// client that lists permissions on seeing a state must never catch
+		// the board mid-update.
+		metadata, permissionCleared, applied := entry.recordLifecycleIf(event, false, "")
 
 		s.mu.Lock()
 		if s.agents[id] != entry {
 			s.mu.Unlock()
+			if applied {
+				entry.publishLifecycle(metadata)
+			}
 			continue
 		}
 		if event.State == agent.StateWaitingPermission && entry.getPermissionID() == "" {
@@ -535,6 +558,9 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 			}
 		}
 		s.mu.Unlock()
+		if applied {
+			entry.publishLifecycle(metadata)
+		}
 		if metadata.State == "stopped" || metadata.State == "crashed" {
 			s.cancelHookPermissions(id, "")
 		}

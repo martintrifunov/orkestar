@@ -363,6 +363,95 @@ func TestAgentLifecycleAndPermissionInbox(t *testing.T) {
 	}
 }
 
+// The permission list must already reflect a lifecycle event by the time the
+// event reaches the stream: the watcher published before doing its permission
+// bookkeeping, so listing on seeing a state raced the update and a loaded
+// machine observed a permission that was already gone (or missed a new one).
+func TestPermissionListFollowsLifecycleStream(t *testing.T) {
+	t.Parallel()
+
+	temporaryDirectory := t.TempDir()
+	socketDirectory, err := os.MkdirTemp("/tmp", "orkestar-perm-order-")
+	if err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDirectory) })
+	socketPath := filepath.Join(socketDirectory, "orkestar.sock")
+
+	server := daemon.NewServer(socketPath)
+	adapter := newControllableAdapter("fake-agent")
+	server.RegisterAdapter(adapter)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-serverError; err != nil {
+			t.Errorf("server shutdown: %v", err)
+		}
+	})
+
+	client := ipc.NewClient(socketPath)
+	waitForServer(t, client)
+	callContext, callCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer callCancel()
+
+	var workspace daemon.Workspace
+	if err := client.Call(callContext, "workspace.create", map[string]string{
+		"directory": temporaryDirectory,
+	}, &workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	var launched daemon.Agent
+	if err := client.Call(callContext, "agent.launch", map[string]any{
+		"workspace_id": workspace.ID,
+		"adapter":      "fake-agent",
+		"mode":         "interactive",
+	}, &launched); err != nil {
+		t.Fatalf("launch agent: %v", err)
+	}
+	stream, err := client.OpenStream(callContext, "agent.attach", map[string]string{
+		"agent_id": launched.ID,
+	}, new(struct {
+		Agent daemon.Agent `json:"agent"`
+	}))
+	if err != nil {
+		t.Fatalf("attach agent: %v", err)
+	}
+	defer stream.Close()
+
+	var session *controllableSession
+	select {
+	case session = <-adapter.sessions:
+	case <-time.After(2 * time.Second):
+		t.Fatal("adapter never launched a session")
+	}
+
+	list := func() []daemon.PermissionRequest {
+		t.Helper()
+		var listed struct {
+			Permissions []daemon.PermissionRequest `json:"permissions"`
+		}
+		if err := client.Call(callContext, "permission.list", nil, &listed); err != nil {
+			t.Fatalf("list permissions: %v", err)
+		}
+		return listed.Permissions
+	}
+	for i := 0; i < 25; i++ {
+		session.emit(agent.StateWaitingPermission, "check")
+		waitForAgentState(t, stream, string(agent.StateWaitingPermission))
+		if permissions := list(); len(permissions) != 1 {
+			t.Fatalf("cycle %d: stream reported waiting but the list has %d permissions", i, len(permissions))
+		}
+		session.emit(agent.StateReady, "done")
+		waitForAgentState(t, stream, string(agent.StateReady))
+		if permissions := list(); len(permissions) != 0 {
+			t.Fatalf("cycle %d: stream reported ready but the list still has %#v", i, permissions)
+		}
+	}
+}
+
 func waitForAgentState(t *testing.T, stream *ipc.Stream, want string) {
 	t.Helper()
 

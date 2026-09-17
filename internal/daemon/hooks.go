@@ -103,8 +103,14 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 			reason += " · " + p.Tool
 		}
 	}
-	_, _ = entry.applyLifecycle(agent.LifecycleEvent{State: state, Reason: reason, Timestamp: time.Now().UTC()}, true)
+	// The inbox entry below is created after this records the state, so the
+	// event is published only once the permission list reflects it — the
+	// same order the session-event path keeps.
+	metadata, _, applied := entry.recordLifecycleIf(agent.LifecycleEvent{State: state, Reason: reason, Timestamp: time.Now().UTC()}, true, "")
 	if p.Event != "PermissionRequest" {
+		if applied {
+			entry.publishLifecycle(metadata)
+		}
 		if err := s.persist(); err != nil {
 			return nil, err
 		}
@@ -123,11 +129,17 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 	s.pendingHooks[id] = pending
 	s.permissions[id] = PermissionRequest{ID: id, AgentID: p.AgentID, Reason: reason, CreatedAt: time.Now().UTC()}
 	s.mu.Unlock()
+	if applied {
+		entry.publishLifecycle(metadata)
+	}
 	defer func() { s.mu.Lock(); delete(s.pendingHooks, id); delete(s.permissions, id); s.mu.Unlock() }()
 	select {
 	case decision := <-pending.decision:
 		if decision != "" {
-			entry.applyLifecycleIf(agent.LifecycleEvent{State: agent.StateWorking, Timestamp: time.Now().UTC()}, true, agent.StateWaitingPermission)
+			decided, _, decisionApplied := entry.recordLifecycleIf(agent.LifecycleEvent{State: agent.StateWorking, Timestamp: time.Now().UTC()}, true, agent.StateWaitingPermission)
+			if decisionApplied {
+				entry.publishLifecycle(decided)
+			}
 			_ = s.persist()
 		}
 		return map[string]string{"decision": decision}, nil
