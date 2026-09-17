@@ -308,3 +308,37 @@ func TestTerminalWaitReturnsWhenOutputMatches(t *testing.T) {
 		t.Fatalf("wait returned in %s; it should hold until its timeout", elapsed)
 	}
 }
+
+// A command that prints its marker and exits at once must still satisfy a
+// wait for that marker: finish() replaces a pending output notification with
+// the exit event, so the exit path has to re-check the final text.
+func TestTerminalWaitSucceedsWhenCommandExitsAfterMatch(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-wait-exit-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	_, client, _ := serveRecoveryTest(t, filepath.Join(dir, "socket"))
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": dir}, &w)
+	var started Terminal
+	callRecovery(t, client, "terminal.start", map[string]any{
+		"workspace_id": w.ID,
+		"command":      []string{"/bin/sh", "-c", "printf 'exit-marker\\n'"},
+	}, &started)
+
+	var result struct {
+		Text  string `json:"text"`
+		State string `json:"state"`
+	}
+	waitContext, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer waitCancel()
+	if err := client.Call(waitContext, "terminal.wait", map[string]any{
+		"terminal_id": started.ID, "contains": "exit-marker", "timeout_seconds": 4,
+	}, &result); err != nil {
+		t.Fatalf("wait for output of an exited command: %v", err)
+	}
+	if !strings.Contains(result.Text, "exit-marker") {
+		t.Fatalf("expected the matched output, got %q", result.Text)
+	}
+}

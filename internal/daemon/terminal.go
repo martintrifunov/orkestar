@@ -501,25 +501,38 @@ func (s *Server) waitForTerminal(ctx context.Context, raw json.RawMessage) (map[
 			"text":        session.text(maxReadLines),
 		}
 	}
-	settled := func() (bool, bool) {
+	settled := func() (matched bool, state string) {
 		session.mu.Lock()
 		defer session.mu.Unlock()
-		return strings.Contains(session.text(maxReadLines), p.Contains), finishedState(session.metadata.State)
+		return strings.Contains(session.text(maxReadLines), p.Contains), session.metadata.State
 	}
 
 	for {
-		if matched, stopped := settled(); matched {
+		if matched, state := settled(); matched {
 			return snapshot(), nil
-		} else if stopped {
-			return snapshot(), fmt.Errorf("terminal %q stopped before its output contained %q", p.TerminalID, p.Contains)
+		} else if finishedState(state) {
+			return snapshot(), fmt.Errorf("terminal %q is %s and its output never contained %q", p.TerminalID, state, p.Contains)
 		}
 		select {
 		case event, open := <-sub.events:
 			if !open {
+				// The watch ended; the final output may already hold the
+				// match, since finish() replaces a pending output event
+				// with the exit event.
+				if matched, _ := settled(); matched {
+					return snapshot(), nil
+				}
 				return snapshot(), fmt.Errorf("terminal %q is no longer being watched", p.TerminalID)
 			}
 			if event.Name == "terminal.exit" {
-				return snapshot(), fmt.Errorf("terminal %q stopped before its output contained %q", p.TerminalID, p.Contains)
+				// Re-check the text: a command that prints and exits can
+				// have its output notification discarded when finish()
+				// drains the channel to send the exit event.
+				if matched, state := settled(); matched {
+					return snapshot(), nil
+				} else {
+					return snapshot(), fmt.Errorf("terminal %q is %s and its output never contained %q", p.TerminalID, state, p.Contains)
+				}
 			}
 		case <-ctx.Done():
 			return snapshot(), fmt.Errorf("waiting for terminal %q output: %w", p.TerminalID, ctx.Err())
