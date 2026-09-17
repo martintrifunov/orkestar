@@ -71,7 +71,27 @@ func (c *Catalog) Save() error {
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
 		return fmt.Errorf("create machine catalog directory: %w", err)
 	}
-	return os.WriteFile(c.path, encoded, 0o600)
+	// Write beside the target and rename, so a crash or a concurrent writer
+	// cannot leave a half-written catalog that no verb can read.
+	temp, err := os.CreateTemp(filepath.Dir(c.path), "machines-*.json")
+	if err != nil {
+		return fmt.Errorf("create machine catalog: %w", err)
+	}
+	name := temp.Name()
+	if _, err := temp.Write(encoded); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, c.path); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return nil
 }
 
 // List returns the machines sorted by label.
