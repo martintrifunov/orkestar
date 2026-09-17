@@ -138,13 +138,19 @@ func taskWatch(paths runtimepath.Paths, args []string) error {
 		return err
 	}
 	defer stream.Close()
+	// Receive has no context, so closing the stream is what releases a blocked
+	// read on Ctrl-C; otherwise the watch could only be killed with SIGKILL.
+	go func() {
+		<-ctx.Done()
+		_ = stream.Close()
+	}()
 	for _, task := range initial.Tasks {
 		printTask(task)
 	}
 	for {
 		var event ipc.Event
 		if err := stream.Receive(&event); err != nil {
-			if errors.Is(err, io.EOF) {
+			if ctx.Err() != nil || errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
