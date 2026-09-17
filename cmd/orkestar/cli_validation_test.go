@@ -35,3 +35,18 @@ func TestMachineAddAcceptsEqualsForm(t *testing.T) {
 	}
 }
 
+func TestParseTerminalSend(t *testing.T) {
+	id, text, enter, err := parseTerminalSend([]string{"term_1", "--enter", "hello", "world"})
+	if err != nil || id != "term_1" || text != "hello world" || !enter {
+		t.Fatalf("flag form: got %q %q %v %v", id, text, enter, err)
+	}
+	// After `--` everything is literal text, including `--enter` itself.
+	id, text, enter, err = parseTerminalSend([]string{"term_1", "--", "--enter"})
+	if err != nil || id != "term_1" || text != "--enter" || enter {
+		t.Fatalf("separator form: got %q %q %v %v", id, text, enter, err)
+	}
+	if _, _, _, err := parseTerminalSend([]string{"term_1"}); err == nil {
+		t.Fatal("expected missing text to fail")
+	}
+}
+

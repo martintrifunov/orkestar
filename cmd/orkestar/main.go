@@ -229,9 +229,34 @@ func runRemoteTUI(host, directory string) error {
 	return tui.Run([]tui.Machine{{ID: "remote", Label: remote.Host, Client: client}}, directory)
 }
 
+// parseTerminalSend splits `send <terminal-id> [--enter] [--] <text>`: words
+// before an optional `--` separator take `--enter` as a flag, words after it
+// are literal text, so the text `--enter` itself can be sent. Shell
+// word-splitting still applies; words are joined with one space.
+func parseTerminalSend(args []string) (terminalID, text string, enter bool, err error) {
+	if len(args) < 2 {
+		return "", "", false, errors.New("usage: orkestar terminal send <terminal-id> [--enter] [--] <text>")
+	}
+	terminalID = args[0]
+	var words []string
+	literal := false
+	for _, argument := range args[1:] {
+		if !literal && argument == "--" {
+			literal = true
+			continue
+		}
+		if !literal && argument == "--enter" {
+			enter = true
+			continue
+		}
+		words = append(words, argument)
+	}
+	return terminalID, strings.Join(words, " "), enter, nil
+}
+
 func runTerminal(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] <text> | wait <terminal-id> --contains <text> [--timeout N] | stop <terminal-id> | remove <terminal-id>")
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] [--] <text> | wait <terminal-id> --contains <text> [--timeout N] | stop <terminal-id> | remove <terminal-id>")
 	}
 
 	switch args[0] {
@@ -296,24 +321,18 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 		return nil
 	case "send":
 		if len(args) < 3 {
-			return errors.New("usage: orkestar terminal send <terminal-id> [--enter] <text>")
+			return errors.New("usage: orkestar terminal send <terminal-id> [--enter] [--] <text>")
 		}
-		terminalID := args[1]
-		enter := false
-		var words []string
-		for _, argument := range args[2:] {
-			if argument == "--enter" {
-				enter = true
-				continue
-			}
-			words = append(words, argument)
+		terminalID, text, enter, err := parseTerminalSend(args[1:])
+		if err != nil {
+			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		var result map[string]string
 		if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal.send", map[string]any{
 			"terminal_id": terminalID,
-			"text":        strings.Join(words, " "),
+			"text":        text,
 			"enter":       enter,
 		}, &result); err != nil {
 			return err
@@ -638,7 +657,7 @@ Usage:
   orkestar terminal start <workspace-id> -- <command> [args...]
   orkestar terminal attach <terminal-id>
   orkestar terminal read <terminal-id> [--lines N]
-  orkestar terminal send <terminal-id> [--enter] <text>
+  orkestar terminal send <terminal-id> [--enter] [--] <text>
   orkestar terminal wait <terminal-id> --contains <text> [--timeout N]
   orkestar terminal stop <terminal-id>
   orkestar terminal remove <terminal-id>
