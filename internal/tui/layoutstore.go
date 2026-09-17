@@ -178,7 +178,10 @@ func runningTerminals(snapshot daemon.Snapshot) map[string]bool {
 // rebuilds the tree from the ones that answer. Attachment is sequential and
 // synchronous so the first pane to attach is the input controller, and the
 // tree is built from what actually succeeded rather than what was saved.
-func restoreLayout(client *ipc.Client, machineID string, saved persistedLayout, running map[string]bool) tea.Cmd {
+func restoreLayout(ctx context.Context, client *ipc.Client, machineID string, saved persistedLayout, running map[string]bool) tea.Cmd {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return func() tea.Msg {
 		panes := map[string]*embeddedTerminal{}
 		var opened []*embeddedTerminal
@@ -194,7 +197,7 @@ func restoreLayout(client *ipc.Client, machineID string, saved persistedLayout, 
 				if _, done := panes[node.Terminal]; done {
 					return
 				}
-				term, err := attachEmbeddedTerminal(context.Background(), client, node.Terminal, 80, 24)
+				term, err := attachEmbeddedTerminal(ctx, client, node.Terminal, 80, 24)
 				if err != nil {
 					return
 				}

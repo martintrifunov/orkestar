@@ -819,7 +819,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.layoutRestored = true
 				if m.layoutPath != "" && m.client != nil && m.tree() == nil {
 					if saved, ok := loadLayout(m.layoutPath); ok {
-						commands = append(commands, restoreLayout(m.client, m.currentMachine().ID, saved, runningTerminals(m.snapshot)))
+						ctx := m.ctx
+						if ctx == nil {
+							ctx = context.Background()
+						}
+						commands = append(commands, restoreLayout(ctx, m.client, m.currentMachine().ID, saved, runningTerminals(m.snapshot)))
 					}
 				}
 			}
