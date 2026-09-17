@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.5.1
+
+A bug-fix release over 0.5.0. Four review passes over the new surface, its
+static-analysis warnings cleared, and the suite green under `-race` and
+`staticcheck`.
+
+Control surface and daemon:
+
+- `terminal.send` no longer reports success against a terminal whose process
+  has ended, and `agent.attach` returns at once for an agent that has already
+  ended instead of hanging, including one forgotten by a resume.
+- An ended agent no longer looks live: `agent.explain` reports it as not live
+  and `agent.prompt`/`agent.interrupt` say to resume it first.
+- Auto-resume no longer bypasses the mutation lock (so it cannot race a reset)
+  and refuses a second concurrent resume of the same agent.
+- A hook that arrives after its session ended no longer restamps the record
+  with a new native identity.
+- Detection reads only the visible screen, so a phrase that has scrolled away
+  cannot pin the state, and a throttled scan is retried rather than dropped.
+- A restart no longer stamps an attention reason on finished agents, and a
+  stale one is cleared; the pane-history file is removed when the feature is
+  off, on every startup path.
+- Metadata the daemon cannot read is moved aside as `metadata.db.corrupt` and
+  the daemon starts empty, instead of failing to start with no way to reset.
+- Snapshots are ordered deterministically; a duplicated terminal in a saved
+  layout is restored once; a template with trailing data is rejected.
+
+CLI and TUI:
+
+- `orkestar task watch` can be interrupted; `daemon stop` and `reset` are
+  idempotent when no daemon is running.
+- The TUI refuses a machine switch that would discard a dirty editor, closes
+  the local file viewer when switching, and drops a snapshot or layout restore
+  that belongs to the machine it just left.
+- The file viewer, machine catalog, and agent manifests trim and de-duplicate
+  their configuration; the machine catalog is written atomically.
+- The socket probe retries briefly before unlinking, so a daemon mid-startup
+  is not mistaken for a stale socket; the sandboxed `terminal attach` sends one
+  byte for a doubled detach prefix.
+
 ## 0.5.0
 
 An agent-native control surface, session continuity, declarative agents,

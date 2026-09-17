@@ -356,6 +356,11 @@ sidebar that drives remote agents without switching, and M12's "no local
 command or secret copied to a remote" guarantee beyond the catalog holding no
 credentials.
 
+**0.5.1** followed on 2026-09-16 with bug fixes only: four review passes over
+the new surface, the suite green under `-race` and `staticcheck`. See the
+changelog. The 0.5.0 caveats above are unchanged — in particular the remote
+half is still verified only against in-process daemons, not ssh.
+
 ### M14: Extension surface (a decision, not a commitment)
 
 A marketplace is out of scope in every form: no plugin index, no discovery, no
