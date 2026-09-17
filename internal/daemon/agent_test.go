@@ -322,11 +322,25 @@ func TestAgentLifecycleAndPermissionInbox(t *testing.T) {
 	if err := client.Call(callContext, "agent.explain", map[string]string{"agent_id": launched.ID}, &explanation); err != nil {
 		t.Fatalf("explain agent: %v", err)
 	}
-	if explanation.Agent.ID != launched.ID || !explanation.Live || !explanation.Resumable {
-		t.Fatalf("unexpected explanation: %#v", explanation)
+	// A running agent with a native ID is live but not resumable yet: a
+	// resume replaces the session, so asking now fails with "still active".
+	if explanation.Agent.ID != launched.ID || !explanation.Live || explanation.Resumable {
+		t.Fatalf("unexpected explanation for a running agent: %#v", explanation)
 	}
 	if len(explanation.Reasons) == 0 {
 		t.Fatal("agent.explain returned no reasons")
+	}
+
+	// Once the session has ended the same agent is no longer live but is
+	// resumable through its native ID.
+	session.emit(agent.StateStopped, "done")
+	waitForAgentState(t, stream, string(agent.StateStopped))
+	var ended daemon.AgentExplanation
+	if err := client.Call(callContext, "agent.explain", map[string]string{"agent_id": launched.ID}, &ended); err != nil {
+		t.Fatalf("explain stopped agent: %v", err)
+	}
+	if ended.Live || !ended.Resumable {
+		t.Fatalf("unexpected explanation for a stopped agent: %#v", ended)
 	}
 
 	// The attach stream must end when the session does, not hang until the

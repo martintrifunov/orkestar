@@ -616,7 +616,13 @@ func (s *Server) explainAgent(raw json.RawMessage) (AgentExplanation, error) {
 		return AgentExplanation{}, err
 	}
 	metadata := entry.snapshot()
-	live := entry.liveSession() != nil
+	// A session that already ended but has not been reaped yet is not live:
+	// the process is gone even though the watcher has not drained.
+	live := entry.liveSession() != nil && !finishedState(metadata.State)
+	// A resume replaces the session, so it is only meaningful once this one
+	// has ended. An active agent with a native ID will be resumable, but
+	// asking now fails with "still active".
+	resumable := metadata.NativeSessionID != "" && finishedState(metadata.State)
 
 	s.mu.RLock()
 	permissions := make([]PermissionRequest, 0, 1)
@@ -666,15 +672,18 @@ func (s *Server) explainAgent(raw json.RawMessage) (AgentExplanation, error) {
 	if metadata.TaskID != "" {
 		reasons = append(reasons, "working task "+metadata.TaskID)
 	}
-	if metadata.NativeSessionID == "" {
+	switch {
+	case metadata.NativeSessionID == "":
 		reasons = append(reasons, "no native session ID, so it cannot be resumed")
-	} else {
+	case resumable:
 		reasons = append(reasons, "resumable as native session "+metadata.NativeSessionID)
+	default:
+		reasons = append(reasons, "native session "+metadata.NativeSessionID+" will be resumable once the agent stops")
 	}
 	return AgentExplanation{
 		Agent:       metadata,
 		Live:        live,
-		Resumable:   metadata.NativeSessionID != "",
+		Resumable:   resumable,
 		Reasons:     reasons,
 		Permissions: permissions,
 	}, nil
