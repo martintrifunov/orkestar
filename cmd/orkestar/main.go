@@ -273,6 +273,9 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 			if err != nil {
 				return fmt.Errorf("--lines needs a number: %w", err)
 			}
+			if count < 0 {
+				return fmt.Errorf("--lines needs a non-negative number, got %d", count)
+			}
 			lineCount = count
 			index++
 		}

@@ -47,7 +47,11 @@ func runHook() error {
 }
 func runAgent(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <claude-code|opencode|codex> | resume <agent-id> | explain <agent-id> | reload | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")
+		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <adapter> [--task=<task-id>] | resume <agent-id> | explain <agent-id> | reload | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")
+	}
+	// Catch junk args before starting a daemon for them.
+	if (args[0] == "list" || args[0] == "reload") && len(args) != 1 {
+		return fmt.Errorf("usage: agent %s", args[0])
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -58,6 +62,9 @@ func runAgent(paths runtimepath.Paths, args []string) error {
 	var result any
 	switch args[0] {
 	case "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agent list")
+		}
 		var state daemon.Snapshot
 		if err := client.Call(ctx, "system.snapshot", nil, &state); err != nil {
 			return err
@@ -110,6 +117,9 @@ func runAgent(paths runtimepath.Paths, args []string) error {
 		}
 		result = explanation
 	case "reload":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agent reload")
+		}
 		var capabilities []agent.Capabilities
 		if err := client.Call(ctx, "agent.reloadAdapters", nil, &capabilities); err != nil {
 			return err
