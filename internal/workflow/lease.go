@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -116,7 +117,9 @@ func (m *LeaseManager) Release(resource, leaseID string) error {
 func (m *LeaseManager) List(resource string) []Lease {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.pruneLocked(resource, time.Now().UTC())
+	active := m.pruneLocked(resource, time.Now().UTC())
+	sortLeases(active)
+	return active
 }
 
 // ListAll returns every unexpired lease across all resources.
@@ -129,7 +132,22 @@ func (m *LeaseManager) ListAll() []Lease {
 	for resource := range m.leases {
 		all = append(all, m.pruneLocked(resource, now)...)
 	}
+	sortLeases(all)
 	return all
+}
+
+// sortLeases orders leases deterministically so snapshots do not flip with
+// Go map randomization. Tasks and artifacts sort the same way.
+func sortLeases(leases []Lease) {
+	sort.Slice(leases, func(left, right int) bool {
+		if leases[left].Resource != leases[right].Resource {
+			return leases[left].Resource < leases[right].Resource
+		}
+		if !leases[left].AcquiredAt.Equal(leases[right].AcquiredAt) {
+			return leases[left].AcquiredAt.Before(leases[right].AcquiredAt)
+		}
+		return leases[left].ID < leases[right].ID
+	})
 }
 
 // pruneLocked removes expired leases for resource and returns what

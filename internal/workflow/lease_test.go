@@ -96,6 +96,29 @@ func TestNegativeLeaseDurationIsRejected(t *testing.T) {
 	}
 }
 
+func TestListAllOrdersLeasesDeterministically(t *testing.T) {
+	t.Parallel()
+
+	manager := workflow.NewLeaseManager()
+	for _, resource := range []string{"zebra", "apple", "mango"} {
+		if _, err := manager.Acquire(resource, "agent_1", workflow.LeaseShared, time.Minute); err != nil {
+			t.Fatalf("acquire %s: %v", resource, err)
+		}
+	}
+	first := manager.ListAll()
+	if len(first) != 3 || first[0].Resource != "apple" || first[1].Resource != "mango" || first[2].Resource != "zebra" {
+		t.Fatalf("leases are not ordered by resource: %#v", first)
+	}
+	for i := 0; i < 20; i++ {
+		next := manager.ListAll()
+		for j := range first {
+			if next[j].ID != first[j].ID {
+				t.Fatalf("lease order flipped between calls: %#v vs %#v", first, next)
+			}
+		}
+	}
+}
+
 func TestZeroLeaseDurationNeverExpires(t *testing.T) {
 	t.Parallel()
 
