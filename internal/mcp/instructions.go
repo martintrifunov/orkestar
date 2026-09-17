@@ -77,4 +77,4 @@ Two things worth knowing:
   session destroys work in progress, so it stays a decision a person makes.
 - resource_acquire takes a lease on something that cannot be shared, such as a
   device or a single-instance editor. Take one before using such a thing when
-  several agents are running, and release it when done.`
+  several agents are running, and release it with resource_release when done.`

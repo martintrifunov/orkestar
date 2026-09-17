@@ -666,8 +666,8 @@ func TestMCPServerTeachesTheLoopOnConnect(t *testing.T) {
 		"workspace_create", "task_create", "task_create_worktree", "task_start",
 		"task_wait", "agent_wait", "agent_prompt", "task_set_status",
 		"task_update", "task_diff", "artifact_create", "agent_list",
-		"resource_acquire", "terminal_start", "terminal_list", "terminal_read",
-		"terminal_send", "terminal_wait", "agent_explain",
+		"resource_acquire", "resource_release", "terminal_start", "terminal_list",
+		"terminal_read", "terminal_send", "terminal_wait", "agent_explain",
 	} {
 		if !strings.Contains(instructions, tool) {
 			t.Errorf("the instructions never mention %s", tool)

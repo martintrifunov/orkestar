@@ -147,11 +147,15 @@ func tuiMachines(paths runtimepath.Paths) ([]tui.Machine, error) {
 	}}
 	catalogPath, err := runtimepath.MachineCatalogPath()
 	if err != nil {
-		return machines, err
+		fmt.Fprintf(os.Stderr, "orkestar: machine catalog: %v\n", err)
+		return machines, nil
 	}
 	catalog, err := machine.Load(catalogPath)
 	if err != nil {
-		return machines, err
+		// A broken catalog is configuration, not core state: open the local
+		// interface rather than refusing to start at all.
+		fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
+		return machines, nil
 	}
 	for _, saved := range catalog.List() {
 		if !saved.Enabled {
@@ -476,10 +480,16 @@ func serveDaemon(paths runtimepath.Paths) error {
 	// A reload rebuilds the whole set, so a changed or removed manifest takes
 	// effect without restarting the daemon.
 	server.SetAdapterLoader(buildAdapters)
-	// OpenCode is the reviewer adapter because its managed mode returns a
-	// structured reply; Claude Code's interactive PTY adapter has no
-	// discrete response to parse a verdict from.
-	server.SetReviewerAdapter("opencode")
+	// The reviewer runs a task's diff in managed mode, because only a
+	// structured reply can carry a verdict. Pick a managed-capable adapter
+	// rather than naming OpenCode: a manifest may take its name, and an
+	// interactive-only adapter must not be chosen for review.
+	for _, adapter := range adapters {
+		if adapter.Capabilities().SupportsManaged {
+			server.SetReviewerAdapter(adapter.Capabilities().Name)
+			break
+		}
+	}
 	return server.Serve(ctx)
 }
 
