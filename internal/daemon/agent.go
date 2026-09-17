@@ -63,6 +63,8 @@ type agentSession struct {
 	metadata     Agent
 	subscribers  map[chan agentEvent]struct{}
 	permissionID string
+	// resuming guards against two resumes launching a session for one agent.
+	resuming bool
 
 	// opening is a prompt to send once the agent is actually able to read
 	// one, and started records that it is. An interactive CLI owns a PTY the
@@ -137,6 +139,33 @@ func (a *agentSession) liveSession() agent.Session {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.session
+}
+
+// clearSession forgets the live session once it has ended, so callers that ask
+// whether an agent is live — prompt, interrupt, explain — see the truth rather
+// than a dead process.
+func (a *agentSession) clearSession() {
+	a.mu.Lock()
+	a.session = nil
+	a.mu.Unlock()
+}
+
+// beginResume claims the resume slot, so a manual and an automatic resume
+// cannot both launch a session for the same agent.
+func (a *agentSession) beginResume() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.resuming {
+		return false
+	}
+	a.resuming = true
+	return true
+}
+
+func (a *agentSession) endResume() {
+	a.mu.Lock()
+	a.resuming = false
+	a.mu.Unlock()
 }
 func (a *agentSession) applyLifecycleEvent(event agent.LifecycleEvent) (Agent, bool) {
 	return a.applyLifecycle(event, false)
@@ -407,7 +436,9 @@ func (s *Server) launch(ctx context.Context, params launchParams) (Agent, error)
 
 	entry := starting
 	entry.mu.Lock()
-	if entry.metadata.NativeSessionID != "" {
+	// A hook that arrived during the launch owns the turn state; preserve it
+	// whether or not it carried a native session id.
+	if entry.metadata.SignalSource != "" || entry.metadata.NativeSessionID != "" || entry.metadata.State != "starting" {
 		metadata.NativeSessionID = entry.metadata.NativeSessionID
 		metadata.State = entry.metadata.State
 		metadata.SignalSource = entry.metadata.SignalSource
@@ -453,6 +484,8 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 	// A subscriber to agent.attach is waiting on its own channel, not this
 	// one; releasing it when the session's events end is what ends the stream.
 	defer entry.closeSubscribers()
+	// The session has ended; forget it so nothing reports the agent as live.
+	defer entry.clearSession()
 	session := entry.liveSession()
 	if session == nil {
 		return

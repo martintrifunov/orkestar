@@ -71,6 +71,9 @@ type terminalSession struct {
 	// It is how a manifest adapter without hooks reports working or blocked.
 	detect     func(text string)
 	lastDetect time.Time
+	// detectTimer catches a scan that was throttled when the trigger text was
+	// the last output before the process went quiet.
+	detectTimer *time.Timer
 }
 
 // detectInterval bounds how often the screen is scanned for a detected state.
@@ -340,12 +343,28 @@ func (s *terminalSession) captureOutput() {
 func (s *terminalSession) runDetection() {
 	s.mu.Lock()
 	detect := s.detect
-	if detect == nil || time.Since(s.lastDetect) < detectInterval {
+	if detect == nil {
+		s.mu.Unlock()
+		return
+	}
+	if time.Since(s.lastDetect) < detectInterval {
+		// Do not drop the scan: the trigger text may be the last output before
+		// the process goes quiet, so schedule one for when the interval is up.
+		if s.detectTimer == nil {
+			s.detectTimer = time.AfterFunc(detectInterval, func() {
+				s.mu.Lock()
+				s.detectTimer = nil
+				s.mu.Unlock()
+				s.runDetection()
+			})
+		}
 		s.mu.Unlock()
 		return
 	}
 	s.lastDetect = time.Now()
-	text := s.text(maxReadLines)
+	// Only the visible screen, not the scrollback: a phrase that has scrolled
+	// away must not keep matching and pin the state.
+	text := s.frame().Content
 	s.mu.Unlock()
 	detect(text)
 }
@@ -411,7 +430,10 @@ func (s *Server) terminalSend(raw json.RawMessage) (map[string]string, error) {
 	if term.renderBroken {
 		return nil, errors.New("terminal screen is no longer available")
 	}
-	if term.process == nil {
+	// A live process is never nil'd after it exits, so the state is what says
+	// the terminal has ended; writing to a closed screen would be discarded
+	// while this still reported success.
+	if term.process == nil || finishedState(term.metadata.State) {
 		return nil, errors.New("terminal is no longer running")
 	}
 	if term.controller != nil {

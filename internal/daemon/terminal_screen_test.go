@@ -234,6 +234,34 @@ func TestTerminalSendDrivesAnUnattendedTerminal(t *testing.T) {
 	}
 }
 
+func TestTerminalSendRefusesAStoppedTerminal(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "orkestar-send-stopped-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	_, client, _ := serveRecoveryTest(t, filepath.Join(dir, "socket"))
+	var w Workspace
+	callRecovery(t, client, "workspace.create", map[string]string{"directory": dir}, &w)
+	var started Terminal
+	callRecovery(t, client, "terminal.start", map[string]any{
+		"workspace_id": w.ID,
+		"command":      []string{"/bin/sh", "-c", "sleep 30"},
+	}, &started)
+
+	var stopped Terminal
+	callRecovery(t, client, "terminal.stop", map[string]string{"terminal_id": started.ID}, &stopped)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var sent map[string]string
+	if err := client.Call(ctx, "terminal.send", map[string]any{
+		"terminal_id": started.ID, "text": "x", "enter": true,
+	}, &sent); err == nil {
+		t.Fatal("terminal.send reported success against a stopped terminal")
+	}
+}
+
 // terminal.wait is the output-condition wait an orchestrator needs instead of
 // polling terminal.read: it returns as soon as the output matches, and fails
 // once the wait can no longer be satisfied rather than sitting out its timeout.
