@@ -213,13 +213,31 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) handleConnection(connection net.Conn) {
 	defer connection.Close()
 
+	// A wait sits for minutes without answering, and a client that goes away
+	// meanwhile must release it rather than leak a subscriber until its
+	// timeout, so requests are answered as they complete instead of in read
+	// order. Nothing pipelines: one Call holds its conversation until the
+	// reply arrives, and the attach methods below take the connection over,
+	// so answering out of order only happens when nobody is listening.
+	// Cancelling here is what ends the handlers below; closing the
+	// connection unblocks the read loop, which is the only thing that can
+	// notice the client is gone while a wait is outstanding.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var encoderMu sync.Mutex
+
 	scanner := bufio.NewScanner(connection)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	encoder := json.NewEncoder(responseWriter{connection})
+	encode := func(response ipc.Response) error {
+		encoderMu.Lock()
+		defer encoderMu.Unlock()
+		return encoder.Encode(response)
+	}
 	for scanner.Scan() {
 		var request ipc.Request
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
-			_ = encoder.Encode(ipc.NewErrorResponse("", "invalid_request", "request is not valid JSON"))
+			_ = encode(ipc.NewErrorResponse("", "invalid_request", "request is not valid JSON"))
 			continue
 		}
 		if request.Method == "terminal.attach" {
@@ -234,16 +252,22 @@ func (s *Server) handleConnection(connection net.Conn) {
 			s.handleTaskAttach(connection, scanner, encoder, request)
 			return
 		}
-		response, shutdown := s.handleRequest(request)
-		encodeErr := encoder.Encode(response)
-		if shutdown {
-			// Only now: stopping the server closes this connection, which would
-			// otherwise race the acknowledgement and hand the client an EOF.
-			s.stopOnce.Do(func() { close(s.stop) })
-		}
-		if encodeErr != nil {
-			return
-		}
+		s.requests.Add(1)
+		go func(request ipc.Request) {
+			defer s.requests.Done()
+			response, shutdown := s.handleRequest(ctx, request)
+			encodeErr := encode(response)
+			if shutdown {
+				// Only now: stopping the server closes this connection, which would
+				// otherwise race the acknowledgement and hand the client an EOF.
+				s.stopOnce.Do(func() { close(s.stop) })
+			}
+			if encodeErr != nil {
+				// Nobody is listening anymore; fail the read loop so the
+				// cancellation above releases the other requests in flight.
+				_ = connection.Close()
+			}
+		}(request)
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
 		return
@@ -252,7 +276,7 @@ func (s *Server) handleConnection(connection net.Conn) {
 
 // handleRequest returns the response and whether the caller must stop the
 // server once that response has been written.
-func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
+func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Response, bool) {
 	if request.Version != ipc.Version {
 		return ipc.NewErrorResponse(request.ID, "unsupported_version", fmt.Sprintf("protocol version %d is not supported", request.Version)), false
 	}
@@ -288,7 +312,7 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 	case "terminal.send":
 		result, err = s.terminalSend(request.Params)
 	case "terminal.wait":
-		result, err = s.waitForTerminal(context.Background(), request.Params)
+		result, err = s.waitForTerminal(ctx, request.Params)
 	case "terminal.start":
 		result, err = s.startTerminal(request.Params)
 	case "terminal.stop":
@@ -296,19 +320,19 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 	case "terminal.remove":
 		result, err = s.removeTerminal(request.Params)
 	case "agent.launch":
-		result, err = s.launchAgent(context.Background(), request.Params)
+		result, err = s.launchAgent(ctx, request.Params)
 	case "agent.hook":
-		result, err = s.hookEvent(context.Background(), request.Params)
+		result, err = s.hookEvent(ctx, request.Params)
 	case "agent.resume":
-		result, err = s.resumeAgent(context.Background(), request.Params)
+		result, err = s.resumeAgent(ctx, request.Params)
 	case "agent.explain":
 		result, err = s.explainAgent(request.Params)
 	case "agent.reloadAdapters":
 		result, err = s.reloadAdapters()
 	case "agent.prompt":
-		result, err = s.promptAgent(context.Background(), request.Params)
+		result, err = s.promptAgent(ctx, request.Params)
 	case "agent.interrupt":
-		result, err = s.interruptAgent(context.Background(), request.Params)
+		result, err = s.interruptAgent(ctx, request.Params)
 	case "agent.stop":
 		result, err = s.stopAgent(request.Params)
 	case "agent.remove":
@@ -316,29 +340,29 @@ func (s *Server) handleRequest(request ipc.Request) (ipc.Response, bool) {
 	case "permission.list":
 		result = map[string]any{"permissions": s.listPermissions()}
 	case "permission.resolve":
-		result, err = s.resolvePermission(context.Background(), request.Params)
+		result, err = s.resolvePermission(ctx, request.Params)
 	case "task.create":
 		result, err = s.createTask(request.Params)
 	case "template.list":
 		result, err = s.listTemplates(request.Params)
 	case "template.apply":
-		result, err = s.applyTemplate(context.Background(), request.Params)
+		result, err = s.applyTemplate(ctx, request.Params)
 	case "task.wait":
-		result, err = s.waitForTask(context.Background(), request.Params)
+		result, err = s.waitForTask(ctx, request.Params)
 	case "agent.wait":
-		result, err = s.waitForAgentSession(context.Background(), request.Params)
+		result, err = s.waitForAgentSession(ctx, request.Params)
 	case "task.update":
 		result, err = s.updateTask(request.Params)
 	case "task.setStatus":
-		result, err = s.setTaskStatus(context.Background(), request.Params)
+		result, err = s.setTaskStatus(ctx, request.Params)
 	case "task.assign":
 		result, err = s.assignTask(request.Params)
 	case "task.createWorktree":
-		result, err = s.createTaskWorktree(context.Background(), request.Params)
+		result, err = s.createTaskWorktree(ctx, request.Params)
 	case "task.removeWorktree":
-		result, err = s.removeTaskWorktree(context.Background(), request.Params)
+		result, err = s.removeTaskWorktree(ctx, request.Params)
 	case "task.diff":
-		result, err = s.taskDiff(context.Background(), request.Params)
+		result, err = s.taskDiff(ctx, request.Params)
 	case "resource.acquire":
 		result, err = s.acquireLease(request.Params)
 	case "resource.release":

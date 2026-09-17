@@ -23,7 +23,7 @@ func TestReadOnlyMethodsDoNotPersist(t *testing.T) {
 	counts := &countingStore{}
 	s.store = counts
 
-	if _, _ = s.handleRequest(ipc.Request{Version: ipc.Version, Method: "permission.list"}); counts.saves != 0 {
+	if _, _ = s.handleRequest(context.Background(), ipc.Request{Version: ipc.Version, Method: "permission.list"}); counts.saves != 0 {
 		t.Fatalf("permission.list wrote the snapshot %d times", counts.saves)
 	}
 
@@ -31,7 +31,7 @@ func TestReadOnlyMethodsDoNotPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _ = s.handleRequest(ipc.Request{Version: ipc.Version, Method: "workspace.create", Params: params}); counts.saves != 1 {
+	if _, _ = s.handleRequest(context.Background(), ipc.Request{Version: ipc.Version, Method: "workspace.create", Params: params}); counts.saves != 1 {
 		t.Fatalf("workspace.create did not persist (saves=%d)", counts.saves)
 	}
 }
