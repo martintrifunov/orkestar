@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -155,6 +156,13 @@ func runMachine(paths runtimepath.Paths, args []string) error {
 		}
 		if err := catalog.Save(); err != nil {
 			return err
+		}
+		// Drop the machine's remembered layout with it: re-adding later
+		// would otherwise restore a dead arrangement, and removed IDs
+		// would leave layout directories behind forever. IDs are generated
+		// hex, but a hand-edited catalog is not trusted with a path.
+		if id := args[1]; !strings.ContainsAny(id, `/\`) {
+			_ = os.RemoveAll(filepath.Join(paths.Directory, "machines", id))
 		}
 		fmt.Printf("%s removed\n", args[1])
 		return nil

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/martintrifunov/orkestar/internal/machine"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
 )
 
@@ -50,3 +53,32 @@ func TestParseTerminalSend(t *testing.T) {
 	}
 }
 
+func TestMachineRemoveCleansLayout(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ORKESTAR_MACHINES_FILE", filepath.Join(dir, "machines.json"))
+	paths := runtimepath.Paths{Directory: filepath.Join(dir, "runtime")}
+	if err := runMachine(paths, []string{"add", "user@example.com", "--label", "box"}); err != nil {
+		t.Fatalf("machine add: %v", err)
+	}
+	catalog, err := machine.Load(os.Getenv("ORKESTAR_MACHINES_FILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := catalog.List()
+	if len(listed) != 1 {
+		t.Fatalf("expected one machine, got %#v", listed)
+	}
+	layoutDir := filepath.Join(paths.Directory, "machines", listed[0].ID)
+	if err := os.MkdirAll(layoutDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layoutDir, "layout.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runMachine(paths, []string{"remove", listed[0].ID}); err != nil {
+		t.Fatalf("machine remove: %v", err)
+	}
+	if _, err := os.Stat(layoutDir); !os.IsNotExist(err) {
+		t.Fatalf("the removed machine's layout survived: %v", err)
+	}
+}
