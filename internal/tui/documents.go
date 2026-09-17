@@ -95,6 +95,9 @@ type documentLoaded struct {
 	root string
 	doc  *files.Document
 	err  error
+	// machineID is the machine the open was issued on. Local file opens
+	// must not land on a remote board after a switch.
+	machineID string
 }
 
 func (m Model) paneRoot() string {
@@ -161,19 +164,20 @@ func (m *Model) openReview() tea.Cmd {
 	return m.refreshReview(p, 0)
 }
 func (m Model) openDocument(root, name string) tea.Cmd {
+	machineID := m.currentMachine().ID
 	if m.client.IsRemote() {
 		return func() tea.Msg {
-			return documentLoaded{err: fmt.Errorf("file editing is unavailable over SSH; use an editor in a remote shell pane")}
+			return documentLoaded{err: fmt.Errorf("file editing is unavailable over SSH; use an editor in a remote shell pane"), machineID: machineID}
 		}
 	}
 	settings := m.settings
 	return func() tea.Msg {
 		d, err := files.Open(root, name)
 		if err != nil {
-			return documentLoaded{err: err}
+			return documentLoaded{err: err, machineID: machineID}
 		}
 		if settings.Editor == "standard" || settings.Editor == "" {
-			return documentLoaded{root: root, doc: d}
+			return documentLoaded{root: root, doc: d, machineID: machineID}
 		}
 		var command []string
 		switch settings.Editor {
@@ -184,20 +188,20 @@ func (m Model) openDocument(root, name string) tea.Cmd {
 		case "custom":
 			command = append(append([]string(nil), settings.Command...), d.Path)
 		default:
-			return documentLoaded{err: fmt.Errorf("unknown editor %q", settings.Editor)}
+			return documentLoaded{err: fmt.Errorf("unknown editor %q", settings.Editor), machineID: machineID}
 		}
 		if len(command) < 2 {
-			return documentLoaded{err: fmt.Errorf("configure a terminal editor command")}
+			return documentLoaded{err: fmt.Errorf("configure a terminal editor command"), machineID: machineID}
 		}
 		if _, err := exec.LookPath(command[0]); err != nil {
-			return documentLoaded{err: err}
+			return documentLoaded{err: err, machineID: machineID}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		var w daemon.Workspace
 		err = m.client.Call(ctx, "workspace.create", map[string]string{"directory": root}, &w)
 		if err != nil {
-			return documentLoaded{err: err}
+			return documentLoaded{err: err, machineID: machineID}
 		}
 		var t daemon.Terminal
 		err = m.client.Call(ctx, "terminal.start", map[string]any{"workspace_id": w.ID, "command": command, "columns": 80, "rows": 24}, &t)

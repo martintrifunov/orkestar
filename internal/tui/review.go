@@ -36,6 +36,8 @@ func (r *reviewPane) palette() theme {
 type reviewLoaded struct {
 	pane   *embeddedTerminal
 	review *reviewPane
+	// machineID guards a local git review from landing after a switch.
+	machineID string
 }
 
 func gitOutput(root string, args ...string) (string, error) {
@@ -173,7 +175,10 @@ func (r *reviewPane) Paste(string)             {}
 func (r *reviewPane) Navigation(rune, int)     {}
 func (r *reviewPane) Close() error             { return nil }
 func (m Model) refreshReview(p *embeddedTerminal, selection int) tea.Cmd {
-	return func() tea.Msg { return reviewLoaded{p, loadReview(p.root, selection, m.theme)} }
+	machineID := m.currentMachine().ID
+	return func() tea.Msg {
+		return reviewLoaded{pane: p, review: loadReview(p.root, selection, m.theme), machineID: machineID}
+	}
 }
 
 type reviewOutput struct {

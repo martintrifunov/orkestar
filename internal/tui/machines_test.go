@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/files"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 )
@@ -118,6 +120,89 @@ func TestLayoutRestoreDoesNotReplaceAnOpenPane(t *testing.T) {
 	m = updated.(Model)
 	if m.embedded != open {
 		t.Fatal("a layout restore replaced an already-open pane")
+	}
+}
+
+// An attachment or mutation reply that lands after a switch belongs to the
+// old machine: installing it would put A's stream into B's layout or report
+// A's outcome as B's.
+func TestStaleAsyncRepliesAreDroppedAfterSwitch(t *testing.T) {
+	m := New(ipc.NewClient("local"), t.TempDir())
+	m.machines = []Machine{
+		{ID: "local", Label: "Local", Client: ipc.NewClient("a")},
+		{ID: "m1", Label: "Build", Client: ipc.NewClient("b")},
+	}
+	m.machineIndex = 1
+	stalePane := fakePane(t, "stale")
+
+	updated, _ := m.Update(embeddedReadyMsg{terminal: stalePane, machineID: "local"})
+	m = updated.(Model)
+	if m.tree() != nil {
+		stalePane.close()
+		t.Fatal("an attachment from the previous machine was installed")
+	}
+
+	updated, _ = m.Update(taskActionMsg{notice: "Task done", machineID: "local"})
+	m = updated.(Model)
+	if m.notice == "Task done" || m.taskBusy {
+		t.Fatal("a task reply from the previous machine was applied")
+	}
+
+	updated, _ = m.Update(lifecycleMsg{notice: "Stopped x", machineID: "local"})
+	m = updated.(Model)
+	if m.notice == "Stopped x" {
+		t.Fatal("a lifecycle reply from the previous machine was applied")
+	}
+
+	updated, _ = m.Update(historyMsg{lines: []string{"old"}, machineID: "local"})
+	m = updated.(Model)
+	if m.viewingHistory {
+		t.Fatal("history from the previous machine was shown")
+	}
+}
+
+// Switching must not carry a confirm, a busy flag or a half-typed prompt to
+// the new machine, where it would act on the wrong board.
+func TestSwitchMachineClearsInteractionState(t *testing.T) {
+	m := New(ipc.NewClient("local"), t.TempDir())
+	m.machines = []Machine{
+		{ID: "local", Label: "Local", Client: ipc.NewClient("a")},
+		{ID: "m1", Label: "Build", Client: ipc.NewClient("b")},
+	}
+	m.pendingStop = "term_abc"
+	m.taskBusy = true
+	m.taskPrompt = true
+	m.taskTitle = "draft"
+	m.filePrompt = true
+	m.renaming = fakePane(t, "r")
+	m.menu = &paneMenu{}
+
+	_ = m.switchMachine(1)
+	if m.pendingStop != "" || m.taskBusy || m.taskPrompt || m.taskTitle != "" || m.filePrompt || m.renaming != nil || m.menu != nil {
+		t.Fatal("interaction state survived a machine switch")
+	}
+}
+
+// On a remote machine the local checkout means nothing: reusing what that
+// machine already has beats rooting a workspace at a local-only path.
+func TestEnsureWorkspaceOnRemoteReusesExisting(t *testing.T) {
+	remote := ipc.NewRemoteClient(ipc.Remote{Host: "example.com"})
+	m := New(remote, "/local/checkout")
+	m.machines = []Machine{{ID: "r", Label: "Remote", Client: remote}}
+	m.client = remote
+	m.snapshot.Workspaces = []daemon.Workspace{{ID: "w-remote", Directory: "/home/user/work"}}
+
+	id, err := m.ensureWorkspace(context.Background())
+	if err != nil {
+		t.Fatalf("remote with a workspace should not fail: %v", err)
+	}
+	if id != "w-remote" {
+		t.Fatalf("expected the remote workspace, got %q", id)
+	}
+
+	m.snapshot.Workspaces = nil
+	if _, err := m.ensureWorkspace(context.Background()); err == nil {
+		t.Fatal("remote with no workspace should fail clearly, not create a local path remotely")
 	}
 }
 

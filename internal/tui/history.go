@@ -13,6 +13,9 @@ import (
 type historyMsg struct {
 	lines []string
 	err   error
+	// machineID is the machine the history was read from, so lines from
+	// the previous machine are not shown as the new one's.
+	machineID string
 }
 
 func (m Model) loadHistory() tea.Cmd {
@@ -20,6 +23,7 @@ func (m Model) loadHistory() tea.Cmd {
 		return nil
 	}
 	id := m.embedded.terminalID
+	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -28,7 +32,7 @@ func (m Model) loadHistory() tea.Cmd {
 			Screen  terminal.Frame `json:"screen"`
 		}
 		err := m.client.Call(ctx, "terminal.history", map[string]string{"terminal_id": id}, &result)
-		return historyMsg{append(result.History, strings.Split(result.Screen.Content, "\n")...), err}
+		return historyMsg{lines: append(result.History, strings.Split(result.Screen.Content, "\n")...), err: err, machineID: machineID}
 	}
 }
 func (m Model) renderHistory(rows int) string {

@@ -13,6 +13,9 @@ type lifecycleMsg struct {
 	notice          string
 	removedTerminal string
 	err             error
+	// machineID is the machine the call ran against, so a reply that
+	// lands after a switch is not applied to the new machine's board.
+	machineID string
 }
 
 // selectedLifecycleTarget describes what the sidebar is pointing at, so one
@@ -99,14 +102,15 @@ func (m *Model) interruptSelected() tea.Cmd {
 
 func (m Model) lifecycleCall(method string, params map[string]any, notice, removedTerminal string) tea.Cmd {
 	client := m.client
+	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		var result map[string]any
 		if err := client.Call(ctx, method, params, &result); err != nil {
-			return lifecycleMsg{err: err}
+			return lifecycleMsg{err: err, machineID: machineID}
 		}
-		return lifecycleMsg{notice: notice, removedTerminal: removedTerminal}
+		return lifecycleMsg{notice: notice, removedTerminal: removedTerminal, machineID: machineID}
 	}
 }
 

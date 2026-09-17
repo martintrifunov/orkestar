@@ -65,6 +65,10 @@ func (t *embeddedTerminal) close() {
 type embeddedReadyMsg struct {
 	terminal *embeddedTerminal
 	err      error
+	// machineID is the machine the attachment was opened against, so a
+	// reply that lands after a switch is closed rather than installed
+	// into the new machine's layout.
+	machineID string
 }
 
 // embeddedEventMsg is sent for every stream event on an embedded
@@ -85,9 +89,15 @@ func openEmbeddedTerminal(client *ipc.Client, terminalID string, columns, rows i
 }
 
 func openEmbeddedTerminalContext(ctx context.Context, client *ipc.Client, terminalID string, columns, rows int) tea.Cmd {
+	return openEmbeddedTerminalForMachine(ctx, client, "", terminalID, columns, rows)
+}
+
+// openEmbeddedTerminalForMachine tags the reply with the machine it was
+// opened against, so the model can drop it after a switch.
+func openEmbeddedTerminalForMachine(ctx context.Context, client *ipc.Client, machineID, terminalID string, columns, rows int) tea.Cmd {
 	return func() tea.Msg {
 		term, err := attachEmbeddedTerminal(ctx, client, terminalID, columns, rows)
-		return embeddedReadyMsg{terminal: term, err: err}
+		return embeddedReadyMsg{terminal: term, err: err, machineID: machineID}
 	}
 }
 

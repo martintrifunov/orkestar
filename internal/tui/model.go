@@ -33,6 +33,9 @@ type terminalStartedMsg struct {
 
 type permissionActionMsg struct {
 	err error
+	// machineID is the machine the call ran against, so a reply that
+	// lands after a switch is not applied to the new machine's board.
+	machineID string
 }
 
 type agentLaunchedMsg struct {
@@ -291,6 +294,25 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.pickerTaskID = ""
 	m.viewingDiff = false
 	m.viewingHistory = false
+	// Interaction state must not cross machines either: a confirm armed
+	// here would otherwise act there with no second press, a busy flag
+	// would wedge the new board until the old reply lands (and is now
+	// dropped), and a half-typed prompt would be created on the wrong
+	// daemon. Drafts are cheap; acting on the wrong machine is not.
+	m.pendingStop = ""
+	m.taskBusy = false
+	m.taskPrompt = false
+	m.taskTitle, m.taskDescription, m.taskEditID, m.taskField = "", "", "", 0
+	m.filePrompt = false
+	m.fileName = ""
+	m.settingsOpen = false
+	m.renaming, m.renameTo = nil, ""
+	m.menu = nil
+	m.documentSplit = nil
+	m.diff = daemon.TaskDiff{}
+	m.diffTaskID = ""
+	m.history = nil
+	m.historyOffset = 0
 	m.machineIndex = (m.machineIndex + delta + len(m.machines)) % len(m.machines)
 	selected := m.machines[m.machineIndex]
 	m.client = selected.Client
@@ -325,6 +347,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.filePaths = message.paths
 		}
 	case documentLoaded:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		m.err = message.err
 		if message.err == nil {
 			for _, p := range m.visiblePanes() {
@@ -346,10 +371,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case highlightedMsg:
 		return m, message.editor.applyHighlight(message)
 	case lifecycleMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		return m, m.applyLifecycle(message)
 	case filesLoadedMsg:
 		m.applyFiles(message)
 	case reviewLoaded:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		if m.findPane(message.pane.terminalID) == message.pane {
 			message.pane.review = message.review
 			message.pane.emulator = message.review
@@ -403,6 +434,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.embedded.editor.dragging = false
 		}
 	case historyMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		m.err = message.err
 		if message.err == nil {
 			m.viewingHistory = true
@@ -811,6 +845,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openTerminal(message.terminal.ID)
 		}
 	case embeddedReadyMsg:
+		// An attachment opened on the previous machine must not land in
+		// the new one's layout: its stream points at the old daemon.
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			if message.terminal != nil {
+				message.terminal.close()
+			}
+			return m, nil
+		}
 		m.opening = false
 		split := m.pendingSplit
 		m.pendingSplit = nil
@@ -902,6 +944,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case diffMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		m.err = message.err
 		m.diffErr = message.err
 		m.diffTaskID = message.taskID
@@ -910,6 +955,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewingDiff = true
 		}
 	case taskActionMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		m.taskBusy = false
 		m.err = message.err
 		m.notice = ""
@@ -921,6 +969,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, m.loadSnapshot()
 	case permissionActionMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
 		m.err = message.err
 		if message.err == nil {
 			m.loading = true
@@ -1163,6 +1214,16 @@ func (m Model) ensureWorkspace(ctx context.Context) (string, error) {
 			return workspace.ID, nil
 		}
 	}
+	if m.client.IsRemote() {
+		// m.directory is this machine's checkout; sending it to another
+		// machine's daemon would root a workspace at a path that means
+		// nothing there. Reuse what that machine already has, the way
+		// --remote does, rather than creating garbage.
+		if len(m.snapshot.Workspaces) > 0 {
+			return m.snapshot.Workspaces[0].ID, nil
+		}
+		return "", fmt.Errorf("this machine has no workspaces yet; create one on that host first")
+	}
 	var workspace daemon.Workspace
 	if err := m.client.Call(ctx, "workspace.create", map[string]string{
 		"directory": m.directory,
@@ -1256,6 +1317,7 @@ func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
 	if permissionID == "" {
 		return nil
 	}
+	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -1264,7 +1326,7 @@ func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
 			"permission_id": permissionID,
 			"decision":      decision,
 		}, &result)
-		return permissionActionMsg{err: err}
+		return permissionActionMsg{err: err, machineID: machineID}
 	}
 }
 
@@ -1295,7 +1357,7 @@ func (m Model) openTerminal(id string) tea.Cmd {
 		ctx = context.Background()
 	}
 	columns, rows := embeddedPaneSize(m.width, m.height)
-	return openEmbeddedTerminalContext(ctx, m.client, id, columns, rows)
+	return openEmbeddedTerminalForMachine(ctx, m.client, m.currentMachine().ID, id, columns, rows)
 }
 
 // updateEmbedded handles a key press while an embedded terminal pane is

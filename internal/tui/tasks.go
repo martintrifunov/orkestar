@@ -19,12 +19,18 @@ type taskActionMsg struct {
 	task   workflow.Task
 	notice string
 	err    error
+	// machineID is the machine the mutation ran against, so a reply that
+	// lands after a switch is not reported as the new machine's.
+	machineID string
 }
 
 type diffMsg struct {
 	diff   daemon.TaskDiff
 	err    error
 	taskID string
+	// machineID guards against a diff from the previous machine rendering
+	// as the new one's.
+	machineID string
 }
 
 // selectedTask returns the highlighted task, if the sidebar has one.
@@ -117,12 +123,13 @@ func (m Model) taskDetail(task workflow.Task) string {
 // on success.
 func (m Model) taskCall(method string, params map[string]any, notice string, timeout time.Duration) tea.Cmd {
 	client := m.client
+	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		var task workflow.Task
 		err := client.Call(ctx, method, params, &task)
-		return taskActionMsg{task: task, notice: notice, err: err}
+		return taskActionMsg{task: task, notice: notice, err: err, machineID: machineID}
 	}
 }
 
@@ -159,12 +166,13 @@ func (m Model) editTask(taskID, title, description string) tea.Cmd {
 }
 
 func (m Model) createTask(title, description string, autoReview bool) tea.Cmd {
+	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		workspaceID, err := m.ensureWorkspace(ctx)
 		if err != nil {
-			return taskActionMsg{err: err}
+			return taskActionMsg{err: err, machineID: machineID}
 		}
 		var task workflow.Task
 		err = m.client.Call(ctx, "task.create", map[string]any{
@@ -173,7 +181,7 @@ func (m Model) createTask(title, description string, autoReview bool) tea.Cmd {
 			"description":  description,
 			"auto_review":  autoReview,
 		}, &task)
-		return taskActionMsg{task: task, notice: "Task created", err: err}
+		return taskActionMsg{task: task, notice: "Task created", err: err, machineID: machineID}
 	}
 }
 
@@ -244,12 +252,13 @@ func (m *Model) loadDiff() tea.Cmd {
 		return nil
 	}
 	client := m.client
+	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		var diff daemon.TaskDiff
 		err := client.Call(ctx, "task.diff", map[string]string{"task_id": task.ID}, &diff)
-		return diffMsg{diff: diff, err: err, taskID: task.ID}
+		return diffMsg{diff: diff, err: err, taskID: task.ID, machineID: machineID}
 	}
 }
 
