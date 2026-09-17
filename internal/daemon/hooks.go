@@ -69,11 +69,15 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 		return nil, fmt.Errorf("unknown lifecycle hook %q", p.Event)
 	}
 	entry.mu.Lock()
-	if p.NativeSessionID != "" {
-		entry.metadata.NativeSessionID = p.NativeSessionID
-	}
-	entry.metadata.SignalSource = "hooks"
+	// A late hook from a session that has already ended must not stamp the
+	// record with new identity; check before mutating anything.
 	stopped := entry.metadata.State == "stopped" || entry.metadata.State == "crashed"
+	if !stopped {
+		if p.NativeSessionID != "" {
+			entry.metadata.NativeSessionID = p.NativeSessionID
+		}
+		entry.metadata.SignalSource = "hooks"
+	}
 	taskID := entry.metadata.TaskID
 	entry.mu.Unlock()
 	if stopped {

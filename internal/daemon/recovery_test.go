@@ -245,3 +245,27 @@ func TestNativePermissionResolutionAndLateHooks(t *testing.T) {
 		t.Fatal("late hook revived exited agent")
 	}
 }
+
+// A hook that arrives after the session ended must not restamp the record with
+// a new native identity, which would make a dead agent look resumable.
+func TestLateHookDoesNotRestampAStoppedAgent(t *testing.T) {
+	s := NewServer(filepath.Join(t.TempDir(), "socket"))
+	id := "agent-stopped"
+	s.hookTokens[id] = "secret"
+	entry := newAgentSession(Agent{ID: id, State: "stopped"}, nil)
+	s.agents[id] = entry
+
+	b, err := json.Marshal(HookInput{AgentID: id, Token: "secret", Event: "SessionStart", NativeSessionID: "late-native"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.hookEvent(context.Background(), b); err != nil {
+		t.Fatalf("a late hook should be accepted and ignored: %v", err)
+	}
+	if got := entry.snapshot().NativeSessionID; got != "" {
+		t.Fatalf("a late hook stamped a stopped agent with native id %q", got)
+	}
+	if got := entry.snapshot().SignalSource; got != "" {
+		t.Fatalf("a late hook set the signal source on a stopped agent: %q", got)
+	}
+}
