@@ -402,6 +402,9 @@ func (s *Server) snapshot() Snapshot {
 		workspaces = append(workspaces, workspace)
 	}
 	sort.Slice(workspaces, func(left, right int) bool {
+		if workspaces[left].CreatedAt.Equal(workspaces[right].CreatedAt) {
+			return workspaces[left].ID < workspaces[right].ID
+		}
 		return workspaces[left].CreatedAt.Before(workspaces[right].CreatedAt)
 	})
 	terminals := make([]Terminal, 0, len(s.terminals))
@@ -409,6 +412,9 @@ func (s *Server) snapshot() Snapshot {
 		terminals = append(terminals, session.snapshot())
 	}
 	sort.Slice(terminals, func(left, right int) bool {
+		if terminals[left].CreatedAt.Equal(terminals[right].CreatedAt) {
+			return terminals[left].ID < terminals[right].ID
+		}
 		return terminals[left].CreatedAt.Before(terminals[right].CreatedAt)
 	})
 	agents := make([]Agent, 0, len(s.agents))
@@ -416,6 +422,9 @@ func (s *Server) snapshot() Snapshot {
 		agents = append(agents, entry.snapshot())
 	}
 	sort.Slice(agents, func(left, right int) bool {
+		if agents[left].CreatedAt.Equal(agents[right].CreatedAt) {
+			return agents[left].ID < agents[right].ID
+		}
 		return agents[left].CreatedAt.Before(agents[right].CreatedAt)
 	})
 	permissions := make([]PermissionRequest, 0, len(s.permissions))
@@ -423,6 +432,9 @@ func (s *Server) snapshot() Snapshot {
 		permissions = append(permissions, request)
 	}
 	sort.Slice(permissions, func(left, right int) bool {
+		if permissions[left].CreatedAt.Equal(permissions[right].CreatedAt) {
+			return permissions[left].ID < permissions[right].ID
+		}
 		return permissions[left].CreatedAt.Before(permissions[right].CreatedAt)
 	})
 	adapters := make([]agent.Capabilities, 0, len(s.adapters))
