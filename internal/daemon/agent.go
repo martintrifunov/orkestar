@@ -91,6 +91,12 @@ func (a *agentSession) subscribe() (Agent, chan agentEvent, func()) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	events := make(chan agentEvent, 64)
+	// An agent that has already ended will publish nothing more, so an attach
+	// must not wait on it: close the channel so the caller returns at once.
+	if a.session == nil || finishedState(a.metadata.State) {
+		close(events)
+		return a.metadata, events, func() {}
+	}
 	a.subscribers[events] = struct{}{}
 	unsubscribe := func() {
 		a.mu.Lock()

@@ -145,18 +145,23 @@ func (s *Server) removeAgent(rawParams json.RawMessage) (map[string]string, erro
 // sidebar.
 func (s *Server) forgetAgent(agentID, terminalID string) *terminalSession {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	entry := s.agents[agentID]
 	delete(s.agents, agentID)
 	delete(s.hookTokens, agentID)
-	if terminalID == "" {
-		return nil
+	var orphan *terminalSession
+	if terminalID != "" {
+		if session, ok := s.terminals[terminalID]; ok {
+			orphan = session
+			delete(s.terminals, terminalID)
+		}
 	}
-	session, ok := s.terminals[terminalID]
-	if !ok {
-		return nil
+	s.mu.Unlock()
+	// Release anyone attached to this agent, or their stream would wait on an
+	// entry no longer in the map and never published to again.
+	if entry != nil {
+		entry.closeSubscribers()
 	}
-	delete(s.terminals, terminalID)
-	return session
+	return orphan
 }
 
 // ResetSummary reports what a reset cleared.
