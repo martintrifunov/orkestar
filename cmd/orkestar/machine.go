@@ -36,6 +36,17 @@ func runMachine(paths runtimepath.Paths, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Mutating verbs read, change and save the catalog; without a lock two
+	// of them racing would load the same file and the second save would
+	// silently drop the first update.
+	switch args[0] {
+	case "add", "rename", "enable", "disable", "remove":
+		release, err := machine.AcquireCatalogLock(path)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	catalog, err := machine.Load(path)
 	if err != nil {
 		return err
