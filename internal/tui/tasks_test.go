@@ -467,6 +467,125 @@ func TestEditingWithNoTasksDoesNothing(t *testing.T) {
 	}
 }
 
+// Dependencies could only be set with `orkestar task create --depends-on`;
+// the prompt that creates the same tasks had no field for them.
+func TestTaskDependenciesFromThePrompt(t *testing.T) {
+	root := taskRepo(t)
+	client := startEmbeddedTestDaemon(t)
+	m := New(client, root)
+	m.width, m.height = 160, 44
+	m.focus = focusTasks
+
+	create := func(m Model, title string) Model {
+		t.Helper()
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 'c'})
+		m = updated.(Model)
+		m = typeText(t, m, title)
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = updated.(Model)
+		m = settle(t, m, cmd)
+		if m.err != nil {
+			t.Fatalf("create %q: %v", title, m.err)
+		}
+		return m
+	}
+	m = create(m, "First")
+
+	// The second task's prompt picks the first as a dependency.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'c'})
+	m = updated.(Model)
+	m = typeText(t, m, "Second")
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = updated.(Model)
+	if !m.pickingDependency {
+		t.Fatal("ctrl+d did not open the dependency picker")
+	}
+	if view := m.promptView(); !strings.Contains(view, "First") || !strings.Contains(view, "[ ]") {
+		t.Fatalf("picker does not list the candidate:\n%s", view)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = updated.(Model)
+	first := m.snapshot.Tasks[0]
+	if !m.dependencySelected(first.ID) {
+		t.Fatal("space did not select the dependency")
+	}
+	if view := m.promptView(); !strings.Contains(view, "[x]") {
+		t.Fatalf("selection is not marked:\n%s", view)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if m.pickingDependency {
+		t.Fatal("enter did not return to the prompt")
+	}
+	if view := m.promptView(); !strings.Contains(view, "Depends on: First") {
+		t.Fatalf("the prompt does not name the dependency:\n%s", view)
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	m = settle(t, m, cmd)
+	if m.err != nil {
+		t.Fatalf("create with dependency: %v", m.err)
+	}
+
+	secondAt := -1
+	for index, task := range m.snapshot.Tasks {
+		if task.Title == "Second" {
+			secondAt = index
+			if len(task.DependsOn) != 1 || task.DependsOn[0] != first.ID {
+				t.Fatalf("dependency was not stored: %+v", task.DependsOn)
+			}
+			if detail := m.taskDetail(task); !strings.Contains(detail, "blocked by 1") {
+				t.Fatalf("the blocked task does not say so: %q", detail)
+			}
+		}
+	}
+	if secondAt < 0 {
+		t.Fatal("the second task is missing")
+	}
+
+	// Editing opens with the stored dependency selected, and can clear it the
+	// same way: the prompt owns the whole list.
+	m.taskSelected = secondAt
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'e'})
+	m = updated.(Model)
+	if !m.taskPrompt || len(m.taskDependsOn) != 1 {
+		t.Fatalf("edit prompt did not carry the dependencies: %+v", m.taskDependsOn)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	m = settle(t, m, cmd)
+	if m.err != nil {
+		t.Fatalf("clear dependency: %v", m.err)
+	}
+	for _, task := range m.snapshot.Tasks {
+		if task.Title == "Second" && len(task.DependsOn) != 0 {
+			t.Fatalf("dependency was not cleared: %+v", task.DependsOn)
+		}
+	}
+}
+
+// A prompt with nothing else on the board must say so rather than opening an
+// empty picker that swallows the keyboard.
+func TestDependencyPickerNeedsCandidates(t *testing.T) {
+	m := Model{width: 140, height: 40, focus: focusTasks}
+	m.snapshot.Tasks = []workflow.Task{{ID: "task_1", Title: "Only", Status: workflow.StatusPending}}
+	m.taskPrompt, m.taskEditID = true, "task_1"
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = updated.(Model)
+	if m.pickingDependency {
+		t.Fatal("the picker opened with no candidate tasks")
+	}
+	if !strings.Contains(m.notice, "No other tasks") {
+		t.Fatalf("no reason was given: %q", m.notice)
+	}
+}
+
 // e means "edit this task" only in the sidebar. A focused pane takes every
 // keystroke, or typing the letter into an agent would open a prompt over
 // whatever task happened to be selected.

@@ -87,6 +87,12 @@ type Model struct {
 	// creating one.
 	taskField  int
 	taskEditID string
+	// taskDependsOn is the prompt's dependency selection, and
+	// pickingDependency is the overlay that changes it. IDs are kept in the
+	// order they were toggled; the daemon replaces the whole list on save.
+	taskDependsOn     []string
+	pickingDependency bool
+	dependencyAt      int
 
 	// renaming holds the pane whose name is being typed. A crowded layout is
 	// hard to read when every pane is called after the command that started
@@ -318,6 +324,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.taskBusy = false
 	m.taskPrompt = false
 	m.taskTitle, m.taskDescription, m.taskEditID, m.taskField = "", "", "", 0
+	m.taskDependsOn, m.pickingDependency, m.dependencyAt = nil, false, 0
 	m.filePrompt = false
 	m.fileName = ""
 	m.settingsOpen = false
@@ -513,6 +520,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.taskPrompt {
+			if m.pickingDependency {
+				return m, nil
+			}
 			*m.field() += strings.ReplaceAll(message.Content, "\r", "")
 			return m, nil
 		}

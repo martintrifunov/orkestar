@@ -138,6 +138,7 @@ func (m Model) taskCall(method string, params map[string]any, notice string, tim
 func (m *Model) startTaskPrompt() {
 	m.taskPrompt = true
 	m.taskTitle, m.taskDescription, m.taskEditID, m.taskField = "", "", "", 0
+	m.taskDependsOn, m.pickingDependency, m.dependencyAt = nil, false, 0
 	m.taskReview = true
 	m.focus = focusTasks
 }
@@ -154,18 +155,28 @@ func (m *Model) startTaskEdit() {
 	m.taskTitle, m.taskDescription = task.Title, task.Description
 	m.taskEditID, m.taskField = task.ID, 0
 	m.taskReview = task.AutoReview
+	// The edit prompt owns the whole dependency list: what it saves replaces
+	// what the task had, so the current selection has to be shown.
+	m.taskDependsOn = append([]string(nil), task.DependsOn...)
+	m.pickingDependency, m.dependencyAt = false, 0
 }
 
 // editTask saves the prompt over the task it was opened on. Auto-review is not
 // sent: it is a property of how the task was created, and changing it here
 // would silently drop a review gate someone asked for.
-func (m Model) editTask(taskID, title, description string) tea.Cmd {
+func (m Model) editTask(taskID, title, description string, dependsOn []string) tea.Cmd {
+	// An empty list must be sent as [] rather than null: the daemon reads
+	// null as "leave the dependencies alone", so clearing them would silently
+	// do nothing.
+	if dependsOn == nil {
+		dependsOn = []string{}
+	}
 	return m.taskCall("task.update", map[string]any{
-		"task_id": taskID, "title": title, "description": description,
+		"task_id": taskID, "title": title, "description": description, "depends_on": dependsOn,
 	}, "Task updated", 15*time.Second)
 }
 
-func (m Model) createTask(title, description string, autoReview bool) tea.Cmd {
+func (m Model) createTask(title, description string, autoReview bool, dependsOn []string) tea.Cmd {
 	machineID := m.currentMachine().ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -179,6 +190,7 @@ func (m Model) createTask(title, description string, autoReview bool) tea.Cmd {
 			"workspace_id": workspaceID,
 			"title":        title,
 			"description":  description,
+			"depends_on":   dependsOn,
 			"auto_review":  autoReview,
 		}, &task)
 		return taskActionMsg{task: task, notice: "Task created", err: err, machineID: machineID}
@@ -272,6 +284,9 @@ func (m Model) cursorOn(field int, value string) string {
 }
 
 func (m Model) taskPromptView() string {
+	if m.pickingDependency {
+		return m.dependencyPickerView()
+	}
 	review := "on — a reviewer agent must approve before this task can be done"
 	if !m.taskReview {
 		review = "off — the task can be completed without a review"
@@ -280,22 +295,144 @@ func (m Model) taskPromptView() string {
 	if description == "" {
 		description = m.theme.dim.Render("what done looks like, or why this exists")
 	}
+	depends := "Depends on: " + m.dependencySummary() + "  (Ctrl+D changes)"
 	body := "New task\n\nWorkspace: " + m.directory +
 		"\n\nTitle: " + m.cursorOn(0, m.taskTitle) +
 		"\nDescription: " + description +
+		"\n" + depends +
 		"\n\nAuto-review: " + review +
-		"\n\nEnter creates · Tab switches field · Ctrl+R toggles auto-review · Esc cancels"
+		"\n\nEnter creates · Tab switches field · Ctrl+D dependencies · Ctrl+R toggles auto-review · Esc cancels"
 	if m.taskEditID != "" {
 		// Auto-review is left out: editing does not change it.
 		body = "Edit task\n\nTitle: " + m.cursorOn(0, m.taskTitle) +
 			"\nDescription: " + description +
-			"\n\nEnter saves · Tab switches field · Esc cancels"
+			"\n" + depends +
+			"\n\nEnter saves · Tab switches field · Ctrl+D dependencies · Esc cancels"
 	}
 	return body
 }
 
+// dependencySummary names the tasks the prompt would make this one wait on.
+// An ID the board no longer knows about contributes nothing rather than
+// showing a raw identifier.
+func (m Model) dependencySummary() string {
+	var titles []string
+	for _, id := range m.taskDependsOn {
+		if title := m.taskTitleOf(id); title != "" {
+			titles = append(titles, title)
+		}
+	}
+	if len(titles) == 0 {
+		return "none"
+	}
+	return strings.Join(titles, ", ")
+}
+
+// dependencyCandidates are the tasks that may be depended on: every task
+// except the one being edited, which cannot depend on itself.
+func (m Model) dependencyCandidates() []workflow.Task {
+	candidates := make([]workflow.Task, 0, len(m.snapshot.Tasks))
+	for _, task := range m.snapshot.Tasks {
+		if task.ID == m.taskEditID {
+			continue
+		}
+		candidates = append(candidates, task)
+	}
+	return candidates
+}
+
+func (m Model) dependencySelected(id string) bool {
+	for _, existing := range m.taskDependsOn {
+		if existing == id {
+			return true
+		}
+	}
+	return false
+}
+
+// toggleDependency adds or removes one ID from the selection.
+func toggleDependency(ids []string, id string) []string {
+	for index, existing := range ids {
+		if existing == id {
+			return append(append([]string(nil), ids[:index]...), ids[index+1:]...)
+		}
+	}
+	return append(ids, id)
+}
+
+func (m Model) dependencyPickerView() string {
+	header := "Choose dependencies"
+	if m.taskEditID != "" {
+		header += " · " + m.taskTitleOf(m.taskEditID)
+	}
+	lines := []string{}
+	candidates := m.dependencyCandidates()
+	if len(candidates) == 0 {
+		lines = append(lines, m.theme.dim.Render("No other tasks to depend on."))
+	}
+	for index, task := range candidates {
+		box := "[ ]"
+		if m.dependencySelected(task.ID) {
+			box = "[x]"
+		}
+		line := fmt.Sprintf("%s  %-11s  %s", box, task.Status, task.Title)
+		if index == m.dependencyAt {
+			line = m.theme.selected.Render(" " + line + " ")
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
+	}
+	return header + "\n\n" + strings.Join(lines, "\n") +
+		"\n\nspace toggles · enter done · esc back"
+}
+
+func (m Model) updateDependencyPicker(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	candidates := m.dependencyCandidates()
+	switch k.String() {
+	case "esc", "enter":
+		m.pickingDependency = false
+	case "up", "k":
+		if m.dependencyAt > 0 {
+			m.dependencyAt--
+		}
+	case "down", "j":
+		if m.dependencyAt+1 < len(candidates) {
+			m.dependencyAt++
+		}
+	case "space":
+		if m.dependencyAt >= 0 && m.dependencyAt < len(candidates) {
+			m.taskDependsOn = toggleDependency(m.taskDependsOn, candidates[m.dependencyAt].ID)
+		}
+	}
+	return m, nil
+}
+
+// openDependencyPicker shows the candidate list, or says why there is none.
+// Tasks that would close a cycle are offered: the daemon rejects one and
+// names the path, which is better than a picker that silently hides entries
+// for a reason the user cannot see.
+func (m *Model) openDependencyPicker() {
+	if len(m.dependencyCandidates()) == 0 {
+		m.notice = "No other tasks to depend on."
+		return
+	}
+	if m.dependencyAt < 0 || m.dependencyAt >= len(m.dependencyCandidates()) {
+		m.dependencyAt = 0
+	}
+	m.pickingDependency = true
+}
+
 func (m Model) updateTaskPrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Ctrl+R rather than Tab, which now moves between the two fields.
+	if m.pickingDependency {
+		return m.updateDependencyPicker(k)
+	}
+	// Ctrl+D picks dependencies; Ctrl+R rather than Tab toggles auto-review,
+	// which moves between the two text fields.
+	if k.Mod&tea.ModCtrl != 0 && k.Code == 'd' {
+		m.openDependencyPicker()
+		return m, nil
+	}
 	if k.Mod&tea.ModCtrl != 0 && k.Code == 'r' && m.taskEditID == "" {
 		m.taskReview = !m.taskReview
 		return m, nil
@@ -321,10 +458,10 @@ func (m Model) updateTaskPrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.taskBusy = true
 		if m.taskEditID != "" {
 			m.notice = "Saving task…"
-			return m, m.editTask(m.taskEditID, title, description)
+			return m, m.editTask(m.taskEditID, title, description, m.taskDependsOn)
 		}
 		m.notice = "Creating task…"
-		return m, m.createTask(title, description, m.taskReview)
+		return m, m.createTask(title, description, m.taskReview, m.taskDependsOn)
 	case tea.KeyBackspace:
 		field := m.field()
 		if r := []rune(*field); len(r) > 0 {

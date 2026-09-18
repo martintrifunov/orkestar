@@ -121,8 +121,11 @@ the CLI.
 
 `e` on a selected task reopens the prompt over it, filled in with what is
 already there. `Tab` moves between the title and the description; `Enter`
-saves. The same prompt creates tasks with `c`, where `Ctrl+R` toggles
-auto-review — `Tab` no longer does, because it now moves between fields.
+saves. `Ctrl+D` opens the dependency list — space toggles a task, Enter
+returns — and the edit saves the whole list, so removing a dependency is the
+same gesture as adding one. The same prompt creates tasks with `c`, where
+`Ctrl+R` toggles auto-review — `Tab` no longer does, because it now moves
+between fields.
 
 Auto-review is missing from the edit prompt on purpose. It describes the gate
 the task was created under, and offering it here would make it easy to drop a

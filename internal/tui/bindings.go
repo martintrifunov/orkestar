@@ -271,6 +271,8 @@ func (m Model) helpLine() string {
 	switch {
 	case m.viewingDiff:
 		return "esc close diff"
+	case m.pickingDependency:
+		return "space toggles · enter done · esc back"
 	case m.prompting():
 		return "Enter confirm · Esc cancel"
 	case m.filesFocused:
