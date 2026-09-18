@@ -67,6 +67,9 @@ type Server struct {
 	// paneHistory persists bounded terminal text across a restart. Off by
 	// default: terminal output can hold secrets, tokens and prompts.
 	paneHistory bool
+	// watchdogLimit flags a session that stays in a working state longer
+	// than this. Zero disables the watchdog.
+	watchdogLimit time.Duration
 	// adapterLoader rebuilds the full adapter set, built-ins and manifests,
 	// when a reload is requested. Nil means reload is not configured.
 	adapterLoader func() ([]agent.Adapter, error)
@@ -161,6 +164,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		_ = listener.Close()
 	})
 	go guard("persist.retry", s.persistRetryLoop)
+	go guard("agent.watchdog", s.watchdogLoop)
 
 	defer func() {
 		s.stopOnce.Do(func() { close(s.stop) })

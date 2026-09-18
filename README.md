@@ -261,7 +261,10 @@ working, with less lifecycle detail.
 
 Metadata is written to SQLite after each mutation. A write that fails leaves
 the change live in memory, keeps retrying in the background, and makes
-`orkestar status` say metadata is not durable until it succeeds.
+`orkestar status` say metadata is not durable until it succeeds. An agent that
+stays in one working state without a lifecycle change past
+`ORKESTAR_AGENT_WATCHDOG` (30 minutes by default, `0` disables) is flagged in
+the sidebar, the way a crash is.
 
 For the boundaries and the reasoning behind them, see
 [the architecture](docs/architecture.md) and the

@@ -65,6 +65,9 @@ type agentSession struct {
 	permissionID string
 	// resuming guards against two resumes launching a session for one agent.
 	resuming bool
+	// workingSince is when the current working state began, so the watchdog
+	// can tell a long-running turn from an idle session. Zero unless working.
+	workingSince time.Time
 
 	// opening is a prompt to send once the agent is actually able to read
 	// one, and started records that it is. An interactive CLI owns a PTY the
@@ -201,6 +204,15 @@ func (a *agentSession) recordLifecycleIf(event agent.LifecycleEvent, hook bool, 
 		return metadata, false, false
 	}
 	a.metadata.State = string(event.State)
+	if event.State == agent.StateWorking {
+		// A repeated working event is not a new turn; the first one starts
+		// the clock the watchdog reads.
+		if a.workingSince.IsZero() {
+			a.workingSince = time.Now()
+		}
+	} else {
+		a.workingSince = time.Time{}
+	}
 	if isAttentionState(event.State) {
 		a.metadata.AttentionReason = event.Reason
 	} else {

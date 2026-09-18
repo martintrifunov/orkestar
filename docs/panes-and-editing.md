@@ -39,6 +39,12 @@ live, whether a resume is possible, where the state signal comes from, what
 the daemon is waiting on, and any pending permission. It is the same account
 `orkestar agent explain` prints, shown over the content area.
 
+An agent that stays in one working state for 30 minutes without a lifecycle
+change is flagged in the sidebar the way a crash is. Orkestar cannot see token
+usage, but a turn that has quietly run that long is the shape of the incident
+the watchdog exists for. Set `ORKESTAR_AGENT_WATCHDOG` to a Go duration (for
+example `1h`) to change the limit, or `0` to turn the notice off.
+
 A session that belongs to an agent cannot be removed on its own; remove the
 agent and its terminal goes too. Sessions restored after a daemon restart are
 marked interrupted and can be cleared the same way. The command line has the

@@ -507,6 +507,7 @@ func serveDaemon(paths runtimepath.Paths) error {
 	server.SetVersion(version)
 	server.SetAutoResume(autoResumeEnabled())
 	server.SetPaneHistory(paneHistoryEnabled())
+	server.SetAgentWatchdog(agentWatchdogLimit())
 	adapters, err := buildAdapters()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "orkestar: %v\n", err)
@@ -571,6 +572,23 @@ func autoResumeEnabled() bool {
 // restart. Off by default: pane output can contain secrets.
 func paneHistoryEnabled() bool {
 	return os.Getenv("ORKESTAR_PANE_HISTORY") == "1"
+}
+
+// agentWatchdogLimit is how long an agent may stay in one working state
+// before the daemon raises attention on its row. The default is deliberately
+// generous: this is for a turn that has gone wrong, not for slow work. A zero
+// or unparseable value disables it.
+func agentWatchdogLimit() time.Duration {
+	value := strings.TrimSpace(os.Getenv("ORKESTAR_AGENT_WATCHDOG"))
+	if value == "" {
+		return daemon.DefaultAgentWatchdog
+	}
+	limit, err := time.ParseDuration(value)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "orkestar: ORKESTAR_AGENT_WATCHDOG=%q is not a duration; disabling the watchdog\n", value)
+		return 0
+	}
+	return limit
 }
 
 // protocolCompatible reports whether this client can talk to the daemon whose
