@@ -200,6 +200,16 @@ are created with automatic review on: the daemon runs a reviewer agent and
 requires approval before the task can close. Press `Ctrl+R` in the create prompt
 to opt out, and `Ctrl+D` to pick the tasks this one waits on.
 
+### Machines
+
+`Ctrl+b ,` then `m` manages saved SSH machines: add a profile, enable or
+disable one, or remove it. Every enabled machine's agents appear in one
+sidebar with a machine column, and a remote agent's row is driven in place —
+interrupt, stop, resume, explain, or Enter to move there and open its pane.
+`orkestar --remote user@host` attaches a single machine without saving a
+profile. Nothing listens on a network and no credential is stored; the
+transport and authentication are ssh.
+
 ## Editing and review
 
 `Ctrl+b d` opens a pull-request style review of the workspace or task worktree,

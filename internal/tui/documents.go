@@ -378,6 +378,9 @@ func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m Model) promptView() string {
+	if m.managingMachines || m.addingMachine {
+		return m.machinesView()
+	}
 	if m.renaming != nil {
 		return "Rename pane\n\nName: " + m.renameTo + "▏" +
 			"\n\nEnter renames · an empty name restores the default · Esc cancels"
@@ -421,6 +424,9 @@ func (m Model) promptView() string {
 
 }
 func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.managingMachines || m.addingMachine {
+		return m.updateMachines(k)
+	}
 	if m.renaming != nil {
 		return m.updateRenamePrompt(k)
 	}
@@ -517,6 +523,10 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.settingsOpen = false
 			m.notice = "Reloading agent adapters…"
 			return m, m.reloadAdapters()
+		}
+		if k.String() == "m" {
+			m.settingsOpen = false
+			return m, m.openMachines()
 		}
 		modes := map[string]string{"1": "standard", "2": "vim", "3": "nano"}
 		if mode, ok := modes[k.String()]; ok {

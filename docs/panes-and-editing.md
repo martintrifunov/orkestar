@@ -259,6 +259,19 @@ and daemon are the same binary; across machines they are two installs, and
 two builds agreeing on the protocol by accident is not something to find out
 halfway through a session.
 
+## Saved machines
+
+`Ctrl+b ,` then `m` lists the local daemon and every saved machine, with its
+host, optional remote session and whether it is enabled. `a` adds one: the
+form takes an ssh target, an optional label and an optional named session on
+the far side. `e` enables or disables a profile without forgetting it, and
+`x` removes it and any layout remembered for it. The list is the same
+`~/.config/orkestar/machines.json` the CLI edits, written under the same lock,
+so the TUI and another terminal cannot clobber each other.
+
+Machine management is unavailable in a `--remote` session: the profiles
+belong to the machine you are sitting at, not the one you attached to.
+
 ## Finding the work on screen
 
 Panes already belong to tasks — an agent is launched for one and its terminal
@@ -527,8 +540,8 @@ buffers. Unsaved buffers do not survive forcibly closing the host terminal.
 Ctrl+b, comma opens settings. Choose `1` standard, `2` Vim or `3` Nano. The
 selection is saved and applies to newly opened files. The panel also cycles
 the theme (`t`), toggles syntax highlighting (`h`), the bell (`b`) and
-notifications (`n`), and reloads agent manifests edited on disk (`r`).
-Vim and Nano are real
+notifications (`n`), reloads agent manifests edited on disk (`r`), and opens
+the saved-machine list (`m`). Vim and Nano are real
 terminal editors managed by the daemon, with their own normal save/quit keys.
 Mouse events are forwarded when the editor enables them. On macOS the system
 `nano` can be Pico, which has Nano-style shortcuts. This Mac’s Pico did not

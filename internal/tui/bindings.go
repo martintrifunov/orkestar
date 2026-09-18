@@ -278,6 +278,10 @@ func (m Model) helpLine() string {
 		return "esc close explanation"
 	case m.pickingDependency:
 		return "space toggles · enter done · esc back"
+	case m.addingMachine:
+		return "Enter saves · Tab switches field · Esc cancels"
+	case m.managingMachines:
+		return "a add · e enable/disable · x remove · esc close"
 	case m.prompting():
 		return "Enter confirm · Esc cancel"
 	case m.filesFocused:

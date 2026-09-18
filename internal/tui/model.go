@@ -12,6 +12,7 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/machine"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -162,6 +163,22 @@ type Model struct {
 	templatesErr       error
 	templatesWorkspace string
 	templateStart      bool
+	// managingMachines is the saved-machine overlay, and addingMachine its
+	// form. Both own the keyboard through prompting().
+	managingMachines bool
+	manageAt         int
+	savedMachines    []machine.Machine
+	machinesErr      error
+	addingMachine    bool
+	machineHost      string
+	machineLabel     string
+	machineSession   string
+	machineField     int
+	// machineCatalogPath and machineLayoutRoot are where saved machines and
+	// their layouts live. Empty means management is unavailable, as in a
+	// --remote session.
+	machineCatalogPath string
+	machineLayoutRoot  string
 	// snapshotLoaded guards the first comparison: everything in the opening
 	// snapshot would otherwise look like it had just happened.
 	snapshotLoaded bool
@@ -236,10 +253,19 @@ func New(client *ipc.Client, directory string) Model {
 	}
 }
 
+// MachineOptions is where the interface reads and writes saved machines, and
+// where each machine's remembered layout lives. An empty CatalogPath disables
+// machine management, which is what a --remote interface wants: the profiles
+// belong to the machine the person is sitting at.
+type MachineOptions struct {
+	CatalogPath string
+	LayoutRoot  string
+}
+
 // Run starts the interface over the given machines, the first selected. Each
 // machine has its own client and layout file, so switching detaches the current
 // panes and brings back the other machine's.
-func Run(machines []Machine, directory string) error {
+func Run(machines []Machine, directory string, options MachineOptions) error {
 	if len(machines) == 0 {
 		return fmt.Errorf("run: at least one machine is required")
 	}
@@ -249,6 +275,8 @@ func Run(machines []Machine, directory string) error {
 	model.machines = machines
 	model.machineIndex = 0
 	model.layoutPath = machines[0].LayoutPath
+	model.machineCatalogPath = options.CatalogPath
+	model.machineLayoutRoot = options.LayoutRoot
 	model.ctx = ctx
 	program := tea.NewProgram(model)
 	final, err := program.Run()
@@ -324,6 +352,9 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.pickingTemplate = false
 	m.templates, m.templatesErr, m.templatesWorkspace = nil, nil, ""
 	m.templateAt, m.templateStart = 0, false
+	m.managingMachines, m.addingMachine = false, false
+	m.savedMachines, m.machinesErr = nil, nil
+	m.machineHost, m.machineLabel, m.machineSession, m.machineField = "", "", "", 0
 	// Interaction state must not cross machines either: a confirm armed
 	// here would otherwise act there with no second press, a busy flag
 	// would wedge the new board until the old reply lands (and is now
@@ -356,7 +387,8 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 // prompting reports whether a modal prompt owns the keyboard and the content
 // area.
 func (m Model) prompting() bool {
-	return m.filePrompt || m.settingsOpen || m.taskPrompt || m.renaming != nil
+	return m.filePrompt || m.settingsOpen || m.taskPrompt || m.renaming != nil ||
+		m.managingMachines || m.addingMachine
 }
 
 func (m Model) Init() tea.Cmd {
@@ -543,7 +575,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.fileName += strings.ReplaceAll(message.Content, "\n", "")
 			return m, nil
 		}
-		if m.settingsOpen || m.filesFocused || m.pickingTemplate || m.viewingExplanation {
+		if m.settingsOpen || m.filesFocused || m.pickingTemplate || m.viewingExplanation || m.managingMachines || m.addingMachine {
 			return m, nil
 		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
@@ -1037,6 +1069,53 @@ if message.machineID != "" && message.machineID != m.currentMachine().ID {
 		m.notice = fmt.Sprintf("Adapters reloaded: %d registered", len(message.adapters))
 		m.loading = true
 		return m, m.loadSnapshot()
+	case machinesListedMsg:
+		m.savedMachines = message.machines
+		m.machinesErr = message.err
+		if m.manageAt >= len(m.savedMachines) {
+			m.manageAt = max(0, len(m.savedMachines)-1)
+		}
+	case machineAddedMsg:
+		m.machinesErr = message.err
+		if message.err != nil {
+			return m, nil
+		}
+		m.savedMachines = append(m.savedMachines, message.saved)
+		sortSavedMachines(m.savedMachines)
+		m.addMachineToSession(message.saved, message.client)
+		m.notice = "Machine " + message.saved.Label + " added"
+	case machineRemovedMsg:
+		m.machinesErr = message.err
+		if message.err != nil {
+			return m, nil
+		}
+		m.dropSavedMachine(message.id)
+		if m.detachSavedMachine(message.id) {
+			m.notice = "Machine removed"
+		} else {
+			m.notice = "Machine removed; its panes stay until this session restarts"
+		}
+		m.forgetMachineLayout(message.id)
+	case machineSetEnabledMsg:
+		m.machinesErr = message.err
+		if message.err != nil {
+			return m, nil
+		}
+		for index := range m.savedMachines {
+			if m.savedMachines[index].ID == message.saved.ID {
+				m.savedMachines[index] = message.saved
+			}
+		}
+		if message.saved.Enabled {
+			m.addMachineToSession(message.saved, message.client)
+			m.notice = "Machine " + message.saved.Label + " enabled"
+			return m, nil
+		}
+		if m.detachSavedMachine(message.saved.ID) {
+			m.notice = "Machine " + message.saved.Label + " disabled"
+		} else {
+			m.notice = "Machine " + message.saved.Label + " disabled; its panes stay until this session restarts"
+		}
 	case templatesMsg:
 		if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, nil
