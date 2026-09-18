@@ -37,11 +37,12 @@ func (m Model) menuFor(pane *embeddedTerminal) []menuItem {
 		{"Split right", ActionSplitRight},
 		{"Split down", ActionSplitDown},
 	}
-	// Zoom and cycling need somewhere to go.
+	// Zoom, cycling and moving need somewhere to go.
 	if len(m.visiblePanes()) > 1 {
 		items = append(items,
 			menuItem{"Zoom", ActionZoom},
 			menuItem{"Next pane", ActionNextPane},
+			menuItem{"Move pane", ActionMovePane},
 		)
 	}
 	items = append(items, menuItem{"Rename", ActionRenamePane})

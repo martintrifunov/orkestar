@@ -131,17 +131,34 @@ func (n *splitNode) find(p *embeddedTerminal, parent *splitNode) (leaf, par *spl
 // The target leaf becomes an internal node in place, so every other pane keeps
 // its position. Without a matching target the whole layout is split instead.
 func (n *splitNode) insert(target, p *embeddedTerminal, stacked bool) *splitNode {
+	return n.insertSide(target, p, stacked, true)
+}
+
+// insertSide is insert with a choice of which side p lands on: after the
+// target (right of it, or below when stacked) or before it. Re-parenting a
+// pane uses the before case to move it left or up without disturbing the
+// target's own position.
+func (n *splitNode) insertSide(target, p *embeddedTerminal, stacked, after bool) *splitNode {
 	if n == nil {
 		return &splitNode{pane: p}
 	}
 	leaf, _ := n.find(target, nil)
 	if leaf == nil {
-		return &splitNode{stacked: stacked, first: n, second: &splitNode{pane: p}}
+		if after {
+			return &splitNode{stacked: stacked, first: n, second: &splitNode{pane: p}}
+		}
+		return &splitNode{stacked: stacked, first: &splitNode{pane: p}, second: n}
 	}
-	leaf.first = &splitNode{pane: leaf.pane}
-	leaf.second = &splitNode{pane: p}
+	existing := leaf.pane
 	leaf.pane = nil
 	leaf.stacked = stacked
+	if after {
+		leaf.first = &splitNode{pane: existing}
+		leaf.second = &splitNode{pane: p}
+	} else {
+		leaf.first = &splitNode{pane: p}
+		leaf.second = &splitNode{pane: existing}
+	}
 	return n
 }
 

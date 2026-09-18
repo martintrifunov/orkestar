@@ -54,15 +54,19 @@ const (
 	ActionSplitDown    Action = "split-down"
 	ActionNextPane     Action = "next-pane"
 	ActionSwapPane     Action = "swap-pane"
-	ActionNextMachine  Action = "next-machine"
-	ActionZoom         Action = "zoom"
-	ActionClosePane    Action = "close-pane"
-	ActionScrollback   Action = "scrollback"
-	ActionEditFile     Action = "edit-file"
-	ActionClaimPane    Action = "claim-pane"
-	ActionRenamePane   Action = "rename-pane"
-	ActionDiscardEdit  Action = "discard-editor"
-	ActionDetachPanel  Action = "detach-panel"
+	// ActionMovePane arms a directional move: the next arrow takes the focused
+	// pane out of its current split and re-parents it beside the pane in that
+	// direction, which swap cannot do because swap only exchanges contents.
+	ActionMovePane    Action = "move-pane"
+	ActionNextMachine Action = "next-machine"
+	ActionZoom        Action = "zoom"
+	ActionClosePane   Action = "close-pane"
+	ActionScrollback  Action = "scrollback"
+	ActionEditFile    Action = "edit-file"
+	ActionClaimPane   Action = "claim-pane"
+	ActionRenamePane  Action = "rename-pane"
+	ActionDiscardEdit Action = "discard-editor"
+	ActionDetachPanel Action = "detach-panel"
 )
 
 // defaultBindings is what Orkestar has always used. Anything a user does not
@@ -95,6 +99,7 @@ func defaultBindings() map[Action]string {
 		ActionSplitDown:    "s",
 		ActionNextPane:     "o",
 		ActionSwapPane:     "p",
+		ActionMovePane:     "m",
 		ActionNextMachine:  "g",
 		ActionZoom:         "z",
 		ActionClosePane:    "q",
@@ -154,6 +159,7 @@ var placements = map[Action]placement{
 	ActionSplitRight:  prefixed,
 	ActionSplitDown:   prefixed,
 	ActionSwapPane:    prefixed,
+	ActionMovePane:    prefixed,
 	ActionNextMachine: prefixed,
 	ActionZoom:        prefixed,
 	ActionClosePane:   prefixed,
@@ -286,9 +292,12 @@ func (m Model) helpLine() string {
 		return "Enter confirm · Esc cancel"
 	case m.filesFocused:
 		return "↑/↓ select · enter open · ←/→ collapse/expand · " + k(ActionRefresh) + " refresh · esc back"
+	case m.movingPane:
+		return "←↑→↓ move pane beside that neighbour · esc cancel"
 	case m.prefix:
 		return "Prefix: " + k(ActionSplitRight) + "/" + k(ActionSplitDown) + " split · " +
-			k(ActionNextPane) + " next · " + k(ActionSwapPane) + " swap · " + k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · arrows resize (repeat) · " +
+			k(ActionNextPane) + " next · " + k(ActionSwapPane) + " swap · " + k(ActionMovePane) + " move · " +
+			k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · arrows resize (repeat) · " +
 			k(ActionDiff) + " diff · " + k(ActionEditFile) + " edit · " + k(ActionRenamePane) +
 			" rename · " + k(ActionFiles) + " files · esc done"
 	case len(m.paneRects()) < len(m.visiblePanes()):
@@ -315,7 +324,7 @@ func (m Model) helpLine() string {
 	case m.embedded != nil:
 		return "drag to copy · " + k(ActionPrefix) + " then: " + k(ActionSplitRight) + "/" +
 			k(ActionSplitDown) + " split · " + k(ActionNextPane) + " next · " + k(ActionSwapPane) +
-			" swap · " + k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · arrows resize · " + k(ActionDiff) + " diff · " +
+			" swap · " + k(ActionMovePane) + " move · " + k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · arrows resize · " + k(ActionDiff) + " diff · " +
 			k(ActionEditFile) + " edit · " + k(ActionClosePane) + " close"
 	}
 	return k(ActionNewAgent) + " agent  " + k(ActionNewShell) + " shell  " + k(ActionOpen) +

@@ -107,6 +107,10 @@ type Model struct {
 	// while it is up.
 	menu *paneMenu
 
+	// movingPane is armed by Ctrl+b m: the next arrow re-parents the focused
+	// pane beside its neighbour in that direction.
+	movingPane bool
+
 	// The file viewer mirrors the sidebar on the right edge. It is closed by
 	// default and reads the workspace only while open.
 	filesOpen, filesFocused, filesLoading bool
@@ -376,6 +380,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.settingsOpen = false
 	m.renaming, m.renameTo = nil, ""
 	m.menu = nil
+	m.movingPane = false
 	m.documentSplit = nil
 	m.diff = daemon.TaskDiff{}
 	m.diffTaskID = ""
@@ -611,6 +616,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.pickingTemplate {
 			return m.updateTemplatePicker(message)
+		}
+		if m.movingPane {
+			// The mode is deliberately one key deep: an arrow moves and
+			// anything else cancels, so a half-armed move cannot make the next
+			// ordinary keystroke do something surprising.
+			m.movingPane = false
+			switch message.String() {
+			case "left", "right", "up", "down":
+				m.movePaneInDirection(message.String())
+			case "esc":
+				m.notice = ""
+			}
+			return m, nil
 		}
 		if m.viewingExplanation {
 			switch message.String() {
@@ -1617,6 +1635,14 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.switchMachine(1)
 		case ActionClaimPane:
 			m.claimPane()
+			return m, nil
+		case ActionMovePane:
+			if len(m.visiblePanes()) < 2 {
+				m.notice = "Only one pane. Ctrl+b v/s splits it."
+				return m, nil
+			}
+			m.movingPane = true
+			m.notice = ""
 			return m, nil
 		case ActionNewAgent:
 			m.sidebarFocused = true

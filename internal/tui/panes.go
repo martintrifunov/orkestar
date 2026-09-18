@@ -140,6 +140,95 @@ func (m Model) findPane(id string) *embeddedTerminal {
 	return nil
 }
 
+// rectFor finds a pane's rectangle in a laid-out tree.
+func rectFor(rects []paneRect, pane *embeddedTerminal) (paneRect, bool) {
+	for _, r := range rects {
+		if r.terminal == pane {
+			return r, true
+		}
+	}
+	return paneRect{}, false
+}
+
+// overlapLen is how many cells two spans share, zero when they only touch.
+func overlapLen(start, length, otherStart, otherLength int) int {
+	return max(0, min(start+length, otherStart+otherLength)-max(start, otherStart))
+}
+
+// paneInDirection finds the nearest pane in that direction from the focused
+// one, judged on the layout rectangles rather than layout order, so an arrow
+// means what it looks like. Ties go to the pane sharing more of the edge.
+func (m Model) paneInDirection(focused *embeddedTerminal, direction string) *embeddedTerminal {
+	tree := m.tree()
+	if tree == nil || focused == nil {
+		return nil
+	}
+	x, y, width, height := m.contentArea()
+	rects := tree.rects(x, y, width, height, nil)
+	focus, ok := rectFor(rects, focused)
+	if !ok {
+		return nil
+	}
+	var best *embeddedTerminal
+	bestGap, bestOverlap := 0, 0
+	for _, r := range rects {
+		if r.terminal == focused {
+			continue
+		}
+		var gap, overlap int
+		switch direction {
+		case "left":
+			gap = focus.x - (r.x + r.width)
+			overlap = overlapLen(r.y, r.height, focus.y, focus.height)
+		case "right":
+			gap = r.x - (focus.x + focus.width)
+			overlap = overlapLen(r.y, r.height, focus.y, focus.height)
+		case "up":
+			gap = focus.y - (r.y + r.height)
+			overlap = overlapLen(r.x, r.width, focus.x, focus.width)
+		case "down":
+			gap = r.y - (focus.y + focus.height)
+			overlap = overlapLen(r.x, r.width, focus.x, focus.width)
+		default:
+			return nil
+		}
+		if gap < 0 || overlap <= 0 {
+			continue
+		}
+		if best == nil || gap < bestGap || (gap == bestGap && overlap > bestOverlap) {
+			best, bestGap, bestOverlap = r.terminal, gap, overlap
+		}
+	}
+	return best
+}
+
+// movePaneInDirection re-parents the focused pane: it leaves its current
+// split, which collapses, and the nearest pane in that direction gains a new
+// split holding this one on the side the move was toward. Swap only exchanges
+// two panes' contents; this changes the shape of the layout.
+func (m *Model) movePaneInDirection(direction string) {
+	m.movingPane = false
+	m.notice = ""
+	if m.embedded == nil || len(m.visiblePanes()) < 2 {
+		m.notice = "Only one pane. Ctrl+b v/s splits it."
+		return
+	}
+	target := m.paneInDirection(m.embedded, direction)
+	if target == nil {
+		m.notice = "No pane to the " + direction + "."
+		return
+	}
+	tree := m.tree().remove(m.embedded)
+	if tree == nil {
+		return
+	}
+	stacked := direction == "up" || direction == "down"
+	after := direction == "right" || direction == "down"
+	m.layout = tree.insertSide(target, m.embedded, stacked, after)
+	m.resizePanes()
+	m.persistLayout()
+}
+
 // swapWithNextPane exchanges the focused pane with the next one in layout
 // order, keeping the split shape and ratios. The focused pane stays focused,
 // so the keys after a swap keep acting on the same work.
@@ -366,6 +455,13 @@ func abs(v int) int {
 
 func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if m.pickingAgent || m.pickingTemplate || m.viewingDiff || m.viewingExplanation || m.viewingHistory || m.prompting() {
+		return m, nil
+	}
+	if m.movingPane {
+		// A click is someone changing their mind; cancel rather than move a
+		// pane the pointer just re-focused.
+		m.movingPane = false
+		m.notice = ""
 		return m, nil
 	}
 	mouse := msg.Mouse()

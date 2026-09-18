@@ -11,6 +11,8 @@ continues to type into that agent.
 | Split: open a new shell below the focused pane | Ctrl+b, s |
 | Focus the next open pane | F6 or Ctrl+b, o |
 | Zoom the focused pane, and back | Ctrl+b, z |
+| Swap the focused pane with the next | Ctrl+b, p |
+| Move the focused pane beside a neighbour | Ctrl+b, m then an arrow |
 | Move the enclosing split's divider | Ctrl+b, arrow keys |
 | Open another shell | Ctrl+b, n |
 | Open agent picker | Ctrl+b, a |
@@ -458,6 +460,13 @@ does the same thing. Both stop before either side becomes too small to use.
 `Ctrl+b z` zooms the focused pane to fill the whole area and back again. The
 other panes keep their processes and their place in the layout, and `F6` still
 cycles through them while zoomed, swapping which one fills the space.
+
+`Ctrl+b m` then an arrow **moves** the focused pane rather than swapping it.
+Swap exchanges what two leaves hold and leaves the shape alone; a move takes
+the pane out of its own split, which collapses, and gives the nearest pane in
+that direction a new split with the moved pane on the side it travelled
+toward. An arrow with nothing in that direction says so. Any key other than
+an arrow or `Esc` cancels an armed move.
 
 The default limit is 16 open panes; set `"max_panes"` in `tui.json` (1 to 64).
 Above the limit, opening or splitting is refused with a notice. Nothing is
