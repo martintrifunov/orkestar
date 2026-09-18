@@ -191,6 +191,7 @@ Select the Tasks section with `Tab`, then `c` creates one.
 | `m` / `x` | Mark it done / cancel it |
 | `w` | Create or remove its Git worktree |
 | `t` | Assign it to the highlighted agent |
+| `T` | Apply a workflow template |
 
 A task carries a status, optional dependencies, an assignee and its own Git
 worktree, so an agent can change files without disturbing your checkout. Tasks

@@ -365,7 +365,7 @@ func abs(v int) int {
 }
 
 func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
-	if m.pickingAgent || m.viewingDiff || m.viewingHistory || m.prompting() {
+	if m.pickingAgent || m.pickingTemplate || m.viewingDiff || m.viewingHistory || m.prompting() {
 		return m, nil
 	}
 	mouse := msg.Mouse()
@@ -469,7 +469,7 @@ func (m Model) paneTitle() string {
 }
 
 func (m Model) forwardMouse(kind string, mouse tea.Mouse) bool {
-	if m.embedded == nil || m.embedded.view == nil || !m.embedded.view.mouseEnabled() || m.prompting() || m.viewingHistory || m.viewingDiff || m.pickingAgent {
+	if m.embedded == nil || m.embedded.view == nil || !m.embedded.view.mouseEnabled() || m.prompting() || m.viewingHistory || m.viewingDiff || m.pickingAgent || m.pickingTemplate {
 		return false
 	}
 	for _, r := range m.paneRects() {

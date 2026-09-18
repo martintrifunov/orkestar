@@ -140,6 +140,16 @@ type Model struct {
 	// automatically.
 	pickingAgent  bool
 	agentPickerAt int
+	// pickingTemplate shows the workflow-template overlay, with the
+	// workspace's templates as last read. Applying them is a mutation like
+	// any other task action, so it shares taskBusy.
+	pickingTemplate    bool
+	templateAt         int
+	templates          []workflow.Template
+	templatesLoading   bool
+	templatesErr       error
+	templatesWorkspace string
+	templateStart      bool
 	// snapshotLoaded guards the first comparison: everything in the opening
 	// snapshot would otherwise look like it had just happened.
 	snapshotLoaded bool
@@ -294,6 +304,11 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.pickerTaskID = ""
 	m.viewingDiff = false
 	m.viewingHistory = false
+	// The other machine has its own workspace and its own templates; a list
+	// read here would create tasks there if it were kept.
+	m.pickingTemplate = false
+	m.templates, m.templatesErr, m.templatesWorkspace = nil, nil, ""
+	m.templateAt, m.templateStart = 0, false
 	// Interaction state must not cross machines either: a confirm armed
 	// here would otherwise act there with no second press, a busy flag
 	// would wedge the new board until the old reply lands (and is now
@@ -460,7 +475,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyOffset = max(0, min(max(0, len(m.history)-1), m.historyOffset-step))
 			return m, nil
 		}
-		if m.prompting() || m.viewingDiff || m.pickingAgent {
+		if m.prompting() || m.viewingDiff || m.pickingAgent || m.pickingTemplate {
 			return m, nil
 		}
 		if m.filesScroll(mouse.X, mouse.Y, step) {
@@ -487,7 +502,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The right button is what people try when they want to know what a
 		// thing can do, and it costs them nothing to find out.
-		if message.Mouse().Button == tea.MouseRight && !m.prompting() && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
+		if message.Mouse().Button == tea.MouseRight && !m.prompting() && !m.viewingDiff && !m.pickingAgent && !m.pickingTemplate && !m.viewingHistory {
 			if m.openMenu(message.Mouse()) {
 				return m, nil
 			}
@@ -509,7 +524,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.fileName += strings.ReplaceAll(message.Content, "\n", "")
 			return m, nil
 		}
-		if m.settingsOpen || m.filesFocused {
+		if m.settingsOpen || m.filesFocused || m.pickingTemplate {
 			return m, nil
 		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
@@ -524,6 +539,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.prompting() {
 			return m.updatePrompt(message)
+		}
+		if m.pickingTemplate {
+			return m.updateTemplatePicker(message)
 		}
 		if message.String() == "f6" {
 			cmd, _ := m.paneAction(m.keys.key(ActionNextPane))
@@ -737,6 +755,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case m.keys.is(key, ActionNewTask):
 			if m.focus == focusTasks || len(m.snapshot.Tasks) == 0 {
 				m.startTaskPrompt()
+			}
+			return m, nil
+		case m.keys.is(key, ActionTemplate):
+			if m.focus == focusTasks && !m.taskBusy {
+				m.pickingTemplate = true
+				m.templateAt = 0
+				m.templates = nil
+				m.templatesLoading = true
+				m.templatesErr = nil
+				m.templatesWorkspace = ""
+				return m, m.loadTemplates()
 			}
 			return m, nil
 
@@ -958,6 +987,30 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.diff = message.diff
 			m.viewingDiff = true
 		}
+	case templatesMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
+		m.templatesLoading = false
+		m.templates = message.templates
+		m.templatesWorkspace = message.workspaceID
+		m.templatesErr = message.err
+		if m.templateAt >= len(m.templates) {
+			m.templateAt = max(0, len(m.templates)-1)
+		}
+	case templateAppliedMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
+		m.taskBusy = false
+		m.err = message.err
+		if message.err != nil {
+			return m, nil
+		}
+		m.notice = appliedNotice(message.applied)
+		m.focus = focusTasks
+		m.loading = true
+		return m, m.loadSnapshot()
 	case taskActionMsg:
 		if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, nil
@@ -1013,7 +1066,7 @@ func (m Model) View() tea.View {
 	// Focus reporting is what lets a notification stay quiet while the user is
 	// already looking at the pane it would be about.
 	view.ReportFocus = true
-	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused && !m.pickingAgent && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
+	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused && !m.pickingAgent && !m.pickingTemplate && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
 		x, y, visible := m.embedded.emulator.Cursor()
 		if visible {
 			for _, r := range m.paneRects() {

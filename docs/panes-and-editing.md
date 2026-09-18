@@ -298,6 +298,11 @@ orkestar template list <workspace-id>
 orkestar template apply <workspace-id> <name> [--start]
 ```
 
+`T` on the board is the same thing: it lists the workspace's templates with
+their task counts, and Enter applies the selected one. `s` toggles whether the
+agents the template names are started, and it starts off, matching the CLI —
+creating tasks is recoverable, launching agents spends tokens.
+
 With `--start`, the agents the template names are launched — but only on the
 tasks nothing is blocking. Starting the rest would mean agents sitting idle
 against work they cannot begin, so they come back under `waiting`, and
@@ -440,6 +445,7 @@ The Tasks section of the sidebar is a board, not just a list. Select it with
 | Cancel it | x |
 | Create or remove its Git worktree | w |
 | Assign it to the highlighted agent | t |
+| Apply a workflow template | T |
 
 The create prompt takes a title and one choice. Automatic review is on by
 default, matching the command line: the daemon runs a reviewer agent when you

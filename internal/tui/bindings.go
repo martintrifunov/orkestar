@@ -38,6 +38,9 @@ const (
 	ActionEditTask   Action = "edit-task"
 	ActionDiff       Action = "diff"
 	ActionTaskDone   Action = "task-done"
+	// ActionTemplate applies a workflow template from the Tasks list. The
+	// daemon has had template.apply since v0.4.0; the board could not reach it.
+	ActionTemplate Action = "apply-template"
 	// ActionDenyOrCancel is one key with two meanings, decided by what has
 	// focus: it denies a pending permission, and on a task it cancels it.
 	// They were always one binding, so naming them separately would let a user
@@ -81,6 +84,7 @@ func defaultBindings() map[Action]string {
 		ActionEditTask:     "e",
 		ActionDiff:         "d",
 		ActionTaskDone:     "m",
+		ActionTemplate:     "T",
 		ActionDenyOrCancel: "x",
 		ActionWorktree:     "w",
 		ActionAssign:       "t",
@@ -138,6 +142,7 @@ var placements = map[Action]placement{
 	ActionNewTask:      direct,
 	ActionEditTask:     direct,
 	ActionTaskDone:     direct,
+	ActionTemplate:     direct,
 	ActionDenyOrCancel: direct,
 	ActionWorktree:     direct,
 	ActionAssign:       direct,
@@ -281,6 +286,8 @@ func (m Model) helpLine() string {
 		return "Scrollback · pgup/pgdown or wheel · esc return"
 	case m.pickingAgent:
 		return "up/down select · enter launch · esc cancel"
+	case m.pickingTemplate:
+		return "up/down select · enter apply · s start agents · esc cancel"
 	case m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused):
 		return k(ActionOpen) + " open  " + k(ActionResume) + " resume  " + k(ActionInterrupt) +
 			" interrupt  " + k(ActionStopRemove) + " stop/remove  " + k(ActionAllow) + "/" +
@@ -288,7 +295,8 @@ func (m Model) helpLine() string {
 	case m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused):
 		return k(ActionOpen) + " show  " + k(ActionNewTask) + " new  " + k(ActionEditTask) +
 			" edit  " + k(ActionNewAgent) + " start  " + k(ActionDiff) + " diff  " +
-			k(ActionTaskDone) + " done  " + k(ActionDenyOrCancel) + " cancel  " + k(ActionWorktree) + " worktree"
+			k(ActionTaskDone) + " done  " + k(ActionDenyOrCancel) + " cancel  " +
+			k(ActionWorktree) + " worktree  " + k(ActionTemplate) + " template"
 	case m.embedded != nil && m.sidebarFocused:
 		return k(ActionOpen) + " open  " + k(ActionStopRemove) + " stop/remove  " +
 			k(ActionNewAgent) + " agent  " + k(ActionNewShell) + " shell  " + k(ActionFiles) +
