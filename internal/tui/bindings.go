@@ -33,6 +33,7 @@ const (
 	ActionStopRemove Action = "stop-or-remove"
 	ActionInterrupt  Action = "interrupt"
 	ActionResume     Action = "resume"
+	ActionExplain    Action = "explain-agent"
 	ActionSettings   Action = "settings"
 	ActionNewTask    Action = "new-task"
 	ActionEditTask   Action = "edit-task"
@@ -79,6 +80,7 @@ func defaultBindings() map[Action]string {
 		ActionStopRemove:   "X",
 		ActionInterrupt:    "i",
 		ActionResume:       "u",
+		ActionExplain:      "E",
 		ActionSettings:     ",",
 		ActionNewTask:      "c",
 		ActionEditTask:     "e",
@@ -139,6 +141,7 @@ var placements = map[Action]placement{
 	ActionStopRemove:   direct,
 	ActionInterrupt:    direct,
 	ActionResume:       direct,
+	ActionExplain:      direct,
 	ActionNewTask:      direct,
 	ActionEditTask:     direct,
 	ActionTaskDone:     direct,
@@ -271,6 +274,8 @@ func (m Model) helpLine() string {
 	switch {
 	case m.viewingDiff:
 		return "esc close diff"
+	case m.viewingExplanation:
+		return "esc close explanation"
 	case m.pickingDependency:
 		return "space toggles · enter done · esc back"
 	case m.prompting():
@@ -292,8 +297,8 @@ func (m Model) helpLine() string {
 		return "up/down select · enter apply · s start agents · esc cancel"
 	case m.focus == focusAgents && (m.embedded == nil || m.sidebarFocused):
 		return k(ActionOpen) + " open  " + k(ActionResume) + " resume  " + k(ActionInterrupt) +
-			" interrupt  " + k(ActionStopRemove) + " stop/remove  " + k(ActionAllow) + "/" +
-			k(ActionDenyOrCancel) + " allow/deny  " + k(ActionSection) + " section"
+			" interrupt  " + k(ActionStopRemove) + " stop/remove  " + k(ActionExplain) + " explain  " +
+			k(ActionAllow) + "/" + k(ActionDenyOrCancel) + " allow/deny  " + k(ActionSection) + " section"
 	case m.focus == focusTasks && (m.embedded == nil || m.sidebarFocused):
 		return k(ActionOpen) + " show  " + k(ActionNewTask) + " new  " + k(ActionEditTask) +
 			" edit  " + k(ActionNewAgent) + " start  " + k(ActionDiff) + " diff  " +

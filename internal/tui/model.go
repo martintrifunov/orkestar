@@ -140,6 +140,12 @@ type Model struct {
 	diff        daemon.TaskDiff
 	diffErr     error
 
+// viewingExplanation is the agent.explain overlay: the daemon's account
+// of why an agent's state is what the sidebar says it is.
+	viewingExplanation bool
+	explanation        daemon.AgentExplanation
+	explainErr         error
+
 	// pickingAgent shows the "choose an agent to launch" overlay, built
 	// dynamically from snapshot.Adapters rather than fixed keybindings, so
 	// a newly registered adapter (e.g. a future Codex adapter) appears
@@ -310,6 +316,9 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.pickerTaskID = ""
 	m.viewingDiff = false
 	m.viewingHistory = false
+	m.viewingExplanation = false
+	m.explanation = daemon.AgentExplanation{}
+	m.explainErr = nil
 	// The other machine has its own workspace and its own templates; a list
 	// read here would create tasks there if it were kept.
 	m.pickingTemplate = false
@@ -482,7 +491,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyOffset = max(0, min(max(0, len(m.history)-1), m.historyOffset-step))
 			return m, nil
 		}
-		if m.prompting() || m.viewingDiff || m.pickingAgent || m.pickingTemplate {
+		if m.prompting() || m.viewingDiff || m.viewingExplanation || m.pickingAgent || m.pickingTemplate {
 			return m, nil
 		}
 		if m.filesScroll(mouse.X, mouse.Y, step) {
@@ -509,7 +518,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The right button is what people try when they want to know what a
 		// thing can do, and it costs them nothing to find out.
-		if message.Mouse().Button == tea.MouseRight && !m.prompting() && !m.viewingDiff && !m.pickingAgent && !m.pickingTemplate && !m.viewingHistory {
+		if message.Mouse().Button == tea.MouseRight && !m.prompting() && !m.viewingDiff && !m.viewingExplanation && !m.pickingAgent && !m.pickingTemplate && !m.viewingHistory {
 			if m.openMenu(message.Mouse()) {
 				return m, nil
 			}
@@ -534,7 +543,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.fileName += strings.ReplaceAll(message.Content, "\n", "")
 			return m, nil
 		}
-		if m.settingsOpen || m.filesFocused || m.pickingTemplate {
+		if m.settingsOpen || m.filesFocused || m.pickingTemplate || m.viewingExplanation {
 			return m, nil
 		}
 		if m.embedded != nil && !m.sidebarFocused && !m.viewingDiff && !m.pickingAgent && !m.viewingHistory {
@@ -552,6 +561,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.pickingTemplate {
 			return m.updateTemplatePicker(message)
+		}
+		if m.viewingExplanation {
+			switch message.String() {
+			case "esc", "q":
+				m.viewingExplanation = false
+			}
+			return m, nil
 		}
 		if message.String() == "f6" {
 			cmd, _ := m.paneAction(m.keys.key(ActionNextPane))
@@ -711,6 +727,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.opening = true
 				return m, cmd
 			}
+		case m.keys.is(key, ActionExplain):
+			if m.focus == focusAgents {
+				return m, m.loadExplanation()
+			}
+			return m, nil
 		case m.keys.is(key, ActionRefresh):
 			m.loading = true
 			return m, m.loadSnapshot()
@@ -997,6 +1018,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.diff = message.diff
 			m.viewingDiff = true
 		}
+	case explainMsg:
+if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
+		m.explainErr = message.err
+		if message.err == nil {
+			m.explanation = message.explanation
+		}
 	case templatesMsg:
 		if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, nil
@@ -1076,7 +1105,7 @@ func (m Model) View() tea.View {
 	// Focus reporting is what lets a notification stay quiet while the user is
 	// already looking at the pane it would be about.
 	view.ReportFocus = true
-	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused && !m.pickingAgent && !m.pickingTemplate && !m.viewingDiff && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
+	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused && !m.pickingAgent && !m.pickingTemplate && !m.viewingDiff && !m.viewingExplanation && !m.viewingHistory && !m.prompting() && m.width >= 50 && m.height >= 16 {
 		x, y, visible := m.embedded.emulator.Cursor()
 		if visible {
 			for _, r := range m.paneRects() {

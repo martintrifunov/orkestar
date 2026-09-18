@@ -136,6 +136,7 @@ viewer mirrors the sidebar on the right.
 | `f` | Show or hide the file viewer |
 | `u` | Resume an inactive agent |
 | `i` | Interrupt an agent's current turn |
+| `E` | Explain why an agent is in its state |
 | `X` | Stop what is selected, or clear it once finished |
 | `y` / `x` | Allow or deny a pending permission request |
 | `r` | Refresh |

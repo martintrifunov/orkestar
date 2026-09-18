@@ -34,6 +34,11 @@ also closes any pane still attached to it.
 `i` interrupts an agent's current turn without ending the session, the same
 thing Ctrl+C does when typed into its terminal.
 
+`E` explains why Orkestar believes what the row says: whether the process is
+live, whether a resume is possible, where the state signal comes from, what
+the daemon is waiting on, and any pending permission. It is the same account
+`orkestar agent explain` prints, shown over the content area.
+
 A session that belongs to an agent cannot be removed on its own; remove the
 agent and its terminal goes too. Sessions restored after a daemon restart are
 marked interrupted and can be cleared the same way. The command line has the

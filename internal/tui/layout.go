@@ -49,12 +49,15 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.pickingTemplate {
 		content = m.renderTemplatePicker(columns)
 	}
+	if m.viewingExplanation {
+		content = m.renderExplanation(columns)
+	}
 	paneStyle := m.theme.panel
 	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused {
 		paneStyle = paneStyle.BorderForeground(m.theme.accentColor)
 	}
 	pane := paneStyle.Width(columns + 4).Height(rows + 2).Render(fitPane(content, columns, rows))
-	if m.embedded != nil && !m.pickingAgent && !m.pickingTemplate && !m.viewingDiff && !m.viewingHistory && !m.prompting() {
+	if m.embedded != nil && !m.pickingAgent && !m.pickingTemplate && !m.viewingDiff && !m.viewingExplanation && !m.viewingHistory && !m.prompting() {
 		pane = m.renderPanes()
 	}
 	title := "  persistent agent runtime"
