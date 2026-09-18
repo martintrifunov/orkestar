@@ -335,13 +335,20 @@ sshd).
 
 - [x] Swap and move panes across groups; a portable layout export and apply.
       Swap landed 2026-09-16 (`Ctrl+b p` exchanges the focused pane with the
-      next, keeping split shape and ratios); moving across groups and a
-      portable export/apply remain.
+      next, keeping split shape and ratios). Move landed 2026-09-18: `Ctrl+b m`
+      then an arrow re-parents the focused pane beside its nearest neighbour
+      in that direction, which changes the tree shape rather than exchanging
+      contents. Portable layouts landed the same day: `Ctrl+b l` saves named
+      layouts (structure plus each pane's label, command and directory),
+      applies them by reusing running terminals or starting the saved command,
+      and deletes them.
 - [x] Richer configuration: terminal window title, sidebar row layouts and
       tokens, and themes. The window title names the focused pane, and a theme
       is chosen in `tui.json` (`"theme"`) or cycled with `t` in settings
-      (palettes: `orkestar` dark default, `light`). Sidebar row layouts and
-      tokens remain.
+      (palettes: `orkestar` dark default, `light`). Sidebar rows landed
+      2026-09-18: `tui.json` `"sidebar"` overrides the task, agent and session
+      row text with `{token}` templates, and unknown tokens are reported at
+      startup.
 - [ ] Inline images (already listed under M7) once a pane can hold graphics,
       since screenshots and diffs need them as much as engines do.
 

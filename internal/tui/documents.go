@@ -35,6 +35,9 @@ type editorSettings struct {
 	// Theme names a built-in palette. An unknown name falls back to the
 	// default rather than leaving the interface unstyled.
 	Theme string `json:"theme,omitempty"`
+	// Sidebar overrides one row per section with a {token} template.
+	// Anything absent keeps the built-in row.
+	Sidebar sidebarTemplates `json:"sidebar,omitempty"`
 }
 
 func (s editorSettings) syntaxEnabled() bool { return s.Syntax == nil || *s.Syntax }

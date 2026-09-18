@@ -61,7 +61,7 @@ func (m Model) renderTasks() string {
 		return strings.Join(append(lines, m.theme.dim.Render("No tasks yet."), m.theme.dim.Render("Press c to create one.")), "\n")
 	}
 	for index, task := range m.snapshot.Tasks {
-		line := fmt.Sprintf("%-11s  %s", task.Status, task.Title)
+		line := m.taskRow(task)
 		selected := m.focus == focusTasks && index == m.taskSelected
 		if selected {
 			line = m.theme.selected.Render(" " + line + " ")

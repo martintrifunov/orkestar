@@ -598,9 +598,22 @@ For another terminal editor:
   "editor": "custom",
   "command": ["nvim", "-c", "set mouse=a"],
   "max_panes": 16,
-  "syntax": true
+  "syntax": true,
+  "sidebar": {
+    "task": "{status} {title}",
+    "agent": "{adapter} {state} on {task} [{machine}]",
+    "session": "{state} {command}"
+  }
 }
 ```
 
 The selected file path is appended as one argument. Commands execute directly,
 without shell interpolation. Missing editor executables produce a visible error.
+
+`sidebar` rewrites one primary row per section with `{token}` placeholders;
+anything absent keeps the built-in row. Tasks have `status`, `title`, `id`,
+`branch`, `worktree`, `assignee`, `depends` and `review`; agents have
+`adapter`, `state`, `machine`, `task`, `id`, `attention` and `terminal`;
+sessions have `state`, `command`, `id` and `directory`. A token with no value
+renders empty, and a token that does not exist is reported when the interface
+starts rather than rendering as a blank column.

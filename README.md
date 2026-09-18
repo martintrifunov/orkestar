@@ -240,9 +240,20 @@ at `ORKESTAR_TUI_CONFIG`. The settings panel (`Ctrl+b`, comma) shows the path.
   "editor": "custom",
   "command": ["nvim", "-c", "set mouse=a"],
   "max_panes": 16,
-  "syntax": true
+  "syntax": true,
+  "sidebar": {
+    "task": "{status} {title}",
+    "agent": "{adapter} {state} on {task} [{machine}]",
+    "session": "{state} {command}"
+  }
 }
 ```
+
+Sidebar rows are templates with `{token}` placeholders. Tasks have
+`status`, `title`, `id`, `branch`, `worktree`, `assignee`, `depends` and
+`review`; agents have `adapter`, `state`, `machine`, `task`, `id`, `attention`
+and `terminal`; sessions have `state`, `command`, `id` and `directory`. An
+unknown token is reported when the interface starts.
 
 `ORKESTAR_RUNTIME_DIR` relocates the daemon socket and database.
 

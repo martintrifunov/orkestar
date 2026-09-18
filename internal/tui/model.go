@@ -254,6 +254,14 @@ func New(client *ipc.Client, directory string) Model {
 		// visible or the user only finds out by pressing the key.
 		notice = "Key bindings: " + strings.Join(complaints, "; ")
 	}
+	if sidebarProblems := sidebarComplaints(settings.Sidebar); len(sidebarProblems) > 0 {
+		// The same rule for row templates: a token that does nothing has to
+		// be visible, or it renders as a silently empty column.
+		if notice != "" {
+			notice += " "
+		}
+		notice += "Sidebar rows: " + strings.Join(sidebarProblems, "; ")
+	}
 	return Model{
 		settings:  settings,
 		keys:      keys,
@@ -1339,14 +1347,9 @@ func (m Model) renderAgents() string {
 	if len(agents) == 0 {
 		lines = append(lines, m.theme.dim.Render("No agent sessions."))
 	}
-	multiple := len(m.machines) > 1
 	for index, scoped := range agents {
 		agent := scoped.Agent
-		line := fmt.Sprintf("%s  %s", agent.Adapter, agent.State)
-		if multiple {
-			// A machine column, so a merged row says where the agent runs.
-			line += "  [" + scoped.MachineLabel + "]"
-		}
+		line := m.agentRow(scoped)
 		switch {
 		case m.focus == focusAgents && index == m.agentSelected:
 			// A remote row is selectable and drivable in place; the machine
@@ -1458,8 +1461,7 @@ func (m Model) renderTerminals() string {
 		return strings.Join(lines, "\n")
 	}
 	for index, terminal := range m.snapshot.Terminals {
-		command := strings.Join(terminal.Command, " ")
-		line := fmt.Sprintf("%-9s  %s", terminal.State, command)
+		line := m.sessionRow(terminal)
 		if index == m.selected {
 			line = m.theme.selected.Render(" " + line + " ")
 		} else {
