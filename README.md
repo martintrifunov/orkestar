@@ -196,8 +196,8 @@ Select the Tasks section with `Tab`, then `c` creates one.
 A task carries a status, optional dependencies, an assignee and its own Git
 worktree, so an agent can change files without disturbing your checkout. Tasks
 are created with automatic review on: the daemon runs a reviewer agent and
-requires approval before the task can close. Press `Tab` in the create prompt to
-opt out.
+requires approval before the task can close. Press `Ctrl+R` in the create prompt
+to opt out, and `Ctrl+D` to pick the tasks this one waits on.
 
 ## Editing and review
 
