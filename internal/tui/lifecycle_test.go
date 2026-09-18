@@ -80,7 +80,8 @@ func TestRemovingARunningSessionIsRefusedByTheDaemon(t *testing.T) {
 	m = settle(t, m, m.loadSnapshot())
 
 	// Ask for removal directly, the way a second client racing the UI would.
-	cmd := m.lifecycleCall("terminal.remove", map[string]any{"terminal_id": started.ID}, "gone", started.ID)
+	target := lifecycleTarget{kind: "terminal", id: started.ID, terminalID: started.ID, machineID: "local", client: client}
+	cmd := m.lifecycleCall(target, "terminal.remove", map[string]any{"terminal_id": started.ID}, "gone", started.ID)
 	msg, ok := cmd().(lifecycleMsg)
 	if !ok || msg.err == nil {
 		t.Fatal("the daemon removed a running session")
@@ -100,7 +101,7 @@ func TestRemovingARunningSessionIsRefusedByTheDaemon(t *testing.T) {
 	if state := m.snapshot.Terminals[0].State; state != "running" {
 		t.Fatalf("the refused removal disturbed the session: %s", state)
 	}
-	cmd = m.lifecycleCall("terminal.stop", map[string]any{"terminal_id": started.ID}, "stopped", "")
+	cmd = m.lifecycleCall(target, "terminal.stop", map[string]any{"terminal_id": started.ID}, "stopped", "")
 	if msg := cmd().(lifecycleMsg); msg.err != nil {
 		t.Fatalf("stop failed: %v", msg.err)
 	}

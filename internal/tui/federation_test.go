@@ -70,7 +70,7 @@ func TestRemotesMsgClampsTheAgentSelection(t *testing.T) {
 	if _, ok := m.lifecycleTarget(); ok {
 		t.Fatal("there is no agent to target")
 	}
-	_ = m.resumeSelected()
+	_, _ = m.resumeSelected()
 	_ = m.resolveSelectedPermission("allow")
 }
 

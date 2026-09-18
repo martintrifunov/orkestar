@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/martintrifunov/orkestar/internal/ipc"
 )
 
 // lifecycleMsg reports a stop, removal or interrupt. removedTerminal lets the
@@ -16,12 +18,20 @@ type lifecycleMsg struct {
 	// machineID is the machine the call ran against, so a reply that
 	// lands after a switch is not applied to the new machine's board.
 	machineID string
+	// foreign marks an action taken on another machine's agent row; its
+	// result refreshes that machine's polled view instead of the local board.
+	foreign bool
 }
 
 // selectedLifecycleTarget describes what the sidebar is pointing at, so one
-// key can act on either a session or an agent.
+// key can act on either a session or an agent. client and machineID say where
+// the call goes: an agent row from another machine is driven on its own
+// daemon.
 type lifecycleTarget struct {
 	kind, id, terminalID, label, state string
+	machineID                          string
+	client                             *ipc.Client
+	foreign                            bool
 }
 
 func (m Model) lifecycleTarget() (lifecycleTarget, bool) {
@@ -33,13 +43,25 @@ func (m Model) lifecycleTarget() (lifecycleTarget, bool) {
 			if len(t.Command) > 0 {
 				label = t.Command[0]
 			}
-			return lifecycleTarget{"terminal", t.ID, t.ID, label, t.State}, true
+			return lifecycleTarget{
+				kind: "terminal", id: t.ID, terminalID: t.ID, label: label, state: t.State,
+				machineID: m.currentMachine().ID, client: m.client,
+			}, true
 		}
 	case focusAgents:
-		if m.agentSelected >= 0 && m.agentSelected < len(m.snapshot.Agents) {
-			a := m.snapshot.Agents[m.agentSelected]
-			return lifecycleTarget{"agent", a.ID, a.TerminalID, a.Adapter, a.State}, true
+		scoped, ok := m.scopedAgentAt(m.agentSelected)
+		if !ok {
+			return lifecycleTarget{}, false
 		}
+		machine, ok := m.agentMachine(scoped)
+		if !ok {
+			return lifecycleTarget{}, false
+		}
+		a := scoped.Agent
+		return lifecycleTarget{
+			kind: "agent", id: a.ID, terminalID: a.TerminalID, label: a.Adapter, state: a.State,
+			machineID: machine.ID, client: machine.Client, foreign: scoped.Remote,
+		}, true
 	}
 	return lifecycleTarget{}, false
 }
@@ -75,7 +97,7 @@ func (m *Model) stopOrRemoveSelected() tea.Cmd {
 		if target.kind == "agent" {
 			method, params = "agent.stop", map[string]any{"agent_id": target.id}
 		}
-		return m.lifecycleCall(method, params, "Stopped "+target.label, "")
+		return m.lifecycleCall(target, method, params, "Stopped "+target.label, "")
 	}
 	m.pendingStop = ""
 	method := "terminal.remove"
@@ -83,7 +105,12 @@ func (m *Model) stopOrRemoveSelected() tea.Cmd {
 	if target.kind == "agent" {
 		method, params = "agent.remove", map[string]any{"agent_id": target.id}
 	}
-	return m.lifecycleCall(method, params, "Removed "+target.label, target.terminalID)
+	removedTerminal := target.terminalID
+	if target.foreign {
+		// A foreign pane is on that machine's own layout, not this client's.
+		removedTerminal = ""
+	}
+	return m.lifecycleCall(target, method, params, "Removed "+target.label, removedTerminal)
 }
 
 // interruptSelected stops an agent's current turn without ending the session,
@@ -97,20 +124,19 @@ func (m *Model) interruptSelected() tea.Cmd {
 		m.notice = target.label + " is not running."
 		return nil
 	}
-	return m.lifecycleCall("agent.interrupt", map[string]any{"agent_id": target.id}, "Interrupted "+target.label, "")
+	return m.lifecycleCall(target, "agent.interrupt", map[string]any{"agent_id": target.id}, "Interrupted "+target.label, "")
 }
 
-func (m Model) lifecycleCall(method string, params map[string]any, notice, removedTerminal string) tea.Cmd {
-	client := m.client
-	machineID := m.currentMachine().ID
+func (m Model) lifecycleCall(target lifecycleTarget, method string, params map[string]any, notice, removedTerminal string) tea.Cmd {
+	client, machineID, foreign := target.client, target.machineID, target.foreign
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		var result map[string]any
 		if err := client.Call(ctx, method, params, &result); err != nil {
-			return lifecycleMsg{err: err, machineID: machineID}
+			return lifecycleMsg{err: err, machineID: machineID, foreign: foreign}
 		}
-		return lifecycleMsg{notice: notice, removedTerminal: removedTerminal, machineID: machineID}
+		return lifecycleMsg{notice: notice, removedTerminal: removedTerminal, machineID: machineID, foreign: foreign}
 	}
 }
 

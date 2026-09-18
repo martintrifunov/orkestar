@@ -423,19 +423,36 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-func (m Model) resumeSelected() tea.Cmd {
-	if m.opening || m.focus != focusAgents || m.agentSelected < 0 || m.agentSelected >= len(m.snapshot.Agents) {
-		return nil
+
+// resumeSelected resumes the highlighted agent on whichever machine it lives.
+// It reports whether the resume is foreign, so the caller knows there is no
+// pane to open here and nothing to wait for locally.
+func (m Model) resumeSelected() (tea.Cmd, bool) {
+	if m.opening {
+		return nil, false
 	}
-	id := m.snapshot.Agents[m.agentSelected].ID
+	scoped, ok := m.scopedAgentAt(m.agentSelected)
+	if !ok {
+		return nil, false
+	}
+	machine, ok := m.agentMachine(scoped)
+	if !ok {
+		return nil, false
+	}
+	foreign := scoped.Remote
+	if !foreign && !m.roomForPane() {
+		return nil, false
+	}
+	client, machineID, id := machine.Client, machine.ID, scoped.Agent.ID
 	return func() tea.Msg {
 		var result agentLaunchedMsg
-		result.machineID = m.currentMachine().ID
+		result.machineID = machineID
+		result.foreign = foreign
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		result.err = m.client.Call(ctx, "agent.resume", map[string]string{"agent_id": id}, &result.agent)
+		result.err = client.Call(ctx, "agent.resume", map[string]string{"agent_id": id}, &result.agent)
 		return result
-	}
+	}, foreign
 }
 func (m Model) claimPane() {
 	if m.embedded != nil && m.embedded.stream != nil {

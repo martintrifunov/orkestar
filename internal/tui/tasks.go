@@ -241,11 +241,16 @@ func (m *Model) assignSelectedTask() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if m.agentSelected < 0 || m.agentSelected >= len(m.snapshot.Agents) {
+	scoped, ok := m.scopedAgentAt(m.agentSelected)
+	if !ok {
 		m.notice = "No agent to assign. Launch one with a, then select it in Agents."
 		return nil
 	}
-	agent := m.snapshot.Agents[m.agentSelected]
+	if scoped.Remote {
+		m.notice = "Assign a task to a local agent; select its machine to assign remotely."
+		return nil
+	}
+	agent := scoped.Agent
 	return m.taskCall("task.assign", map[string]any{
 		"task_id": task.ID, "agent_id": agent.ID,
 	}, "Assigned to "+agent.Adapter, 15*time.Second)

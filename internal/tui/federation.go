@@ -46,6 +46,37 @@ func (m Model) allAgents() []scopedAgent {
 	return agents
 }
 
+// scopedAgentAt is the agent the merged Agents list has selected. The
+// selection indexes that list, not the local snapshot: a remote row is
+// actionable from here now, and its client follows from its machine.
+func (m Model) scopedAgentAt(index int) (scopedAgent, bool) {
+	agents := m.allAgents()
+	if index < 0 || index >= len(agents) {
+		return scopedAgent{}, false
+	}
+	return agents[index], true
+}
+
+// machineByID finds a watched machine, local or saved.
+func (m Model) machineByID(id string) (Machine, bool) {
+	for _, candidate := range m.machines {
+		if candidate.ID == id {
+			return candidate, true
+		}
+	}
+	return Machine{}, false
+}
+
+// agentMachine is the machine an agent row belongs to. A local row always
+// resolves to the current machine, even in a model assembled without the
+// machine list, where there would be nothing to look up by ID.
+func (m Model) agentMachine(scoped scopedAgent) (Machine, bool) {
+	if !scoped.Remote {
+		return m.currentMachine(), true
+	}
+	return m.machineByID(scoped.MachineID)
+}
+
 // taskTitleOfScoped names the task a scoped agent works, reading the remote
 // machine's own board when the agent is remote.
 func (m Model) taskTitleOfScoped(scoped scopedAgent) string {

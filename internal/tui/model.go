@@ -43,6 +43,8 @@ type agentLaunchedMsg struct {
 	agent     daemon.Agent
 	err       error
 	machineID string
+	// foreign marks a resume on another machine's agent row.
+	foreign bool
 }
 
 type tickMsg time.Time
@@ -141,11 +143,14 @@ type Model struct {
 	diff        daemon.TaskDiff
 	diffErr     error
 
-// viewingExplanation is the agent.explain overlay: the daemon's account
-// of why an agent's state is what the sidebar says it is.
+	// viewingExplanation is the agent.explain overlay: the daemon's account
+	// of why an agent's state is what the sidebar says it is. The machine and
+	// task are captured when it opens so the answer stays tied to the row.
 	viewingExplanation bool
 	explanation        daemon.AgentExplanation
 	explainErr         error
+	explainMachine     string
+	explainTaskTitle   string
 
 	// pickingAgent shows the "choose an agent to launch" overlay, built
 	// dynamically from snapshot.Adapters rather than fixed keybindings, so
@@ -347,6 +352,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.viewingExplanation = false
 	m.explanation = daemon.AgentExplanation{}
 	m.explainErr = nil
+	m.explainMachine, m.explainTaskTitle = "", ""
 	// The other machine has its own workspace and its own templates; a list
 	// read here would create tasks there if it were kept.
 	m.pickingTemplate = false
@@ -434,6 +440,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case highlightedMsg:
 		return m, message.editor.applyHighlight(message)
 	case lifecycleMsg:
+		if message.foreign {
+			if _, ok := m.machineByID(message.machineID); !ok {
+				// The machine was removed while the call was in flight.
+				return m, nil
+			}
+			m.pendingStop = ""
+			m.err = message.err
+			if message.err == nil {
+				m.notice = message.notice
+			}
+			return m, m.pollRemotes()
+		}
 		if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, nil
 		}
@@ -727,7 +745,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.taskSelected++
 				}
 			case focusAgents:
-				if m.agentSelected+1 < len(m.snapshot.Agents) {
+				if m.agentSelected+1 < len(m.allAgents()) {
 					m.agentSelected++
 				}
 			default:
@@ -752,13 +770,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			cmd, _ := m.paneAction(m.keys.key(ActionEditFile))
 			return m, cmd
 		case m.keys.is(key, ActionResume):
-			if !m.roomForPane() {
-				return m, nil
-			}
-			if cmd := m.resumeSelected(); cmd != nil {
-				m.opening = true
+			if cmd, foreign := m.resumeSelected(); cmd != nil {
+				if !foreign {
+					m.opening = true
+				}
 				return m, cmd
 			}
+			return m, nil
 		case m.keys.is(key, ActionExplain):
 			if m.focus == focusAgents {
 				return m, m.loadExplanation()
@@ -793,6 +811,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			// its panes when more than one is open.
 			if m.focus == focusTasks {
 				return m, m.openSelectedTask()
+			}
+			// An agent on another machine opens by moving to that machine,
+			// so the pane attaches through the right daemon.
+			if m.focus == focusAgents {
+				if scoped, ok := m.scopedAgentAt(m.agentSelected); ok && scoped.Remote {
+					return m, m.openRemoteAgent(scoped)
+				}
 			}
 			id := m.selectedTerminalID()
 			if id == "" {
@@ -902,8 +927,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.taskSelected >= len(m.snapshot.Tasks) && m.taskSelected > 0 {
 				m.taskSelected = max(0, len(m.snapshot.Tasks)-1)
 			}
-			if m.agentSelected >= len(m.snapshot.Agents) && m.agentSelected > 0 {
-				m.agentSelected = max(0, len(m.snapshot.Agents)-1)
+			if agents := m.allAgents(); m.agentSelected >= len(agents) && m.agentSelected > 0 {
+				m.agentSelected = max(0, len(agents)-1)
 			}
 			// The saved layout is restored once, now that the snapshot says
 			// which of its terminals are still running.
@@ -1035,8 +1060,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.remote = message.views
-		if m.agentSelected >= len(m.snapshot.Agents) {
-			m.agentSelected = max(0, len(m.snapshot.Agents)-1)
+		if agents := m.allAgents(); m.agentSelected >= len(agents) {
+			m.agentSelected = max(0, len(agents)-1)
 		}
 		return m, nil
 	case diffMsg:
@@ -1051,7 +1076,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewingDiff = true
 		}
 	case explainMsg:
-if message.machineID != "" && message.machineID != m.currentMachine().ID {
+		if message.machineID != "" && message.machineID != m.explainMachine {
 			return m, nil
 		}
 		m.explainErr = message.err
@@ -1164,6 +1189,16 @@ if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, m.loadSnapshot()
 		}
 	case agentLaunchedMsg:
+		if message.foreign {
+			if _, ok := m.machineByID(message.machineID); !ok {
+				return m, nil
+			}
+			m.err = message.err
+			if message.err == nil {
+				m.notice = "Resumed " + message.agent.Adapter
+			}
+			return m, m.pollRemotes()
+		}
 		if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, nil
 		}
@@ -1260,11 +1295,11 @@ func (m Model) renderAgents() string {
 			line += "  [" + scoped.MachineLabel + "]"
 		}
 		switch {
-		case !scoped.Remote && m.focus == focusAgents && index == m.agentSelected:
+		case m.focus == focusAgents && index == m.agentSelected:
+			// A remote row is selectable and drivable in place; the machine
+			// column says where the action goes.
 			line = m.theme.selected.Render(" " + line + " ")
 		case scoped.Remote:
-			// Another machine's agent is shown, not driven from here: select
-			// that machine (ctrl+b g) to act on it.
 			line = "  " + m.theme.dim.Render(line)
 		default:
 			line = "  " + line
@@ -1488,11 +1523,17 @@ func (m Model) launchPickedAgent() tea.Cmd {
 	}
 }
 
-func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
-	if m.focus != focusAgents || m.agentSelected < 0 || len(m.snapshot.Agents) == 0 || m.agentSelected >= len(m.snapshot.Agents) {
+func (m *Model) resolveSelectedPermission(decision string) tea.Cmd {
+	scoped, ok := m.scopedAgentAt(m.agentSelected)
+	if m.focus != focusAgents || !ok {
 		return nil
 	}
-	agentID := m.snapshot.Agents[m.agentSelected].ID
+	if scoped.Remote {
+		// Permission requests are answered on the machine that raised them.
+		m.notice = "Switch to that machine to answer its permission requests."
+		return nil
+	}
+	agentID := scoped.Agent.ID
 	var permissionID string
 	for _, permission := range m.snapshot.Permissions {
 		if permission.AgentID == agentID {
@@ -1519,8 +1560,8 @@ func (m Model) resolveSelectedPermission(decision string) tea.Cmd {
 func (m Model) selectedTerminalID() string {
 	switch m.focus {
 	case focusAgents:
-		if m.agentSelected >= 0 && m.agentSelected < len(m.snapshot.Agents) {
-			return m.snapshot.Agents[m.agentSelected].TerminalID
+		if scoped, ok := m.scopedAgentAt(m.agentSelected); ok && !scoped.Remote {
+			return scoped.Agent.TerminalID
 		}
 	case focusSessions:
 		if m.selected >= 0 && m.selected < len(m.snapshot.Terminals) {

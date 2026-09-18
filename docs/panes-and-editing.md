@@ -269,6 +269,13 @@ the far side. `e` enables or disables a profile without forgetting it, and
 `~/.config/orkestar/machines.json` the CLI edits, written under the same lock,
 so the TUI and another terminal cannot clobber each other.
 
+An enabled machine joins the session immediately, without a restart. A remote
+agent's row in the merged sidebar is selectable and drivable in place:
+`i` interrupts, `X` stops or clears, `u` resumes, `E` explains, and Enter
+moves to that machine and opens the agent's pane. Anything that needs local
+files — permissions, assignment, opening an editor — still asks you to switch
+to that machine first, because those belong to its daemon.
+
 Machine management is unavailable in a `--remote` session: the profiles
 belong to the machine you are sitting at, not the one you attached to.
 

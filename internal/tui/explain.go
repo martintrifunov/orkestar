@@ -20,19 +20,28 @@ type explainMsg struct {
 	machineID   string
 }
 
-// loadExplanation asks the daemon about the highlighted agent. It returns
-// nothing when no agent is selected.
+// loadExplanation asks the highlighted agent's own daemon why it is in the
+// state the sidebar shows. It returns nothing when no agent is selected.
 func (m *Model) loadExplanation() tea.Cmd {
-	index := m.agentSelected
-	if index < 0 || index >= len(m.snapshot.Agents) {
+	scoped, ok := m.scopedAgentAt(m.agentSelected)
+	if !ok {
 		return nil
 	}
-	agentID := m.snapshot.Agents[index].ID
+	machine, ok := m.agentMachine(scoped)
+	if !ok {
+		return nil
+	}
 	m.viewingExplanation = true
 	m.explanation = daemon.AgentExplanation{}
 	m.explainErr = nil
-	client := m.client
-	machineID := m.currentMachine().ID
+	// The reply is accepted only from the machine the overlay was opened for,
+	// so a switch while it is in flight cannot put one machine's answer under
+	// another's name.
+	m.explainMachine = machine.ID
+	m.explainTaskTitle = m.taskTitleOfScoped(scoped)
+	client := machine.Client
+	agentID := scoped.Agent.ID
+	machineID := machine.ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -69,8 +78,8 @@ func (m Model) renderExplanation(width int) string {
 		fmt.Sprintf("  %s · %s · %s", agent.Adapter, agent.Mode, agent.State),
 		fmt.Sprintf("  live process: %s   resumable: %s", yesNo(m.explanation.Live), yesNo(m.explanation.Resumable)),
 	}
-	if title := m.taskTitleOf(agent.TaskID); title != "" {
-		lines = append(lines, "  on "+title)
+	if m.explainTaskTitle != "" {
+		lines = append(lines, "  on "+m.explainTaskTitle)
 	}
 	lines = append(lines, m.theme.accent.Render("Identity"), "  id "+agent.ID)
 	if agent.NativeSessionID != "" {

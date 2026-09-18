@@ -119,12 +119,15 @@ func (m Model) renderSidebar(columns, rows int) string {
 			selected[2]++
 		}
 	}
-	for i, agent := range m.snapshot.Agents {
+	for i, scoped := range m.allAgents() {
 		if i >= m.agentSelected {
 			break
 		}
 		selected[3]++
-		if agent.AttentionReason != "" {
+		if m.taskTitleOfScoped(scoped) != "" {
+			selected[3]++
+		}
+		if scoped.Agent.AttentionReason != "" {
 			selected[3]++
 		}
 	}

@@ -122,11 +122,12 @@ func (m Model) paneRoot() string {
 			}
 		}
 	}
-	if m.focus == focusAgents && m.agentSelected >= 0 && m.agentSelected < len(m.snapshot.Agents) {
-		a := m.snapshot.Agents[m.agentSelected]
-		for _, w := range m.snapshot.Workspaces {
-			if w.ID == a.WorkspaceID {
-				return w.Directory
+	if m.focus == focusAgents {
+		if scoped, ok := m.scopedAgentAt(m.agentSelected); ok && !scoped.Remote {
+			for _, w := range m.snapshot.Workspaces {
+				if w.ID == scoped.Agent.WorkspaceID {
+					return w.Directory
+				}
 			}
 		}
 	}
