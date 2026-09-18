@@ -60,6 +60,7 @@ const (
 	ActionMovePane    Action = "move-pane"
 	ActionNextMachine Action = "next-machine"
 	ActionZoom        Action = "zoom"
+	ActionLayouts     Action = "layouts"
 	ActionClosePane   Action = "close-pane"
 	ActionScrollback  Action = "scrollback"
 	ActionEditFile    Action = "edit-file"
@@ -102,6 +103,7 @@ func defaultBindings() map[Action]string {
 		ActionMovePane:     "m",
 		ActionNextMachine:  "g",
 		ActionZoom:         "z",
+		ActionLayouts:      "l",
 		ActionClosePane:    "q",
 		ActionScrollback:   "[",
 		ActionEditFile:     "e",
@@ -162,6 +164,7 @@ var placements = map[Action]placement{
 	ActionMovePane:    prefixed,
 	ActionNextMachine: prefixed,
 	ActionZoom:        prefixed,
+	ActionLayouts:     prefixed,
 	ActionClosePane:   prefixed,
 	ActionScrollback:  prefixed,
 	ActionEditFile:    prefixed,
@@ -297,7 +300,7 @@ func (m Model) helpLine() string {
 	case m.prefix:
 		return "Prefix: " + k(ActionSplitRight) + "/" + k(ActionSplitDown) + " split · " +
 			k(ActionNextPane) + " next · " + k(ActionSwapPane) + " swap · " + k(ActionMovePane) + " move · " +
-			k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · arrows resize (repeat) · " +
+			k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · " + k(ActionLayouts) + " layout · arrows resize (repeat) · " +
 			k(ActionDiff) + " diff · " + k(ActionEditFile) + " edit · " + k(ActionRenamePane) +
 			" rename · " + k(ActionFiles) + " files · esc done"
 	case len(m.paneRects()) < len(m.visiblePanes()):
@@ -324,7 +327,7 @@ func (m Model) helpLine() string {
 	case m.embedded != nil:
 		return "drag to copy · " + k(ActionPrefix) + " then: " + k(ActionSplitRight) + "/" +
 			k(ActionSplitDown) + " split · " + k(ActionNextPane) + " next · " + k(ActionSwapPane) +
-			" swap · " + k(ActionMovePane) + " move · " + k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · arrows resize · " + k(ActionDiff) + " diff · " +
+			" swap · " + k(ActionMovePane) + " move · " + k(ActionNextMachine) + " machine · " + k(ActionZoom) + " zoom · " + k(ActionLayouts) + " layout · arrows resize · " + k(ActionDiff) + " diff · " +
 			k(ActionEditFile) + " edit · " + k(ActionClosePane) + " close"
 	}
 	return k(ActionNewAgent) + " agent  " + k(ActionNewShell) + " shell  " + k(ActionOpen) +

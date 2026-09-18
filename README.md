@@ -157,6 +157,7 @@ prefix, so ordinary letters still reach the agent you are typing to.
 | `z` | Zoom the focused pane to fill the area, and back |
 | `p` | Swap the focused pane with the next |
 | `m` | Move the focused pane beside a neighbour: then an arrow |
+| `l` | Portable layouts: save, apply, delete |
 | arrows | Move the enclosing split's divider, repeatable |
 | `d` / `e` | Review changes / open a file |
 | `f` | Show or hide the file viewer |

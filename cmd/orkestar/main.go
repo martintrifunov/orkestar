@@ -67,7 +67,7 @@ func run(args []string) error {
 		if len(args) == 3 {
 			remoteDirectory = args[2]
 		}
-		return runRemoteTUI(args[1], remoteDirectory)
+		return runRemoteTUI(paths, args[1], remoteDirectory)
 	}
 
 	if len(args) == 0 {
@@ -145,6 +145,7 @@ func runTUI(paths runtimepath.Paths) error {
 	return tui.Run(machines, directory, tui.MachineOptions{
 		CatalogPath: catalogPath,
 		LayoutRoot:  paths.Directory,
+		LayoutsDir:  filepath.Join(paths.Directory, "layouts"),
 	})
 }
 
@@ -195,7 +196,7 @@ func tuiMachines(paths runtimepath.Paths) ([]tui.Machine, string, error) {
 // here, which is the point: notifications, the clipboard and the terminal all
 // belong to the machine the person is sitting at, while the agents keep
 // running on the one that has the work.
-func runRemoteTUI(host, directory string) error {
+func runRemoteTUI(paths runtimepath.Paths, host, directory string) error {
 	remote, err := ipc.ParseRemote(host)
 	if err != nil {
 		return err
@@ -241,7 +242,11 @@ func runRemoteTUI(host, directory string) error {
 	// A remote session keeps its own layout: this client would attach to
 	// terminals on another machine, and a remembered layout from a local one
 	// would point at IDs that mean nothing there.
-	return tui.Run([]tui.Machine{{ID: "remote", Label: remote.Host, Client: client}}, directory, tui.MachineOptions{})
+	return tui.Run([]tui.Machine{{ID: "remote", Label: remote.Host, Client: client}}, directory, tui.MachineOptions{
+		// Portable layouts are the client's own files, so a remote session
+		// still reads and writes them here.
+		LayoutsDir: filepath.Join(paths.Directory, "layouts"),
+	})
 }
 
 // parseTerminalSend splits `send <terminal-id> [--enter] [--] <text>`: words

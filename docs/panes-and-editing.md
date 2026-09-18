@@ -13,6 +13,7 @@ continues to type into that agent.
 | Zoom the focused pane, and back | Ctrl+b, z |
 | Swap the focused pane with the next | Ctrl+b, p |
 | Move the focused pane beside a neighbour | Ctrl+b, m then an arrow |
+| Save, apply or delete a portable layout | Ctrl+b, l |
 | Move the enclosing split's divider | Ctrl+b, arrow keys |
 | Open another shell | Ctrl+b, n |
 | Open agent picker | Ctrl+b, a |
@@ -467,6 +468,23 @@ the pane out of its own split, which collapses, and gives the nearest pane in
 that direction a new split with the moved pane on the side it travelled
 toward. An arrow with nothing in that direction says so. Any key other than
 an arrow or `Esc` cancels an armed move.
+
+## Portable layouts
+
+The per-machine `layout.json` is implicit and local: it points at terminal IDs
+that mean nothing on another daemon. `Ctrl+b l` keeps named layouts that
+survive either. Saving records the split structure with what each pane was —
+its label, command and directory — not just an ID, and applying one reuses a
+running terminal when it can (same ID first, then the same command) and starts
+the saved command when it cannot. A pane whose command is empty comes back as
+a shell.
+
+The overlay lists what `<runtime>/layouts` holds: `Enter` applies the selected
+layout, `s` saves the current arrangement under a typed name (saving over a
+name replaces it), `x` deletes it, and `Esc` closes. Applying replaces the
+panes on screen, so a dirty editor refuses it the same way closing a pane
+does. These files live on the machine the interface runs on, even in a
+`--remote` session: they describe your screen, not the remote daemon.
 
 The default limit is 16 open panes; set `"max_panes"` in `tui.json` (1 to 64).
 Above the limit, opening or splitting is refused with a notice. Nothing is

@@ -188,6 +188,16 @@ type Model struct {
 	// --remote session.
 	machineCatalogPath string
 	machineLayoutRoot  string
+	// layoutsOpen is the portable-layout overlay, with namingLayout its
+	// save-as name prompt. layoutsDir is the client-side directory they live
+	// in, which is local even when the interface is attached elsewhere.
+	layoutsOpen  bool
+	layoutAt     int
+	layouts      []layoutSummary
+	layoutsErr   error
+	namingLayout bool
+	layoutName   string
+	layoutsDir   string
 	// snapshotLoaded guards the first comparison: everything in the opening
 	// snapshot would otherwise look like it had just happened.
 	snapshotLoaded bool
@@ -269,6 +279,9 @@ func New(client *ipc.Client, directory string) Model {
 type MachineOptions struct {
 	CatalogPath string
 	LayoutRoot  string
+	// LayoutsDir is where portable layouts live. It is client-side, so a
+	// --remote session still reads and writes its own machine's files.
+	LayoutsDir string
 }
 
 // Run starts the interface over the given machines, the first selected. Each
@@ -286,6 +299,7 @@ func Run(machines []Machine, directory string, options MachineOptions) error {
 	model.layoutPath = machines[0].LayoutPath
 	model.machineCatalogPath = options.CatalogPath
 	model.machineLayoutRoot = options.LayoutRoot
+	model.layoutsDir = options.LayoutsDir
 	model.ctx = ctx
 	program := tea.NewProgram(model)
 	final, err := program.Run()
@@ -365,6 +379,8 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.managingMachines, m.addingMachine = false, false
 	m.savedMachines, m.machinesErr = nil, nil
 	m.machineHost, m.machineLabel, m.machineSession, m.machineField = "", "", "", 0
+	m.layoutsOpen, m.namingLayout = false, false
+	m.layouts, m.layoutsErr, m.layoutName = nil, nil, ""
 	// Interaction state must not cross machines either: a confirm armed
 	// here would otherwise act there with no second press, a busy flag
 	// would wedge the new board until the old reply lands (and is now
@@ -399,7 +415,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 // area.
 func (m Model) prompting() bool {
 	return m.filePrompt || m.settingsOpen || m.taskPrompt || m.renaming != nil ||
-		m.managingMachines || m.addingMachine
+		m.managingMachines || m.addingMachine || m.layoutsOpen
 }
 
 func (m Model) Init() tea.Cmd {
@@ -1139,6 +1155,25 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Machine removed; its panes stay until this session restarts"
 		}
 		m.forgetMachineLayout(message.id)
+	case layoutsListedMsg:
+		m.layouts = message.layouts
+		m.layoutsErr = message.err
+		if m.layoutAt >= len(m.layouts) {
+			m.layoutAt = max(0, len(m.layouts)-1)
+		}
+	case layoutActionMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
+		m.err = message.err
+		if message.err != nil {
+			m.layoutsErr = message.err
+			return m, nil
+		}
+		m.notice = message.notice
+		if m.layoutsOpen {
+			return m, m.loadLayouts()
+		}
 	case machineSetEnabledMsg:
 		m.machinesErr = message.err
 		if message.err != nil {
@@ -1644,6 +1679,8 @@ func (m Model) updateEmbedded(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.movingPane = true
 			m.notice = ""
 			return m, nil
+		case ActionLayouts:
+			return m, m.openLayouts()
 		case ActionNewAgent:
 			m.sidebarFocused = true
 			m.pickingAgent = true

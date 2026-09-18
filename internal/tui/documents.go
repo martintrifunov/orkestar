@@ -302,6 +302,8 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 	case ActionSettings:
 		m.settingsOpen = true
 		return nil, true
+	case ActionLayouts:
+		return m.openLayouts(), true
 	case ActionDiscardEdit:
 		if m.embedded != nil && m.embedded.editor != nil {
 			m.removePane(m.embedded)
@@ -390,6 +392,9 @@ func (m Model) promptView() string {
 	if m.managingMachines || m.addingMachine {
 		return m.machinesView()
 	}
+	if m.layoutsOpen {
+		return m.layoutsView()
+	}
 	if m.renaming != nil {
 		return "Rename pane\n\nName: " + m.renameTo + "▏" +
 			"\n\nEnter renames · an empty name restores the default · Esc cancels"
@@ -435,6 +440,9 @@ func (m Model) promptView() string {
 func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.managingMachines || m.addingMachine {
 		return m.updateMachines(k)
+	}
+	if m.layoutsOpen {
+		return m.updateLayouts(k)
 	}
 	if m.renaming != nil {
 		return m.updateRenamePrompt(k)
