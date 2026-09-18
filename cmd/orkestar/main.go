@@ -606,8 +606,9 @@ func printStatus(paths runtimepath.Paths) error {
 	defer cancel()
 
 	var result struct {
-		Status  string `json:"status"`
-		Version string `json:"version"`
+		Status       string `json:"status"`
+		Version      string `json:"version"`
+		PersistError string `json:"persist_error"`
 	}
 	if err := ipc.NewClient(paths.Socket).Call(ctx, "system.ping", nil, &result); err != nil {
 		return fmt.Errorf("daemon is not available at %s: %w", paths.Socket, err)
@@ -616,6 +617,9 @@ func printStatus(paths runtimepath.Paths) error {
 		result.Version = "unversioned"
 	}
 	fmt.Printf("daemon %s, version %s; client %s (%s)\n", result.Status, result.Version, version, paths.Socket)
+	if result.PersistError != "" {
+		fmt.Printf("warning: metadata is not durable: %s\n", result.PersistError)
+	}
 	return nil
 }
 

@@ -189,9 +189,58 @@ func (s *Server) persist() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.store.Save(ctx, b); err != nil {
-		return fmt.Errorf("save metadata: %w", err)
+		wrapped := fmt.Errorf("save metadata: %w", err)
+		s.recordPersistError(wrapped)
+		log.Printf("metadata save failed; changes are live but not durable yet: %v", wrapped)
+		return wrapped
 	}
+	s.clearPersistError()
 	return nil
+}
+
+func (s *Server) recordPersistError(err error) {
+	message := err.Error()
+	s.persistErr.Store(&message)
+}
+
+func (s *Server) clearPersistError() {
+	s.persistErr.Store(nil)
+}
+
+// lastPersistError is the last save failure, or "" when metadata is durable.
+func (s *Server) lastPersistError() string {
+	if stored := s.persistErr.Load(); stored != nil {
+		return *stored
+	}
+	return ""
+}
+
+// persistRetryInterval is how often a failed save is retried. A mutation is
+// applied in memory before it is written, and rolling every one of them back
+// would be a much larger change; the retry turns the gap between memory and
+// disk into a delay rather than a loss, and system.ping reports it while it
+// lasts.
+const persistRetryInterval = 3 * time.Second
+
+func (s *Server) persistRetryLoop() {
+	ticker := time.NewTicker(persistRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.retryPersistIfNeeded()
+		}
+	}
+}
+
+// retryPersistIfNeeded saves again only after a failure, so the loop is inert
+// while metadata is durable.
+func (s *Server) retryPersistIfNeeded() {
+	if s.lastPersistError() != "" {
+		_ = s.persist()
+	}
 }
 func (s *Server) resumeAgent(ctx context.Context, raw json.RawMessage) (Agent, error) {
 	var p struct {

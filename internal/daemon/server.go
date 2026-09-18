@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
@@ -54,6 +55,11 @@ type Server struct {
 	mutationMu   sync.RWMutex
 	requests     sync.WaitGroup
 	connections  map[net.Conn]struct{}
+	// persistErr is the last metadata save failure. Mutations are applied in
+	// memory before they are written, so while this is set the daemon's
+	// memory is ahead of its disk; system.ping reports it and a retry loop
+	// keeps trying until the save succeeds.
+	persistErr atomic.Pointer[string]
 	// autoResume relaunches agents that were running when the daemon last
 	// stopped, once the first client connects after a restart.
 	autoResume     bool
@@ -154,6 +160,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 		_ = listener.Close()
 	})
+	go guard("persist.retry", s.persistRetryLoop)
 
 	defer func() {
 		s.stopOnce.Do(func() { close(s.stop) })
@@ -295,7 +302,13 @@ func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Re
 
 	switch request.Method {
 	case "system.ping":
-		result = map[string]string{"status": "ok", "version": s.buildVersion, "protocol": strconv.Itoa(ipc.Version)}
+		status := map[string]string{"status": "ok", "version": s.buildVersion, "protocol": strconv.Itoa(ipc.Version)}
+		if last := s.lastPersistError(); last != "" {
+			// The daemon is serving from memory that is not on disk yet;
+			// saying so is better than a status line that looks healthy.
+			status["persist_error"] = last
+		}
+		result = status
 	case "system.snapshot":
 		result = s.snapshot()
 	case "system.reset":

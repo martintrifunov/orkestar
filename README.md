@@ -259,6 +259,10 @@ approval decision is bypassed. Codex may ask you to review Orkestar's five
 command hooks the first time you launch it; declining leaves the terminal fully
 working, with less lifecycle detail.
 
+Metadata is written to SQLite after each mutation. A write that fails leaves
+the change live in memory, keeps retrying in the background, and makes
+`orkestar status` say metadata is not durable until it succeeds.
+
 For the boundaries and the reasoning behind them, see
 [the architecture](docs/architecture.md) and the
 [decision records](docs/decisions/).
