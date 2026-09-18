@@ -401,7 +401,7 @@ func (m Model) promptView() string {
 		if !notificationsSupported() {
 			notifications = "unavailable on this system"
 		}
-		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\nt  Theme: " + m.theme.name + " — cycles the palette\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Key bindings, custom terminal command and max_panes: edit tui.json.\nBindings are \"keys\": {\"prefix\": \"ctrl+a\", \"new-task\": \"N\"} and so on."
+		return "Settings\n\n1  Standard — mouse, Ctrl+S/Z/Y/A/C/X/V\n2  Vim — native Vim keys and mouse\n3  Nano — native Nano keys and mouse\n\nh  Syntax highlighting: " + syntax + " — applies to open files too\nb  Bell: " + bell + " — rings when a task finishes or its agent stops\nn  Notifications: " + notifications + " — the same two moments, when the terminal is not focused\nt  Theme: " + m.theme.name + " — cycles the palette\nr  Reload agent adapters — picks up manifests edited on disk\nm  Machines — add, remove or enable saved ssh machines\n\nCurrent editor: " + m.settings.Editor + "\nSaved to " + settingsPath() + "\nEditor changes apply to files opened afterwards.\nEsc closes. Key bindings, custom terminal command and max_panes: edit tui.json.\nBindings are \"keys\": {\"prefix\": \"ctrl+a\", \"new-task\": \"N\"} and so on."
 	}
 	matches := m.matches()
 	var lines []string
@@ -509,6 +509,14 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.settingsOpen = false
 			m.notice = "Theme: " + next
 			return m, nil
+		}
+		if k.String() == "r" {
+			// Manifests are read at startup and on reload; editing one in
+			// ~/.config/orkestar/agents used to mean leaving the interface for
+			// the CLI.
+			m.settingsOpen = false
+			m.notice = "Reloading agent adapters…"
+			return m, m.reloadAdapters()
 		}
 		modes := map[string]string{"1": "standard", "2": "vim", "3": "nano"}
 		if mode, ok := modes[k.String()]; ok {

@@ -525,7 +525,10 @@ buffers. Unsaved buffers do not survive forcibly closing the host terminal.
 ## Vim, Nano and custom editors
 
 Ctrl+b, comma opens settings. Choose `1` standard, `2` Vim or `3` Nano. The
-selection is saved and applies to newly opened files. Vim and Nano are real
+selection is saved and applies to newly opened files. The panel also cycles
+the theme (`t`), toggles syntax highlighting (`h`), the bell (`b`) and
+notifications (`n`), and reloads agent manifests edited on disk (`r`).
+Vim and Nano are real
 terminal editors managed by the daemon, with their own normal save/quit keys.
 Mouse events are forwarded when the editor enables them. On macOS the system
 `nano` can be Pico, which has Nano-style shortcuts. This Mac’s Pico did not

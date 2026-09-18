@@ -35,6 +35,9 @@ func startEmbeddedTestDaemonWithSocket(t *testing.T, adapters ...agent.Adapter) 
 	for _, adapter := range adapters {
 		server.RegisterAdapter(adapter)
 	}
+	// A reload rebuilds the adapter set; a real daemon gets that from the
+	// manifest loader, a test daemon from the fixtures it was handed.
+	server.SetAdapterLoader(func() ([]agent.Adapter, error) { return adapters, nil })
 	ctx, cancel := context.WithCancel(context.Background())
 	serverError := make(chan error, 1)
 	go func() { serverError <- server.Serve(ctx) }()

@@ -1026,6 +1026,17 @@ if message.machineID != "" && message.machineID != m.currentMachine().ID {
 		if message.err == nil {
 			m.explanation = message.explanation
 		}
+	case adaptersReloadedMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
+		m.err = message.err
+		if message.err != nil {
+			return m, nil
+		}
+		m.notice = fmt.Sprintf("Adapters reloaded: %d registered", len(message.adapters))
+		m.loading = true
+		return m, m.loadSnapshot()
 	case templatesMsg:
 		if message.machineID != "" && message.machineID != m.currentMachine().ID {
 			return m, nil
