@@ -1,4 +1,4 @@
-package tui
+package notify
 
 import (
 	"os/exec"
@@ -6,8 +6,9 @@ import (
 )
 
 // resolveNotifier posts through AppleScript, which every macOS has, rather
-// than terminal-notifier, which most do not.
-func resolveNotifier() notifier {
+// than terminal-notifier, which most do not. AppleScript notifications have no
+// buttons, so this platform is not Actionable.
+func resolve() notifier {
 	path, err := exec.LookPath("osascript")
 	if err != nil {
 		return notifier{}

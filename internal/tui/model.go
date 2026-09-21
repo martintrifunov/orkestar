@@ -977,7 +977,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.snapshotLoaded {
 				if notice := bellFor(m.snapshot, message.snapshot); notice != "" {
 					m.notice = notice
-					commands = append(commands, m.announce(notice))
+					commands = append(commands, m.announce(notice, bellTarget(m.snapshot, message.snapshot)))
 				}
 			}
 			m.snapshotLoaded = true
@@ -1194,6 +1194,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		message.pane.replay.step(replayStep)
 		return m, replayTick(message.pane)
+	case notificationActionMsg:
+		if message.terminalID != "" {
+			return m, m.focusOrOpen(message.terminalID)
+		}
 	case layoutsListedMsg:
 		m.layouts = message.layouts
 		m.layoutsErr = message.err

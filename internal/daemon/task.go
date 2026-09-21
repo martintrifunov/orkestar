@@ -147,7 +147,14 @@ func (s *Server) setTaskStatus(ctx context.Context, rawParams json.RawMessage) (
 		}
 	}
 
-	return s.tasks.SetStatus(params.TaskID, workflow.Status(params.Status))
+	task, err := s.tasks.SetStatus(params.TaskID, workflow.Status(params.Status))
+	if err != nil {
+		return workflow.Task{}, err
+	}
+	if task.Status == workflow.StatusDone {
+		s.announceTaskDone(task)
+	}
+	return task, nil
 }
 
 // updateTask edits a task's title, description or dependencies. Every field is

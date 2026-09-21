@@ -600,6 +600,9 @@ func (s *Server) watchAgent(id string, entry *agentSession) {
 		}
 		if metadata.State == "stopped" || metadata.State == "crashed" {
 			s.cancelHookPermissions(id, "")
+			if applied {
+				s.announceAgentStopped(metadata)
+			}
 		}
 		_ = s.persist()
 	}

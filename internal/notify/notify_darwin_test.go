@@ -1,4 +1,4 @@
-package tui
+package notify
 
 import (
 	"strings"
@@ -40,7 +40,7 @@ func TestAppleScriptStringIsNotEscapable(t *testing.T) {
 
 // The escaping only matters if it is actually what gets run.
 func TestDarwinNotifierEscapesItsArguments(t *testing.T) {
-	n := resolveNotifier()
+	n := resolve()
 	if n.program == "" {
 		t.Skip("osascript is not installed")
 	}
@@ -48,5 +48,8 @@ func TestDarwinNotifierEscapesItsArguments(t *testing.T) {
 	joined := strings.Join(arguments, " ")
 	if !strings.Contains(joined, `\"it\"`) {
 		t.Fatalf("the body was not escaped: %v", arguments)
+	}
+	if n.actionArguments != nil {
+		t.Fatal("AppleScript notifications have no buttons and must not claim otherwise")
 	}
 }

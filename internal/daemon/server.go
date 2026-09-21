@@ -77,6 +77,9 @@ type Server struct {
 	// adapterLoader rebuilds the full adapter set, built-ins and manifests,
 	// when a reload is requested. Nil means reload is not configured.
 	adapterLoader func() ([]agent.Adapter, error)
+	// notifier posts a desktop notification. Nil resolves the platform helper;
+	// tests replace it so nothing reaches a real desktop.
+	notifier func(title, body string)
 	// autoStartMu serializes the board scans that launch auto_start tasks, so
 	// two changes landing together cannot start one task twice.
 	autoStartMu sync.Mutex

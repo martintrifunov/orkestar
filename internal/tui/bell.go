@@ -60,6 +60,47 @@ func bellFor(previous, current daemon.Snapshot) string {
 	return ""
 }
 
+// bellTarget names the pane a notice is about, so an actionable notification
+// can focus it. It follows the same two cases bellFor does; a change with no
+// pane behind it (a task no agent ever worked) returns empty.
+func bellTarget(previous, current daemon.Snapshot) string {
+	before := make(map[string]workflow.Task, len(previous.Tasks))
+	for _, task := range previous.Tasks {
+		before[task.ID] = task
+	}
+	for _, task := range current.Tasks {
+		if was, ok := before[task.ID]; ok && was.Status != workflow.StatusDone && task.Status == workflow.StatusDone {
+			for _, agent := range current.Agents {
+				if agent.TaskID == task.ID && agent.TerminalID != "" {
+					return agent.TerminalID
+				}
+			}
+			return ""
+		}
+	}
+
+	tasks := make(map[string]workflow.Task, len(current.Tasks))
+	for _, task := range current.Tasks {
+		tasks[task.ID] = task
+	}
+	agents := make(map[string]daemon.Agent, len(previous.Agents))
+	for _, agent := range previous.Agents {
+		agents[agent.ID] = agent
+	}
+	for _, agent := range current.Agents {
+		was, ok := agents[agent.ID]
+		if !ok || finishedAgentState(was.State) || !finishedAgentState(agent.State) {
+			continue
+		}
+		task, ok := tasks[agent.TaskID]
+		if !ok || task.Status == workflow.StatusDone || task.Status == workflow.StatusCancelled {
+			continue
+		}
+		return agent.TerminalID
+	}
+	return ""
+}
+
 // ring returns the command that sounds the bell, or nil when the user has
 // turned it off. tea.Raw writes straight to the terminal, so the byte reaches
 // it without going through a frame.
