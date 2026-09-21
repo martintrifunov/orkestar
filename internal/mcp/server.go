@@ -163,6 +163,16 @@ func NewServer(client *ipc.Client, version string) *sdk.Server {
 	}, taskCreateWorktree(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "task_import_github",
+		Description: "Create a task from a GitHub issue, using the gh CLI's own authentication. Orkestar stores no token, and a missing or unauthenticated gh is reported before anything is created.",
+	}, taskImportGitHub(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "task_open_pr",
+		Description: "Open a pull request for a finished task's worktree branch and record its URL as an artifact. Refuses a task that is not done.",
+	}, taskOpenPR(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_diff",
 		Description: "Get the changed files and unified diff for a task's worktree.",
 	}, taskDiff(client))
@@ -712,6 +722,33 @@ func taskCreateWorktree(client *ipc.Client) sdk.ToolHandlerFor[taskCreateWorktre
 			"task_id": in.TaskID,
 			"branch":  in.Branch,
 		})
+	}
+}
+
+type taskImportGitHubInput struct {
+	WorkspaceID string `json:"workspace_id"`
+	Reference   string `json:"reference" jsonschema:"issue number or URL"`
+}
+
+func taskImportGitHub(client *ipc.Client) sdk.ToolHandlerFor[taskImportGitHubInput, daemon.GitHubImport] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in taskImportGitHubInput) (*sdk.CallToolResult, daemon.GitHubImport, error) {
+		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		return callIPC[daemon.GitHubImport](ctx, client, "task.githubImport", map[string]string{
+			"workspace_id": in.WorkspaceID, "reference": in.Reference,
+		})
+	}
+}
+
+type taskOpenPRInput struct {
+	TaskID string `json:"task_id"`
+}
+
+func taskOpenPR(client *ipc.Client) sdk.ToolHandlerFor[taskOpenPRInput, workflow.Artifact] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in taskOpenPRInput) (*sdk.CallToolResult, workflow.Artifact, error) {
+		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		return callIPC[workflow.Artifact](ctx, client, "task.githubPR", map[string]string{"task_id": in.TaskID})
 	}
 }
 

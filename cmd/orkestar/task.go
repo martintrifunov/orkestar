@@ -101,6 +101,10 @@ func runTask(paths runtimepath.Paths, args []string) error {
 		return taskAutoStart(paths, args[1:])
 	case "budget":
 		return taskBudget(paths, args[1:])
+	case "import":
+		return taskImport(paths, args[1:])
+	case "pr":
+		return taskPR(paths, args[1:])
 	case "worktree":
 		return taskWorktree(paths, args[1:])
 	case "wait":
@@ -122,6 +126,8 @@ var errTaskUsage = errors.New(`usage:
   orkestar task assign <task-id> <agent-id>
   orkestar task auto-start <task-id> <agent> [--prompt=text] | orkestar task auto-start <task-id> --clear
   orkestar task budget <task-id> [--tokens=N] [--seconds=N] [--action=warn|stop] [--clear]
+  orkestar task import <workspace-id> <issue-number-or-url>
+  orkestar task pr <task-id>
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
@@ -422,6 +428,44 @@ func taskBudget(paths runtimepath.Paths, args []string) error {
 	printTask(task)
 	return nil
 }
+
+// taskImport creates a task from a GitHub issue, through gh's own
+// authentication. It talks to the network, so it gets a longer deadline than
+// the local verbs.
+func taskImport(paths runtimepath.Paths, args []string) error {
+	if len(args) != 2 {
+		return errTaskUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var imported daemon.GitHubImport
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "task.githubImport", map[string]string{
+		"workspace_id": args[0], "reference": args[1],
+	}, &imported); err != nil {
+		return err
+	}
+	fmt.Printf("%s\t%s\t%s\n", imported.Task.ID, imported.URL, imported.Task.Title)
+	return nil
+}
+
+// taskPR opens a pull request for a finished task's worktree branch and
+// records its URL as an artifact.
+func taskPR(paths runtimepath.Paths, args []string) error {
+	if len(args) != 1 {
+		return errTaskUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var artifact workflow.Artifact
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "task.githubPR", map[string]string{
+		"task_id": args[0],
+	}, &artifact); err != nil {
+		return err
+	}
+	fmt.Printf("%s\t%s\n", artifact.Path, artifact.Label)
+	return nil
+}
+
 func taskWorktree(paths runtimepath.Paths, args []string) error {
 	if len(args) < 2 {
 		return errTaskUsage
