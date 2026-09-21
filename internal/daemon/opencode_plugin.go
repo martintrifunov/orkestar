@@ -62,8 +62,12 @@ export const OrkestarPlugin = async ({ client }) => {
       }
       if (event.type === "permission.asked") hook_event_name = "PermissionRequest";
       if (!hook_event_name) return;
+      // The command is forwarded so a policy rule can match it. Permission
+      // patterns are not: they carry paths and command text that the bridge
+      // has never sent, and a policy can still match on the tool name.
+      const target = (p.metadata && (p.metadata.command || p.metadata.filePath || p.metadata.path)) || "";
       const input = {hook_event_name, session_id, tool_name: p.permission || p.type || "tool",
-        permission_id: p.requestID || p.permissionID || p.id};
+        permission_id: p.requestID || p.permissionID || p.id, target};
       if (event.type !== "permission.asked") {
         // Preserve lifecycle order without blocking OpenCode's event bus.
         lifecycle = lifecycle.then(() => send(input));

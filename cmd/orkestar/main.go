@@ -109,6 +109,8 @@ func run(args []string) error {
 		return runMCP(paths, args[1:])
 	case "machine":
 		return runMachine(paths, args[1:])
+	case "policy":
+		return runPolicy(paths, args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -725,6 +727,8 @@ Usage:
   orkestar task diff <task-id>
   orkestar template list <workspace-id>
   orkestar template apply <workspace-id> <name> [--start]
+  orkestar policy audit [--workspace=<id>] [--json]
+  orkestar policy check <adapter> <tool> [target] [--workspace=<id>]
   orkestar mcp serve
   orkestar mcp instructions
   orkestar help

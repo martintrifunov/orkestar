@@ -16,6 +16,9 @@ const agentManifestDirectoryEnvironment = "ORKESTAR_AGENT_MANIFESTS_DIR"
 // machineCatalogEnvironment overrides the saved-machine catalog path.
 const machineCatalogEnvironment = "ORKESTAR_MACHINES_FILE"
 
+// policyFileEnvironment overrides the user-level permission policy path.
+const policyFileEnvironment = "ORKESTAR_POLICY_FILE"
+
 // AgentManifestDirectory is where declarative agent manifests live. It is
 // configuration rather than runtime state, so it sits under the user config
 // directory rather than beside the socket.
@@ -41,6 +44,20 @@ func MachineCatalogPath() (string, error) {
 		return "", fmt.Errorf("find user config directory: %w", err)
 	}
 	return filepath.Join(configDirectory, "orkestar", "machines.json"), nil
+}
+
+// PolicyFilePath is the user-level permission policy, the fallback beneath a
+// workspace's own .orkestar/policy.json. It is configuration, not runtime
+// state, so it sits with the agent manifests.
+func PolicyFilePath() (string, error) {
+	if path := os.Getenv(policyFileEnvironment); path != "" {
+		return path, nil
+	}
+	configDirectory, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("find user config directory: %w", err)
+	}
+	return filepath.Join(configDirectory, "orkestar", "policy.json"), nil
 }
 
 type Paths struct {

@@ -50,9 +50,13 @@ type Agent struct {
 // human (or policy) must resolve before the agent can continue. The daemon
 // aggregates these across every agent session into one inbox.
 type PermissionRequest struct {
-	ID        string    `json:"id"`
-	AgentID   string    `json:"agent_id"`
-	Reason    string    `json:"reason"`
+	ID      string `json:"id"`
+	AgentID string `json:"agent_id"`
+	Reason  string `json:"reason"`
+	// Policy names the rule a policy consulted for this request, or says that
+	// nothing matched. It is what makes a request that reached the inbox
+	// explainable after the fact.
+	Policy    string    `json:"policy,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

@@ -42,6 +42,10 @@ type Snapshot struct {
 	Leases      []workflow.Lease     `json:"leases"`
 	Artifacts   []workflow.Artifact  `json:"artifacts"`
 	Adapters    []agent.Capabilities `json:"adapters"`
+	// PolicyAudit is the recent history of permission requests a policy
+	// decided. It is persisted because "why was this approved" is asked
+	// after a restart as often as before one.
+	PolicyAudit []PolicyAuditEntry `json:"policy_audit,omitempty"`
 }
 
 type Server struct {
@@ -84,6 +88,7 @@ type Server struct {
 	adapters        map[string]agent.Adapter
 	agents          map[string]*agentSession
 	permissions     map[string]PermissionRequest
+	policyHistory   []PolicyAuditEntry
 	tasks           *workflow.Board
 	leases          *workflow.LeaseManager
 	artifacts       *workflow.ArtifactStore
@@ -362,6 +367,10 @@ func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Re
 		result = map[string]any{"permissions": s.listPermissions()}
 	case "permission.resolve":
 		result, err = s.resolvePermission(ctx, request.Params)
+	case "policy.audit":
+		result, err = s.policyAudit(request.Params)
+	case "policy.check":
+		result, err = s.checkPolicy(request.Params)
 	case "task.create":
 		result, err = s.createTask(request.Params)
 	case "template.list":
@@ -421,7 +430,8 @@ func readOnlyMethod(method string) bool {
 	switch method {
 	case "system.snapshot", "system.ping", "system.shutdown", "terminal.history",
 		"terminal.read", "terminal.wait", "task.wait", "agent.wait", "agent.explain",
-		"template.list", "permission.list":
+		"template.list", "permission.list", "policy.audit", "policy.check",
+		"search.query":
 		return true
 	default:
 		return false
@@ -503,6 +513,7 @@ func (s *Server) snapshot() Snapshot {
 		Leases:      s.leases.ListAll(),
 		Artifacts:   s.artifacts.List(),
 		Adapters:    adapters,
+		PolicyAudit: append([]PolicyAuditEntry(nil), s.policyHistory...),
 	}
 }
 

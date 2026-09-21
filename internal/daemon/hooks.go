@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/agent"
+	"github.com/martintrifunov/orkestar/internal/policy"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -35,6 +37,9 @@ type HookInput struct {
 	// how the OpenCode plugin reports usage. It takes precedence over the
 	// transcript, which only Claude and Codex write.
 	Tokens int64 `json:"tokens"`
+	// Target is the command or path a permission is about, when the
+	// provider's payload names one. Policy rules match against it.
+	Target string `json:"target"`
 }
 
 func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string]string, error) {
@@ -114,6 +119,34 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 	if p.Event == "Stop" || p.Event == "Interrupt" || p.Event == "SessionEnd" {
 		s.cancelHookPermissions(p.AgentID, "")
 	}
+	// A policy decides a permission before the inbox sees it. Anything it
+	// does not decide stays a question, carrying the rule that was consulted
+	// so the inbox can say why it is there.
+	policyRule := ""
+	if p.Event == "PermissionRequest" {
+		current := entry.snapshot()
+		decision, rule, problem := s.decidePermission(current, p.Tool, p.Target)
+		if problem != "" {
+			log.Printf("permission policy: %s", problem)
+		}
+		policyRule = rule
+		if decision != string(policy.Ask) {
+			s.recordPolicyAudit(PolicyAuditEntry{
+				At: time.Now().UTC(), AgentID: p.AgentID, Adapter: current.Adapter,
+				Tool: p.Tool, Target: p.Target, Decision: decision, Rule: rule,
+			})
+			resolved, _, applied := entry.recordLifecycleIf(agent.LifecycleEvent{
+				State: agent.StateWorking, Reason: "policy " + decision, Timestamp: time.Now().UTC(),
+			}, true, "")
+			if applied {
+				entry.publishLifecycle(resolved)
+			}
+			if err := s.persist(); err != nil {
+				return nil, err
+			}
+			return map[string]string{"decision": decision}, nil
+		}
+	}
 	reason := ""
 	if isAttentionState(state) {
 		reason = p.Event
@@ -144,8 +177,12 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 		s.mu.Unlock()
 		return map[string]string{}, nil
 	}
+	policyLabel := "no matching rule"
+	if policyRule != "" {
+		policyLabel = policyRule
+	}
 	s.pendingHooks[id] = pending
-	s.permissions[id] = PermissionRequest{ID: id, AgentID: p.AgentID, Reason: reason, CreatedAt: time.Now().UTC()}
+	s.permissions[id] = PermissionRequest{ID: id, AgentID: p.AgentID, Reason: reason, Policy: policyLabel, CreatedAt: time.Now().UTC()}
 	s.mu.Unlock()
 	if applied {
 		entry.publishLifecycle(metadata)

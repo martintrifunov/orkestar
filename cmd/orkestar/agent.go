@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,6 +32,7 @@ func runHook() error {
 		// tokens instead.
 		TranscriptPath string          `json:"transcript_path"`
 		Tokens         int64           `json:"tokens"`
+		ToolInput      json.RawMessage `json:"tool_input"`
 	}
 	if err := json.NewDecoder(io.LimitReader(os.Stdin, 1024*1024)).Decode(&raw); err != nil {
 		return err
@@ -39,7 +41,7 @@ func runHook() error {
 		_, _ = fmt.Fprintln(os.Stdout, "{}")
 		return nil
 	}
-	input := daemon.HookInput{AgentID: os.Getenv("ORKESTAR_AGENT_ID"), Token: os.Getenv("ORKESTAR_HOOK_TOKEN"), Event: raw.Event, NativeSessionID: raw.SessionID, Tool: raw.Tool, Notification: raw.Notification, PermissionID: raw.PermissionID}
+	input := daemon.HookInput{AgentID: os.Getenv("ORKESTAR_AGENT_ID"), Token: os.Getenv("ORKESTAR_HOOK_TOKEN"), Event: raw.Event, NativeSessionID: raw.SessionID, Tool: raw.Tool, Notification: raw.Notification, PermissionID: raw.PermissionID, TranscriptPath: raw.TranscriptPath, Tokens: raw.Tokens, Target: hookTarget(raw.ToolInput)}
 	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 	defer cancel()
 	var result map[string]string
@@ -50,6 +52,41 @@ func runHook() error {
 	}
 	return json.NewEncoder(os.Stdout).Encode(response)
 }
+
+// hookTarget extracts the command or path a permission is about, so policy
+// rules have something stable to match. Providers name it in different fields
+// under tool_input; anything unrecognized falls back to the compact JSON,
+// which a prefix glob can still match.
+func hookTarget(toolInput json.RawMessage) string {
+	if len(toolInput) == 0 {
+		return ""
+	}
+	var fields struct {
+		Command  string `json:"command"`
+		FilePath string `json:"file_path"`
+		Path     string `json:"path"`
+	}
+	if err := json.Unmarshal(toolInput, &fields); err == nil {
+		switch {
+		case fields.Command != "":
+			return fields.Command
+		case fields.FilePath != "":
+			return fields.FilePath
+		case fields.Path != "":
+			return fields.Path
+		}
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, toolInput); err != nil {
+		return ""
+	}
+	target := compact.String()
+	if len(target) > 512 {
+		target = target[:512]
+	}
+	return target
+}
+
 func runAgent(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: orkestar agent list | launch <workspace-id> <adapter> [--task=<task-id>] | resume <agent-id> | explain <agent-id> | reload | stop <agent-id> | remove <agent-id> | interrupt <agent-id>")

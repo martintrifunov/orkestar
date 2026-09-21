@@ -145,6 +145,10 @@ func (s *Server) openStore() error {
 	}
 	s.tasks.Restore(saved.Tasks)
 	s.artifacts.Restore(saved.Artifacts)
+	if len(saved.PolicyAudit) > policyAuditLimit {
+		saved.PolicyAudit = saved.PolicyAudit[len(saved.PolicyAudit)-policyAuditLimit:]
+	}
+	s.policyHistory = append([]PolicyAuditEntry(nil), saved.PolicyAudit...)
 	s.loadPaneHistory()
 	return nil
 }
