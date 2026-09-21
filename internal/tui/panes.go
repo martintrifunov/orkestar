@@ -314,6 +314,11 @@ func (m Model) paneLabel(p *embeddedTerminal) string {
 		return p.editor.title()
 	case p.review != nil:
 		return "Changes"
+	case p.replay != nil:
+		if p.replay.title != "" {
+			return p.replay.title
+		}
+		return "Replay"
 	case p.title != "":
 		return p.title
 	}

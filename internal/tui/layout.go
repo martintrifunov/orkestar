@@ -52,6 +52,9 @@ func (m Model) renderEmbedded(width, height int) string {
 	if m.viewingExplanation {
 		content = m.renderExplanation(columns)
 	}
+	if m.recordingsOpen {
+		content = m.recordingsView()
+	}
 	paneStyle := m.theme.panel
 	if m.embedded != nil && !m.sidebarFocused && !m.filesFocused {
 		paneStyle = paneStyle.BorderForeground(m.theme.accentColor)

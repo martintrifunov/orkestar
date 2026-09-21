@@ -17,11 +17,16 @@ const (
 	ArtifactScreenshot ArtifactKind = "screenshot"
 	ArtifactBuild      ArtifactKind = "build"
 	ArtifactReview     ArtifactKind = "review"
+	// ArtifactRecording is a captured terminal session, an asciicast file
+	// that replays what happened rather than only its final state.
+	ArtifactRecording ArtifactKind = "recording"
+	// ArtifactPullRequest is the URL of a pull request opened for a task.
+	ArtifactPullRequest ArtifactKind = "pull_request"
 )
 
 func (k ArtifactKind) valid() bool {
 	switch k {
-	case ArtifactDiff, ArtifactTestResult, ArtifactLog, ArtifactScreenshot, ArtifactBuild, ArtifactReview:
+	case ArtifactDiff, ArtifactTestResult, ArtifactLog, ArtifactScreenshot, ArtifactBuild, ArtifactReview, ArtifactRecording, ArtifactPullRequest:
 		return true
 	default:
 		return false

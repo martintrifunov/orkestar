@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/martintrifunov/orkestar/internal/ipc"
@@ -27,6 +28,11 @@ type Terminal struct {
 	CreatedAt   time.Time `json:"created_at"`
 	Columns     int       `json:"columns"`
 	Rows        int       `json:"rows"`
+	// Recording is true while this terminal is capturing an asciicast, and
+	// RecordingPath is the file it writes to. The path survives a stop, so a
+	// recording that hit its size cap can still be found.
+	Recording     bool   `json:"recording,omitempty"`
+	RecordingPath string `json:"recording_path,omitempty"`
 }
 type terminalEvent struct {
 	Name string
@@ -74,6 +80,10 @@ type terminalSession struct {
 	// detectTimer catches a scan that was throttled when the trigger text was
 	// the last output before the process went quiet.
 	detectTimer *time.Timer
+	// recorder is the optional asciicast capture. It is swapped rather than
+	// locked because the output pump reads it on every chunk while start and
+	// stop happen on a request goroutine.
+	recorder atomic.Pointer[terminalRecorder]
 }
 
 // detectInterval bounds how often the screen is scanned for a detected state.
@@ -339,6 +349,12 @@ func (s *terminalSession) captureOutput() {
 	for {
 		n, err := s.process.Read(b)
 		if n > 0 {
+			// Recorded before the emulator sees the bytes, and before any
+			// subscriber coalescing: a recording is what the process wrote,
+			// not what a screen happened to keep.
+			if recorder := s.recorder.Load(); recorder != nil {
+				recorder.write(time.Now().UTC(), b[:n])
+			}
 			if crashErr := s.renderOutput(b[:n]); crashErr != nil {
 				s.finish(crashErr)
 				return
@@ -400,9 +416,14 @@ func (s *terminalSession) renderOutput(data []byte) error {
 	return err
 }
 func (s *terminalSession) finish(err error) {
+	// A recording ends with its process; the file stays where it was written.
+	if recorder := s.recorder.Swap(nil); recorder != nil {
+		_, _, _ = recorder.close()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.metadata.State = "stopped"
+	s.metadata.Recording = false
 	if err != nil {
 		s.metadata.State = "crashed"
 		s.metadata.ExitError = err.Error()

@@ -280,10 +280,12 @@ func parseTerminalSend(args []string) (terminalID, text string, enter bool, err 
 
 func runTerminal(paths runtimepath.Paths, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] [--] <text> | wait <terminal-id> --contains <text> [--timeout N] | stop <terminal-id> | remove <terminal-id>")
+		return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...] | attach <terminal-id> | read <terminal-id> [--lines N] | send <terminal-id> [--enter] [--] <text> | wait <terminal-id> --contains <text> [--timeout N] | record start|stop <terminal-id> [--task=<task-id>] | stop <terminal-id> | remove <terminal-id>")
 	}
 
 	switch args[0] {
+	case "record":
+		return runTerminalRecord(paths, args[1:])
 	case "start":
 		if len(args) < 3 {
 			return errors.New("usage: orkestar terminal start <workspace-id> -- <command> [args...]")
@@ -438,6 +440,49 @@ func runTerminal(paths runtimepath.Paths, args []string) error {
 	default:
 		return fmt.Errorf("unknown terminal command %q", args[0])
 	}
+}
+
+// runTerminalRecord starts or stops an asciicast capture of one terminal. The
+// task is optional; when given, the finished recording is attached to it as
+// an artifact.
+func runTerminalRecord(paths runtimepath.Paths, args []string) error {
+	usage := errors.New("usage: orkestar terminal record start|stop <terminal-id> [--task=<task-id>]")
+	if len(args) < 2 {
+		return usage
+	}
+	action, terminalID := args[0], args[1]
+	if action != "start" && action != "stop" {
+		return usage
+	}
+	taskID := ""
+	for _, argument := range args[2:] {
+		value, ok := strings.CutPrefix(argument, "--task=")
+		if !ok {
+			return fmt.Errorf("unknown flag %q\n\n%s", argument, usage.Error())
+		}
+		taskID = value
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var status daemon.RecordingStatus
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "terminal.record", map[string]string{
+		"terminal_id": terminalID, "action": action, "task_id": taskID,
+	}, &status); err != nil {
+		return err
+	}
+	if status.Recording {
+		fmt.Printf("recording\t%s\n", status.Path)
+		return nil
+	}
+	fmt.Printf("stopped\t%s\t%d bytes\n", status.Path, status.Bytes)
+	if status.Truncated {
+		fmt.Println("reached the size cap; the recording ends there")
+	}
+	if status.Artifact != nil {
+		fmt.Printf("artifact\t%s\n", status.Artifact.ID)
+	}
+	return nil
 }
 
 // proxyDaemon joins this process's stdin and stdout to the local daemon
@@ -705,6 +750,7 @@ Usage:
   orkestar terminal read <terminal-id> [--lines N]
   orkestar terminal send <terminal-id> [--enter] [--] <text>
   orkestar terminal wait <terminal-id> --contains <text> [--timeout N]
+  orkestar terminal record start|stop <terminal-id> [--task=<task-id>]
   orkestar terminal stop <terminal-id>
   orkestar terminal remove <terminal-id>
   orkestar agent list

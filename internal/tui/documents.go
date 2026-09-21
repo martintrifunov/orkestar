@@ -307,6 +307,9 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 		return nil, true
 	case ActionLayouts:
 		return m.openLayouts(), true
+	case ActionRecordings:
+		m.openRecordings()
+		return nil, true
 	case ActionDiscardEdit:
 		if m.embedded != nil && m.embedded.editor != nil {
 			m.removePane(m.embedded)
@@ -352,6 +355,9 @@ func repeatsWithPrefix(key string) bool {
 }
 func (m Model) updateDocumentKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	p := m.embedded
+	if p.replay != nil {
+		return m.updateReplayKey(p, k)
+	}
 	if p.editor != nil {
 		if k.String() == "ctrl+p" {
 			cmd := m.startFilePicker(p.root)

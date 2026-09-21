@@ -143,6 +143,11 @@ func NewServer(client *ipc.Client, version string) *sdk.Server {
 	}, terminalWait(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "terminal_record",
+		Description: "Start or stop an asciicast recording of a terminal's output, so what an agent did can be replayed rather than only diffed. Give task_id to attach the finished file to a task as an artifact.",
+	}, terminalRecord(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_assign",
 		Description: "Assign a task to an agent by ID.",
 	}, taskAssign(client))
@@ -640,6 +645,20 @@ func terminalWait(client *ipc.Client) sdk.ToolHandlerFor[terminalWaitInput, term
 			"terminal_id":     in.TerminalID,
 			"contains":        in.Contains,
 			"timeout_seconds": seconds,
+		})
+	}
+}
+
+type terminalRecordInput struct {
+	TerminalID string `json:"terminal_id"`
+	Action     string `json:"action" jsonschema:"start or stop"`
+	TaskID     string `json:"task_id,omitempty" jsonschema:"attach the finished recording to this task as an artifact"`
+}
+
+func terminalRecord(client *ipc.Client) sdk.ToolHandlerFor[terminalRecordInput, daemon.RecordingStatus] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in terminalRecordInput) (*sdk.CallToolResult, daemon.RecordingStatus, error) {
+		return callIPC[daemon.RecordingStatus](ctx, client, "terminal.record", map[string]string{
+			"terminal_id": in.TerminalID, "action": in.Action, "task_id": in.TaskID,
 		})
 	}
 }

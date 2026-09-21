@@ -46,7 +46,7 @@ func (m Model) menuFor(pane *embeddedTerminal) []menuItem {
 		)
 	}
 	items = append(items, menuItem{"Rename", ActionRenamePane})
-	if pane.editor == nil && pane.review == nil {
+	if pane.editor == nil && pane.review == nil && pane.replay == nil {
 		// Scrollback belongs to a daemon-owned terminal; a document pane
 		// scrolls with the wheel.
 		items = append(items, menuItem{"Scrollback", ActionScrollback})

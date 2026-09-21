@@ -68,6 +68,8 @@ const (
 	ActionRenamePane  Action = "rename-pane"
 	ActionDiscardEdit Action = "discard-editor"
 	ActionDetachPanel Action = "detach-panel"
+	// ActionRecordings lists terminal recordings and replays one.
+	ActionRecordings Action = "recordings"
 )
 
 // defaultBindings is what Orkestar has always used. Anything a user does not
@@ -111,6 +113,7 @@ func defaultBindings() map[Action]string {
 		ActionRenamePane:   "r",
 		ActionDiscardEdit:  "x",
 		ActionDetachPanel:  "tab",
+		ActionRecordings:   "R",
 	}
 }
 
@@ -173,6 +176,7 @@ var placements = map[Action]placement{
 	ActionSettings:    prefixed,
 	ActionDiscardEdit: prefixed,
 	ActionRenamePane:  prefixed,
+	ActionRecordings:  prefixed,
 
 	ActionNewAgent: both,
 	ActionNewShell: both,
@@ -291,6 +295,8 @@ func (m Model) helpLine() string {
 		return "Enter saves · Tab switches field · Esc cancels"
 	case m.managingMachines:
 		return "a add · e enable/disable · x remove · esc close"
+	case m.recordingsOpen:
+		return "↑/↓ select · enter replay · esc close"
 	case m.prompting():
 		return "Enter confirm · Esc cancel"
 	case m.filesFocused:

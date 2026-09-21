@@ -198,6 +198,11 @@ type Model struct {
 	namingLayout bool
 	layoutName   string
 	layoutsDir   string
+	// recordingsOpen lists the recording artifacts on the board, and
+	// recordingAt is the one Enter replays.
+	recordingsOpen bool
+	recordings     []recordingSummary
+	recordingAt    int
 	// snapshotLoaded guards the first comparison: everything in the opening
 	// snapshot would otherwise look like it had just happened.
 	snapshotLoaded bool
@@ -385,6 +390,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.templates, m.templatesErr, m.templatesWorkspace = nil, nil, ""
 	m.templateAt, m.templateStart = 0, false
 	m.managingMachines, m.addingMachine = false, false
+	m.recordingsOpen, m.recordings, m.recordingAt = false, nil, 0
 	m.savedMachines, m.machinesErr = nil, nil
 	m.machineHost, m.machineLabel, m.machineSession, m.machineField = "", "", "", 0
 	m.layoutsOpen, m.namingLayout = false, false
@@ -635,6 +641,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.menu != nil {
 			return m.updateMenu(message)
 		}
+		if m.recordingsOpen {
+			return m.updateRecordings(message)
+		}
 		if m.prompting() {
 			return m.updatePrompt(message)
 		}
@@ -691,7 +700,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filesFocused && !m.viewingHistory && !m.viewingDiff && !m.pickingAgent {
 			return m.updateFiles(message)
 		}
-		if m.embedded != nil && !m.sidebarFocused && !m.viewingHistory && !m.viewingDiff && (m.embedded.editor != nil || m.embedded.review != nil) {
+		if m.embedded != nil && !m.sidebarFocused && !m.viewingHistory && !m.viewingDiff && (m.embedded.editor != nil || m.embedded.review != nil || m.embedded.replay != nil) {
 			return m.updateDocumentKey(message)
 		}
 		if m.viewingHistory {
@@ -1163,6 +1172,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Machine removed; its panes stay until this session restarts"
 		}
 		m.forgetMachineLayout(message.id)
+	case replayTickMsg:
+		if message.pane == nil || message.pane.replay == nil || !message.pane.replay.playing {
+			return m, nil
+		}
+		message.pane.replay.step(replayStep)
+		return m, replayTick(message.pane)
 	case layoutsListedMsg:
 		m.layouts = message.layouts
 		m.layoutsErr = message.err

@@ -21,6 +21,7 @@ type embeddedTerminal struct {
 	title, root   string
 	editor        *textEditor
 	review        *reviewPane
+	replay        *replayPane
 	terminalID    string
 	stream        *ipc.Stream
 	emulator      paneScreen

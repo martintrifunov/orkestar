@@ -345,6 +345,8 @@ func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Re
 		result, err = s.stopTerminal(request.Params)
 	case "terminal.remove":
 		result, err = s.removeTerminal(request.Params)
+	case "terminal.record":
+		result, err = s.terminalRecord(request.Params)
 	case "agent.launch":
 		result, err = s.launchAgent(ctx, request.Params)
 	case "agent.hook":
