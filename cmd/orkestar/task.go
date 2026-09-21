@@ -96,6 +96,8 @@ func runTask(paths runtimepath.Paths, args []string) error {
 		return taskStatus(paths, args[1:])
 	case "assign":
 		return taskAssign(paths, args[1:])
+	case "auto-start":
+		return taskAutoStart(paths, args[1:])
 	case "worktree":
 		return taskWorktree(paths, args[1:])
 	case "wait":
@@ -115,6 +117,7 @@ var errTaskUsage = errors.New(`usage:
   orkestar task edit <task-id> [--title=…] [--description=…] [--depends-on=id1,id2]
   orkestar task status <task-id> <pending|in_progress|done|cancelled>
   orkestar task assign <task-id> <agent-id>
+  orkestar task auto-start <task-id> <agent> [--prompt=text] | orkestar task auto-start <task-id> --clear
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
@@ -179,6 +182,9 @@ func taskCreate(paths runtimepath.Paths, args []string) error {
 	title := args[1]
 
 	autoReview := true
+	autoStart := false
+	autoAgent := ""
+	autoPrompt := ""
 	var dependsOn []string
 	for _, flag := range args[2:] {
 		switch {
@@ -189,9 +195,17 @@ func taskCreate(paths runtimepath.Paths, args []string) error {
 			if value != "" {
 				dependsOn = strings.Split(value, ",")
 			}
+		case strings.HasPrefix(flag, "--auto-start="):
+			autoStart = true
+			autoAgent = strings.TrimPrefix(flag, "--auto-start=")
+		case strings.HasPrefix(flag, "--auto-prompt="):
+			autoPrompt = strings.TrimPrefix(flag, "--auto-prompt=")
 		default:
 			return fmt.Errorf("unknown flag %q\n\n%s", flag, errTaskUsage.Error())
 		}
+	}
+	if autoStart && autoAgent == "" {
+		return fmt.Errorf("--auto-start needs an adapter name\n\n%s", errTaskUsage.Error())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -202,6 +216,9 @@ func taskCreate(paths runtimepath.Paths, args []string) error {
 		"title":        title,
 		"depends_on":   dependsOn,
 		"auto_review":  &autoReview,
+		"auto_start":   autoStart,
+		"auto_agent":   autoAgent,
+		"auto_prompt":  autoPrompt,
 	}, &task); err != nil {
 		return err
 	}
@@ -303,6 +320,49 @@ func taskAssign(paths runtimepath.Paths, args []string) error {
 	return nil
 }
 
+// taskAutoStart declares which agent to launch once a task's dependencies are
+// done, or clears a declaration that has not fired yet.
+func taskAutoStart(paths runtimepath.Paths, args []string) error {
+	if len(args) < 1 {
+		return errTaskUsage
+	}
+	taskID := args[0]
+	agent := ""
+	prompt := ""
+	clear := false
+	for _, argument := range args[1:] {
+		switch {
+		case argument == "--clear":
+			clear = true
+		case strings.HasPrefix(argument, "--prompt="):
+			prompt = strings.TrimPrefix(argument, "--prompt=")
+		case strings.HasPrefix(argument, "--"):
+			return fmt.Errorf("unknown flag %q\n\n%s", argument, errTaskUsage.Error())
+		default:
+			if agent != "" {
+				return errTaskUsage
+			}
+			agent = argument
+		}
+	}
+	if clear {
+		agent, prompt = "", ""
+	}
+	if !clear && agent == "" {
+		return errTaskUsage
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var task workflow.Task
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "task.setAutoStart", map[string]any{
+		"task_id": taskID, "agent": agent, "prompt": prompt,
+	}, &task); err != nil {
+		return err
+	}
+	printTask(task)
+	return nil
+}
 func taskWorktree(paths runtimepath.Paths, args []string) error {
 	if len(args) < 2 {
 		return errTaskUsage

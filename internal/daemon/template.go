@@ -26,6 +26,10 @@ type AppliedTemplate struct {
 	// because something they depend on has not finished. Applying does not
 	// wait around for them; task.wait until startable is how to pick them up.
 	Waiting []string `json:"waiting,omitempty"`
+	// AutoStarting names the tasks whose auto_start the daemon now owns: it
+	// launches each one as its dependencies finish, so nobody has to pick
+	// them up with task.wait.
+	AutoStarting []string `json:"auto_starting,omitempty"`
 	// Failed says why an agent could not be started, when the tasks were
 	// created but a launch was not. It is carried in the result rather than
 	// returned as an error: an error discards the result, so the caller would
@@ -181,6 +185,18 @@ func (s *Server) applyTemplate(ctx context.Context, rawParams json.RawMessage) (
 			}
 			task = withWorktree
 		}
+		// The auto-start request is recorded only when the template is being
+		// applied with starting enabled. Applying one to build a board must
+		// not leave the daemon launching agents the caller never asked to run.
+		if params.Start && declared.AutoStart {
+			withSpec, err := s.tasks.SetAutoStart(task.ID, declared.Agent, templatePrompt(declared, task))
+			if err != nil {
+				applied.Tasks = append(applied.Tasks, task)
+				applied.Failed = fmt.Sprintf("auto-start %q: %v", declared.Key, err)
+				return applied, nil
+			}
+			task = withSpec
+		}
 		created[declared.Key] = task
 		applied.Tasks = append(applied.Tasks, task)
 	}
@@ -193,18 +209,19 @@ func (s *Server) applyTemplate(ctx context.Context, rawParams json.RawMessage) (
 			continue
 		}
 		task := created[declared.Key]
+		if declared.AutoStart {
+			// The daemon owns this launch from here: its watcher starts the
+			// task once the dependencies are done. A dependency-free task is
+			// usually launched before apply returns, so it may already carry
+			// an assignee by the time the result is built below.
+			applied.AutoStarting = append(applied.AutoStarting, task.ID)
+			continue
+		}
 		if len(task.DependsOn) > 0 {
 			applied.Waiting = append(applied.Waiting, task.ID)
 			continue
 		}
-		prompt := declared.Prompt
-		if prompt == "" {
-			prompt = "You have been assigned this task: " + task.Title
-			if task.Description != "" {
-				prompt += "\n\n" + task.Description
-			}
-		}
-		launched, err := s.launchForTask(ctx, task, declared.Agent, prompt)
+		launched, err := s.launchForTask(ctx, task, declared.Agent, templatePrompt(declared, task))
 		if err != nil {
 			// Reported in the result, not as an error. The tasks and their
 			// worktrees are already real, and an error would discard the
@@ -215,5 +232,25 @@ func (s *Server) applyTemplate(ctx context.Context, rawParams json.RawMessage) (
 		}
 		applied.Agents = append(applied.Agents, launched)
 	}
+	// Re-read the tasks so the result carries anything the auto-start watcher
+	// managed to launch while this call was still building its reply.
+	for index, declared := range ordered {
+		if task, err := s.tasks.Get(created[declared.Key].ID); err == nil {
+			applied.Tasks[index] = task
+		}
+	}
 	return applied, nil
+}
+
+// templatePrompt is what a template-launched agent is told when the template
+// declares no prompt of its own.
+func templatePrompt(declared workflow.TemplateTask, task workflow.Task) string {
+	if declared.Prompt != "" {
+		return declared.Prompt
+	}
+	prompt := "You have been assigned this task: " + task.Title
+	if task.Description != "" {
+		prompt += "\n\n" + task.Description
+	}
+	return prompt
 }

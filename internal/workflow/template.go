@@ -38,6 +38,11 @@ type TemplateTask struct {
 	Agent string `json:"agent,omitempty"`
 	// Prompt is what that agent is told. Empty means the task itself.
 	Prompt string `json:"prompt,omitempty"`
+	// AutoStart defers the launch until every dependency is done and then
+	// starts it without anyone waiting on the board. It requires Agent, and
+	// it only takes effect when the template is applied with starting
+	// enabled; applying without it never schedules a launch.
+	AutoStart bool `json:"auto_start,omitempty"`
 }
 
 // ParseTemplate reads and validates a template. It rejects anything that would
@@ -78,6 +83,8 @@ func (t Template) validate() error {
 			return fmt.Errorf("two tasks share the key %q", task.Key)
 		case strings.TrimSpace(task.Title) == "":
 			return fmt.Errorf("task %q has no title", task.Key)
+		case task.AutoStart && strings.TrimSpace(task.Agent) == "":
+			return fmt.Errorf("task %q asks for auto_start but names no agent", task.Key)
 		}
 		keys[task.Key] = true
 	}

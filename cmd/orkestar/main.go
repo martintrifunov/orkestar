@@ -716,6 +716,7 @@ Usage:
   orkestar task edit <task-id> [--title=…] [--description=…] [--depends-on=id1,id2]
   orkestar task status <task-id> <pending|in_progress|done|cancelled>
   orkestar task assign <task-id> <agent-id>
+  orkestar task auto-start <task-id> <agent> [--prompt=text] | orkestar task auto-start <task-id> --clear
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]

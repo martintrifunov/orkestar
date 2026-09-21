@@ -94,14 +94,20 @@ func TestWaitsReleasedOnClientDisconnect(t *testing.T) {
 	callRecovery(t, client, "task.create", map[string]any{
 		"workspace_id": w.ID, "title": "waited on", "auto_review": false,
 	}, &task)
+	// The daemon keeps a watcher of its own for auto-start tasks, so the
+	// count to compare against is the baseline it holds, not zero.
+	waitForCondition(t, "the daemon's own watcher to register", 3*time.Second, func() bool {
+		return server.tasks.Watchers() >= 1
+	})
+	base := server.tasks.Watchers()
 	taskWaiter := sendRawWait(t, socket, "task.wait", map[string]any{
 		"task_id": task.ID, "until": "done", "timeout_seconds": 60,
 	})
 	waitForCondition(t, "task wait to register", 3*time.Second, func() bool {
-		return server.tasks.Watchers() == 1
+		return server.tasks.Watchers() == base+1
 	})
 	_ = taskWaiter.Close()
 	waitForCondition(t, "task wait to release on disconnect", 5*time.Second, func() bool {
-		return server.tasks.Watchers() == 0
+		return server.tasks.Watchers() == base
 	})
 }

@@ -68,6 +68,10 @@ func NewServer(client *ipc.Client, version string) *sdk.Server {
 	}, taskUpdate(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "task_auto_start",
+		Description: "Declare that an agent should be launched on a task as soon as every dependency is done, so a chain runs without waiting on each link; call with no adapter to clear a declaration that has not fired. Launch happens in the background and is recorded on the task.",
+	}, taskAutoStart(client))
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_start",
 		Description: "Launch an agent to work a task, in the task's git worktree when it has one, assign the task to it, and tell it what to do. The prompt defaults to the task's own title and description, and is held until the agent's session reports it has started, so there is no need to wait before calling this. The task moves to in_progress once the agent acts on it. Use agent_list to see which adapters are available and what is already running.",
 	}, taskStart(client))
@@ -79,7 +83,7 @@ func NewServer(client *ipc.Client, version string) *sdk.Server {
 
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "template_apply",
-		Description: "Create every task a template declares, with their dependencies and worktrees. With start set, it also launches the agents the template names, for the tasks nothing is blocking; the rest come back in 'waiting' and are picked up with task_wait until startable.",
+		Description: "Create every task a template declares, with their dependencies and worktrees. With start set, it also launches the agents the template names, for the tasks nothing is blocking; the rest come back in 'waiting' and are picked up with task_wait until startable. Tasks the template marked auto_start are launched by the daemon as their dependencies finish and come back in 'auto_starting' instead.",
 	}, templateApply(client))
 
 	sdk.AddTool(server, &sdk.Tool{
@@ -189,6 +193,8 @@ type taskCreateInput struct {
 	Description string   `json:"description,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty" jsonschema:"IDs of tasks that must be done before this one can start"`
 	AutoReview  *bool    `json:"auto_review,omitempty" jsonschema:"defaults to true; set false to allow marking the task done without a reviewer-agent verdict"`
+	AutoAgent   string   `json:"auto_agent,omitempty" jsonschema:"adapter to launch once every dependency is done; leave empty to start the task by hand or with task_start"`
+	AutoPrompt  string   `json:"auto_prompt,omitempty" jsonschema:"what the automatically started agent is told; defaults to the task's title and description"`
 }
 
 func taskCreate(client *ipc.Client) sdk.ToolHandlerFor[taskCreateInput, workflow.Task] {
@@ -200,6 +206,9 @@ func taskCreate(client *ipc.Client) sdk.ToolHandlerFor[taskCreateInput, workflow
 			"description":  in.Description,
 			"depends_on":   in.DependsOn,
 			"auto_review":  &autoReview,
+			"auto_start":   in.AutoAgent != "",
+			"auto_agent":   in.AutoAgent,
+			"auto_prompt":  in.AutoPrompt,
 		})
 	}
 }
@@ -270,6 +279,21 @@ func taskUpdate(client *ipc.Client) sdk.ToolHandlerFor[taskUpdateInput, workflow
 	}
 }
 
+type taskAutoStartInput struct {
+	TaskID  string `json:"task_id"`
+	Adapter string `json:"adapter,omitempty" jsonschema:"adapter to launch when the task becomes startable; omit or leave empty to clear the declaration"`
+	Prompt  string `json:"prompt,omitempty" jsonschema:"what the agent is told; defaults to the task's title and description"`
+}
+
+func taskAutoStart(client *ipc.Client) sdk.ToolHandlerFor[taskAutoStartInput, workflow.Task] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in taskAutoStartInput) (*sdk.CallToolResult, workflow.Task, error) {
+		return callIPC[workflow.Task](ctx, client, "task.setAutoStart", map[string]string{
+			"task_id": in.TaskID,
+			"agent":   in.Adapter,
+			"prompt":  in.Prompt,
+		})
+	}
+}
 type taskStartInput struct {
 	TaskID  string  `json:"task_id"`
 	Adapter string  `json:"adapter,omitempty" jsonschema:"which agent to launch; may be omitted when exactly one adapter is available"`

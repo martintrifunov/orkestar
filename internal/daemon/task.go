@@ -82,6 +82,12 @@ func (s *Server) createTask(rawParams json.RawMessage) (workflow.Task, error) {
 		// required before the task can move to done) unless the caller
 		// explicitly opts out.
 		AutoReview *bool `json:"auto_review"`
+		// AutoStart, with AutoAgent, asks the daemon to launch that agent
+		// once the task's dependencies are done. It is recorded only with an
+		// agent to launch.
+		AutoStart  bool   `json:"auto_start"`
+		AutoAgent  string `json:"auto_agent"`
+		AutoPrompt string `json:"auto_prompt"`
 	}
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return workflow.Task{}, fmt.Errorf("decode task create params: %w", err)
@@ -93,9 +99,27 @@ func (s *Server) createTask(rawParams json.RawMessage) (workflow.Task, error) {
 	if !ok {
 		return workflow.Task{}, fmt.Errorf("workspace %q does not exist", params.WorkspaceID)
 	}
+	if params.AutoStart && params.AutoAgent == "" {
+		return workflow.Task{}, errors.New("auto_start requires an agent to launch")
+	}
+	if params.AutoAgent != "" {
+		s.mu.RLock()
+		_, ok := s.adapters[params.AutoAgent]
+		s.mu.RUnlock()
+		if !ok {
+			return workflow.Task{}, fmt.Errorf("adapter %q is not registered", params.AutoAgent)
+		}
+	}
 
 	autoReview := params.AutoReview == nil || *params.AutoReview
-	return s.tasks.Create(params.WorkspaceID, params.Title, params.Description, params.DependsOn, autoReview)
+	task, err := s.tasks.Create(params.WorkspaceID, params.Title, params.Description, params.DependsOn, autoReview)
+	if err != nil {
+		return workflow.Task{}, err
+	}
+	if params.AutoStart {
+		return s.tasks.SetAutoStart(task.ID, params.AutoAgent, params.AutoPrompt)
+	}
+	return task, nil
 }
 
 func (s *Server) setTaskStatus(ctx context.Context, rawParams json.RawMessage) (workflow.Task, error) {
@@ -240,6 +264,30 @@ func (s *Server) assignTask(rawParams json.RawMessage) (workflow.Task, error) {
 	return s.tasks.Assign(params.TaskID, params.AgentID)
 }
 
+// setTaskAutoStart records the agent to launch once a task's dependencies are
+// done, or clears that request when no agent is named. The adapter is checked
+// now rather than at launch time so a typo is reported while the caller is
+// still listening; a manifest that later removes it fails the launch and is
+// recorded on the task.
+func (s *Server) setTaskAutoStart(rawParams json.RawMessage) (workflow.Task, error) {
+	var params struct {
+		TaskID string `json:"task_id"`
+		Agent  string `json:"agent"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return workflow.Task{}, fmt.Errorf("decode task auto-start params: %w", err)
+	}
+	if params.Agent != "" {
+		s.mu.RLock()
+		_, ok := s.adapters[params.Agent]
+		s.mu.RUnlock()
+		if !ok {
+			return workflow.Task{}, fmt.Errorf("adapter %q is not registered", params.Agent)
+		}
+	}
+	return s.tasks.SetAutoStart(params.TaskID, params.Agent, params.Prompt)
+}
 // createTaskWorktree gives a task its own git worktree and branch,
 // sibling to its workspace's directory, so an agent can work on it without
 // disturbing the workspace's primary checkout.

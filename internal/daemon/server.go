@@ -73,6 +73,9 @@ type Server struct {
 	// adapterLoader rebuilds the full adapter set, built-ins and manifests,
 	// when a reload is requested. Nil means reload is not configured.
 	adapterLoader func() ([]agent.Adapter, error)
+	// autoStartMu serializes the board scans that launch auto_start tasks, so
+	// two changes landing together cannot start one task twice.
+	autoStartMu sync.Mutex
 
 	mu              sync.RWMutex
 	listener        net.Listener
@@ -165,6 +168,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	})
 	go guard("persist.retry", s.persistRetryLoop)
 	go guard("agent.watchdog", s.watchdogLoop)
+	go guard("task.auto-start", s.autoStartLoop)
 
 	defer func() {
 		s.stopOnce.Do(func() { close(s.stop) })
@@ -374,6 +378,8 @@ func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Re
 		result, err = s.setTaskStatus(ctx, request.Params)
 	case "task.assign":
 		result, err = s.assignTask(request.Params)
+	case "task.setAutoStart":
+		result, err = s.setTaskAutoStart(request.Params)
 	case "task.createWorktree":
 		result, err = s.createTaskWorktree(ctx, request.Params)
 	case "task.removeWorktree":

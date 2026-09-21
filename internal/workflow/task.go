@@ -48,10 +48,38 @@ type Task struct {
 	// AutoReview, when true, requires a reviewer-agent verdict before the
 	// task may move to StatusDone. Callers that don't want that gate must
 	// opt out explicitly when creating the task.
-	AutoReview bool      `json:"auto_review"`
-	Status     Status    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	AutoReview bool `json:"auto_review"`
+	// AutoStart asks the daemon to launch AutoAgent on this task as soon as
+	// every dependency is done, so a declared chain runs without a person or
+	// an orchestrator calling task.wait for each link. The assignment is what
+	// marks it as started: once AssigneeAgentID is set the daemon never
+	// launches again, including across a restart.
+	AutoStart bool `json:"auto_start,omitempty"`
+	// AutoAgent names the adapter an automatic start launches. Empty means
+	// there is nothing to start and AutoStart is inert.
+	AutoAgent string `json:"auto_agent,omitempty"`
+	// AutoPrompt is what that agent is told. Empty falls back to the task's
+	// title and description.
+	AutoPrompt string `json:"auto_prompt,omitempty"`
+	// AutoStartError records why an automatic launch failed. A task carrying
+	// one is not retried: a launch that failed once for a missing adapter or
+	// a bad directory would fail again on every board change, so the reason
+	// is reported and the decision to try again stays with a person.
+	AutoStartError string `json:"auto_start_error,omitempty"`
+	// TokenBudget, when positive, is the number of tokens the agents working
+	// this task may report before BudgetAction applies. Zero means the task
+	// has no token budget.
+	TokenBudget int64 `json:"token_budget,omitempty"`
+	// TimeBudgetSeconds, when positive, bounds how long one agent session
+	// launched for this task may run before BudgetAction applies.
+	TimeBudgetSeconds int64 `json:"time_budget_seconds,omitempty"`
+	// BudgetAction is what crossing either budget does: BudgetActionWarn
+	// raises attention, BudgetActionStop also interrupts the agent. Empty
+	// behaves as warn.
+	BudgetAction string    `json:"budget_action,omitempty"`
+	Status       Status    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Board tracks tasks across workspaces and enforces dependency and
@@ -304,6 +332,44 @@ func (b *Board) Assign(taskID, agentID string) (Task, error) {
 	return task, nil
 }
 
+// SetAutoStart records the agent an automatic start should launch once the
+// task's dependencies are done. An empty agent clears the request, which is
+// also how a person cancels one before it fires.
+func (b *Board) SetAutoStart(taskID, agent, prompt string) (Task, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	task, ok := b.tasks[taskID]
+	if !ok {
+		return Task{}, fmt.Errorf("task %q does not exist", taskID)
+	}
+	task.AutoStart = agent != ""
+	task.AutoAgent = agent
+	task.AutoPrompt = prompt
+	task.AutoStartError = ""
+	task.UpdatedAt = time.Now().UTC()
+	b.tasks[taskID] = task
+	b.notify()
+	return task, nil
+}
+
+// SetAutoStartError records why an automatic start could not happen. An empty
+// reason clears it. A task with an error is skipped by the auto-start scan
+// rather than retried on every board change.
+func (b *Board) SetAutoStartError(taskID, reason string) (Task, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	task, ok := b.tasks[taskID]
+	if !ok {
+		return Task{}, fmt.Errorf("task %q does not exist", taskID)
+	}
+	task.AutoStartError = reason
+	task.UpdatedAt = time.Now().UTC()
+	b.tasks[taskID] = task
+	b.notify()
+	return task, nil
+}
 // SetWorktree records the git worktree path and branch associated with a
 // task. It only tracks metadata; creating or removing the worktree on disk
 // is the caller's responsibility (see internal/git).
