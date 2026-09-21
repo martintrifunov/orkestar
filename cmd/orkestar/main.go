@@ -111,6 +111,8 @@ func run(args []string) error {
 		return runMachine(paths, args[1:])
 	case "policy":
 		return runPolicy(paths, args[1:])
+	case "run":
+		return runRun(paths, args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -727,6 +729,7 @@ Usage:
   orkestar task diff <task-id>
   orkestar template list <workspace-id>
   orkestar template apply <workspace-id> <name> [--start]
+  orkestar run [--workspace=DIR] [--task=<id>|--template=NAME] [--agent=ADAPTER] [--prompt=TEXT] [--title=TITLE] [--timeout=600] [--no-review]
   orkestar policy audit [--workspace=<id>] [--json]
   orkestar policy check <adapter> <tool> [target] [--workspace=<id>]
   orkestar mcp serve
