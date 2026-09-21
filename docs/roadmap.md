@@ -155,7 +155,7 @@ All five shipped. What each cost was mostly honesty rather than code:
 - [ ] Unity MCP instance routing
 - [ ] Godot adapter evaluation and integration
 - [ ] Screenshot and play/test result workflows
-- [ ] **Inline image protocols.** Promoted here rather than to M6 because this
+- [x] **Inline image protocols.** Promoted here rather than to M6 because this
       is where it earns its place: a screenshot of an engine viewport is the
       artifact the workflow produces, and a path to a PNG in a task's artifact
       list is not the same as seeing it.
@@ -387,6 +387,276 @@ Deliberate non-goals, unchanged: any plugin or theme marketplace, tabs as a
 separate concept, a graphics engine, and matching herdr on multiplexer surface
 for its own sake. Orkestar's bet stays the workflow layer and a runtime a
 person can walk away from.
+
+## M15: Unattended operation
+
+M0 through M13 give Orkestar work to own and a way to hand it between agents.
+None of it makes walking away safe: an agent can run until a rate-limit window
+is gone, a template stops when its first tasks are launched, and every
+permission reply still waits on a person. The three below are ordered by what
+unattended work needs first — a limit, a next step, and a policy for the
+routine ask. Each builds on machinery already shipped (the watchdog, task waits
+and templates, the permission inbox), so it is wiring rather than foundations.
+
+- [x] **Usage and cost budgets per task and agent.** The watchdog added
+      2026-09-18 raises attention when a turn runs long, and its own comment
+      names the limit: "Orkestar cannot see token usage." It can, for agents
+      that report it, and a budget is what turns that from a display into a
+      stop.
+
+      - Usage sources: Codex rollout logs already carry `token_usage_record`
+        with per-turn and per-thread totals and the rate-limit window; Claude
+        hook payloads and the OpenCode plugin expose what they expose, and a
+        provider's own log is parsed where the hook does not. A manifest gains
+        an optional usage source (a log path and a pattern) so a declarative
+        agent can report without code, the same shape as M10's detection
+        rules. An adapter with no source stays time-only, which is today.
+      - A budget belongs to the task and is inherited by agents launched for
+        it: a token ceiling and a wall-clock ceiling, each with a warn and an
+        optional stop threshold. Tokens are the primary unit because that is
+        what an agent reports; a dollar estimate needs a configured price
+        table and is derived, never stored as the budget itself.
+      - Crossing a threshold raises the same attention a crash raises.
+        Crossing a stop threshold interrupts the agent, leaves the task open,
+        and records why where `agent.explain`, the CLI and the task's
+        artifacts can read it. A budget stops the agent, never the task:
+        cancelling or completing the work stays a person's call.
+      - Surfaces: usage and budget on task and agent rows, `agent.explain`,
+        `orkestar task budget` / `orkestar agent usage`, and MCP read tools so
+        an orchestrator can see what a pipeline is spending.
+      - Acceptance: a budgeted agent that crosses its stop threshold is
+        interrupted with the reason readable over IPC, CLI and MCP; a warn-only
+        budget raises attention and nothing more; an adapter with no usage
+        source changes nothing; the time watchdog still fires on its own.
+
+- [x] **Auto-advance: start dependents when their dependencies finish.** A
+      template starts every task with nothing blocking it at apply time and
+      reports the rest as waiting, which M5 documented as "picked up with
+      `task.wait` until startable" — a person or an orchestrator had to do the
+      picking up. The daemon already knows the moment a task reaches done and
+      already wakes waiters on it; the dependent belongs on that list.
+
+      - A template task that names an agent gains an `auto_start` flag
+        (default false, so applying a template does not silently become a
+        pipeline). When a task reaching done makes such a dependent startable
+        — every dependency done — the daemon launches its agent with its
+        prompt. A task that already has an agent associated is never started
+        again, which is what makes the rule exactly-once across a restart
+        without a second bit of state to keep.
+      - A cancelled dependency, or a review that will keep a task from ever
+        reaching done, halts its dependents and records why; the chain stops
+        because nothing can make the next link startable, and cancelling what
+        is still pending stops it the rest of the way. Applying the same
+        template twice is two independent sets of tasks, never a trigger for
+        the first set.
+      - A chain that starts agents is exactly the thing the budgets and
+        permission policies above exist to make safe, which is why this sits
+        after them.
+      - Acceptance: a three-task chained template with `auto_start` runs from
+        one apply to a finished board with no human or orchestrator call;
+        cancelling the middle task leaves the third unstarted and says why;
+        restarting the daemon mid-chain neither doubles nor loses a launch.
+
+- [x] **Permission policies.** The permission inbox (M2) and the hook/plugin
+      reply bridges work; every reply is still a person's. An unattended chain
+      stalls on the first routine question — the same `git status`, the same
+      read of a file in the workspace — and stalls with nobody watching.
+
+      - A policy is an ordered list of rules matching the asking agent, the
+        tool, and a command or path pattern, with decisions allow, deny or
+        ask. First match wins, and an unmatched request keeps today's
+        behavior, which is to land in the inbox. Anything a rule decides is
+        recorded with the rule, the request and the time, so "why was this
+        approved" is answerable afterwards, and `agent.explain` names the rule
+        holding or deciding a request.
+      - Written where other Orkestar configuration lives (a workspace
+        `.orkestar/policy.json`, with a user-level file beneath it), validated
+        whole before it is applied, the way templates are: a half-applied
+        policy that silently approves is worse than a rejected one.
+      - This is the inbound half of the policy and audit middleware M4 lists
+        for external MCP calls. When M4 lands both should share one rule
+        vocabulary rather than growing two, and it is written here so the
+        second one does not invent a format the first cannot read.
+      - Acceptance: a repeated ask answered by a rule with no human in the
+        loop; an unmatched ask still reaches the inbox; the audit names the
+        deciding rule, and a rejected policy changes nothing.
+
+## M16: Operator surface
+
+The person is watching more often than not, and these make that better: run the
+loop without a TUI, find what happened, keep the evidence when it scrolls away,
+and make a notification something you can act on. Ordered by how much daily
+friction each removes. `orkestar run` wants M15's budgets before it is safe in
+CI, which is the one dependency here.
+
+- [x] **Headless `orkestar run`.** The control surface is all there — start,
+      send, read, wait, attach, review — over IPC, CLI and MCP, but running one
+      piece of work start to finish still means composing several verbs in a
+      shell script, each with its own JSON handling. One command should do it:
+      given a workspace or a new directory, a task or a template, and an agent,
+      it creates what is missing, starts the work, waits on `task.wait`, prints
+      a machine-readable summary (status, artifacts, diff, usage once M15 has
+      it), and exits non-zero when the work failed or was cancelled.
+
+      - Interactive input is out of scope by definition: with no TTY the run
+        either finishes, hits a permission that policy answers, or reports the
+        stall. `--timeout` bounds it the way every other wait is bounded, and
+        an interrupt stops the run cleanly without killing the daemon or the
+        other sessions on it.
+      - This is the entry point CI and the M4/M7 pipelines need, and it is the
+        cheapest way to find out whether an Orkestar workflow is reproducible
+        without a person at the terminal.
+      - Acceptance: on a machine with no daemon running, one command creates a
+        workspace, creates or applies work, runs it to done, and prints a
+        parseable summary whose exit code matches the outcome; interrupting
+        mid-run leaves the daemon and its other sessions running.
+
+- [x] **Global search across panes, tasks and artifacts.** What a pane printed
+      is daemon-owned and bounded, tasks and artifacts are in the store, and
+      pane labels are client-side; nothing searches across them. "Where did
+      that error appear" today means visiting panes one at a time.
+
+      - One query over the visible screen and bounded scrollback of every
+        terminal (the content `terminal.read` already serves), pane labels,
+        task titles and descriptions, artifacts and templates. A TUI overlay
+        jumps to the pane or task that matched and shows the surrounding
+        lines; `orkestar search` and an MCP tool give a script and an agent the
+        same thing, which is how one agent finds where another failed.
+      - It starts as a scan over the bounded history rather than a full-text
+        index: the history is already capped and local, and an index is a
+        store change whose cost is not justified until a scan is felt to be
+        slow. Results are ordered deterministically (kind, then recency, then
+        identity) so two runs of the same query agree.
+      - Acceptance: a phrase printed in any pane is found and selecting the
+        result focuses that pane; task titles and artifact labels match; a
+        terminal with no output and a workspace with nothing running both
+        answer with an empty result rather than an error.
+
+- [x] **Recording a pane as a review artifact.** The artifact kinds cover a
+      diff, a test result, a log, a screenshot, a build and a review; the
+      timeline of a run is none of them, and a session's scrollback is bounded
+      and dropped when its terminal ends. When an agent's behavior is the
+      thing under review, the diff alone does not show it.
+
+      - Recording captures a terminal's output chunks with timestamps into a
+        file the daemon owns, bounded by size and age the way pane history is,
+        opt-in per terminal, and registered on its task as an artifact (a
+        `recording` kind, or `log` with a declared format). The format is
+        asciicast-compatible so the file is useful outside Orkestar, and the
+        review pane can replay it beside the diff.
+      - Secrets: a recording is pane history written to disk and carries the
+        same caveat, so it is off by default, announced while active, and
+        removed with its terminal or task. A template never starts one
+        silently.
+      - Acceptance: `orkestar terminal record start|stop` produces a file that
+        replays in the TUI review pane and parses as asciicast; an unrecorded
+        terminal writes nothing; a recording past its bound is trimmed rather
+        than growing without limit.
+
+- [x] **Notifications that act.** The bell and the desktop notification fire,
+      and `notify.go`'s own comment admits the second gap: "This still needs a
+      client running." Either way a notification says what happened and offers
+      nothing to do about it; acting means finding the pane and reaching for
+      the right binding.
+
+      - Where the platform can carry an action (Linux `notify-send --action`;
+        macOS through `terminal-notifier` when it is installed, since
+        AppleScript notifications have no buttons; Windows has no equivalent),
+        the notification offers the one action that applies — focus the pane,
+        or approve or deny the waiting permission. The action posts an IPC call
+        to the daemon, so it works without the TUI holding focus.
+      - Where the platform cannot, the notification names the pane and the
+        binding instead of pretending, and the settings screen says which
+        behavior this machine gets, the way it already reports whether
+        notifications are supported at all.
+      - Delivery moves behind the daemon so a change worth notifying happens
+        with no client attached, which is the caveat the current code writes
+        down. Cross-machine delivery stays out of scope: a notification is a
+        local desktop thing, and reaching a phone belongs with remote access.
+      - Acceptance: on a platform with actions, approving from the
+        notification replies to the waiting hook and the row clears with no TUI
+        focus; on a platform without, the capability is reported and no action
+        is offered; a bell-worthy change with no client attached still posts
+        once, not once per client that later connects.
+
+## M17: GitHub issue and PR sync
+
+The first integration with a service rather than an agent runtime or an engine,
+and the largest guess about how somebody else works, which is why it is last and
+alone. The rule it
+sets is the one every later integration should follow: the platform's own CLI
+is the authentication boundary, and Orkestar stores no credential.
+
+- [x] **Import an issue as a task, open a PR from a reviewed one.** Work
+      usually starts as an issue and ends as a pull request, and both are
+      copied by hand into Orkestar today.
+
+      - Import (`orkestar task import --github <url|number>`) shells out to
+        `gh`, which owns authentication, and creates a task whose description
+        and link come from the issue. Orkestar never reads or stores a token,
+        consistent with the machine catalog and M12's no-secret rule.
+      - Export (`orkestar task pr <id>`) opens a PR from the task's worktree
+        branch once the review gate passes, with the title and body taken from
+        the task, the reviewer's verdict linked, and the PR URL recorded as an
+        artifact. It never merges, closes an issue or force-pushes; those stay
+        the platform's and the person's.
+      - Sync starts one-way (issue to task, PR link back), because between two
+        sources of truth the hard part is not the API but deciding which side
+        wins. A missing or unauthenticated `gh` produces a clear error and no
+        partial task, the rule templates already follow.
+      - Acceptance: with `gh` authenticated, importing an issue creates a
+        linked task and opening a PR from a reviewed task succeeds with the URL
+        on the task; without `gh`, both fail before creating anything.
+
+## M15–M17 progress — 2026-09-21
+
+Specified and implemented the same day from the tree at `b853b98`. What each
+one actually is, and what is still missing:
+
+- **Budgets** live on the task (`token_budget`, `time_budget_seconds`,
+  `budget_action`) and are checked on every hook and on the watchdog tick.
+  Usage comes from the Claude transcript, the Codex rollout found by native
+  session ID, and the OpenCode plugin's token totals; the daemon reads each
+  incrementally from a stored offset. Crossing a budget raises attention and
+  records a `log` artifact on the task; `stop` also interrupts the agent.
+  `agent.explain` reports the budget and spend. **Not implemented**: a
+  manifest-declared usage source, so a declarative agent still reports no
+  tokens, and dollar estimates, which need a price table.
+- **Auto-advance** is `auto_start` on a template task, recorded as
+  `task.setAutoStart` and launched by a daemon board watcher once every
+  dependency is done. The assignment is the exactly-once marker, so a restart
+  neither doubles nor loses a launch; a failed launch is recorded on the task
+  and not retried. `AppliedTemplate.AutoStarting` reports what the daemon now
+  owns.
+- **Permission policies** are `.orkestar/policy.json` with a user-level file
+  beneath it, first match wins, and a rule that would match everything with
+  allow or deny is refused. Decisions are audited and persisted
+  (`policy.audit`), a hypothetical request can be checked (`policy.check`), and
+  an ask that reaches the inbox names the rule consulted. **Not implemented**:
+  sharing M4's rule vocabulary, since M4 has not started.
+- **`orkestar run`** creates or reuses a workspace, creates a task or applies a
+  template, launches an agent, waits on `task.wait`, and prints a JSON summary;
+  a cancelled or timed-out run exits non-zero after printing. A template with
+  hand-start waiting tasks is refused rather than left to time out.
+- **Search** scans terminal screens and bounded scrollback, tasks, artifacts
+  and templates over IPC, CLI and MCP, with pane-label matches added
+  client-side. It is a scan, not an index.
+- **Recording** captures a terminal as an asciicast v2 file, capped at 8 MiB,
+  and attaches it to a task as a `recording` artifact. The TUI has a recordings
+  overlay (`Ctrl+b R`) and a replay pane. The secrets caveat is the pane-history
+  one: a recording is terminal text written to disk.
+- **Notifications** are actionable where the platform reports the choice
+  (Linux `notify-send --wait --action`); macOS AppleScript notifications have
+  no buttons, so they name the change and nothing more. The daemon posts only
+  when no client is attached; the interface keeps focus-aware suppression.
+  Cross-machine delivery remains out of scope.
+- **GitHub** import and PR use the `gh` CLI as the authentication boundary;
+  no token is stored. `task import` creates a task from an issue, `task pr`
+  opens a pull request from a done task's branch and records the URL as a
+  `pull_request` artifact. Sync is one-way. Verified against a fake `gh` on
+  PATH, not a real GitHub account.
+
+M4 still blocks M7, and nothing here changes that.
 
 ## Later possibilities
 

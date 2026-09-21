@@ -27,8 +27,12 @@ Delegating a piece of work:
 4. task_start to launch an agent on it. This assigns the task, starts the
    session in the worktree, and sends it the task as its opening prompt; pass
    your own prompt to say something more specific. Call agent_list first if you
-   do not know which adapters are available.
-5. task_wait until "done", or "finished" if a cancellation is an acceptable
+   do not know which adapters are available. When a task should wait for its
+   dependencies and then start on its own, task_auto_start declares that
+   instead, and the daemon launches it without anyone waiting.
+5. task_set_budget when the work could run long: a token or wall-clock ceiling
+   that raises attention, and optionally interrupts the agent, when crossed.
+6. task_wait until "done", or "finished" if a cancellation is an acceptable
    outcome. Do not call task_list in a loop: waiting is what these tools are
    for, and polling costs you a turn every time you ask.
 
@@ -50,7 +54,11 @@ While work is running:
   terminal_read returns the last lines one has printed, and terminal_send types
   into one while no client is holding its input. terminal_wait blocks until a
   terminal's output contains text, so waiting for a command to reach a point
-  does not need terminal_read in a loop.
+  does not need terminal_read in a loop. terminal_record captures a terminal as
+  a replayable asciicast and attaches it to a task.
+- search finds text in any terminal's screen and scrollback, in tasks, and in
+  artifacts. Use it to locate where another agent failed instead of reading
+  panes one at a time.
 
 Finishing:
 
@@ -61,6 +69,9 @@ Finishing:
   log, a build — so it survives the session that made it.
 - task_update corrects a title, a description or dependencies afterwards.
   Dependencies discovered mid-flight belong here rather than in a new task.
+- task_import_github creates a task from an issue, and task_open_pr opens a
+  pull request from a finished task's branch. Both use the gh CLI's own
+  authentication; Orkestar stores no token.
 
 Work that is done the same way repeatedly:
 
@@ -69,7 +80,9 @@ Work that is done the same way repeatedly:
   depends on what, and which agent does each.
 - template_apply creates all of it at once. With start, it launches the agents
   for the tasks nothing is blocking, and returns the rest in "waiting"; take
-  those with task_wait until startable, then task_start.
+  those with task_wait until startable, then task_start. Tasks a template marks
+  auto_start come back in "auto_starting" instead: the daemon launches each one
+  as its dependencies finish, so a chain needs no waiting at all.
 
 Two things worth knowing:
 

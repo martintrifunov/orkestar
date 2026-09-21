@@ -22,6 +22,8 @@ continues to type into that agent.
 | Editor settings, including syntax highlighting | Ctrl+b, comma |
 | Show or hide the file viewer | Ctrl+b, f |
 | Scrollback for the focused terminal | Ctrl+b, [ |
+| Global search across panes, tasks and artifacts | Ctrl+b, / |
+| List and replay terminal recordings | Ctrl+b, R |
 | Focus sidebar | Ctrl+b, Tab |
 | Close focused pane | Ctrl+b, q |
 | Explicitly discard a dirty standard editor | Ctrl+b, x |
@@ -43,10 +45,17 @@ the daemon is waiting on, and any pending permission. It is the same account
 `orkestar agent explain` prints, shown over the content area.
 
 An agent that stays in one working state for 30 minutes without a lifecycle
-change is flagged in the sidebar the way a crash is. Orkestar cannot see token
-usage, but a turn that has quietly run that long is the shape of the incident
-the watchdog exists for. Set `ORKESTAR_AGENT_WATCHDOG` to a Go duration (for
-example `1h`) to change the limit, or `0` to turn the notice off.
+change is flagged in the sidebar the way a crash is, and its reported token
+count is shown beside it when the adapter reports one. Set
+`ORKESTAR_AGENT_WATCHDOG` to a Go duration (for example `1h`) to change the
+limit, or `0` to turn the notice off.
+
+A task can carry its own budget with `orkestar task budget <task-id>
+--tokens=N` (or `--seconds=N`), with `--action=warn` raising attention when it
+is crossed and `--action=stop` also interrupting the agent. `agent explain`
+reports the limit and the spend; crossing one is recorded on the task as an
+artifact, because the attention reason can be cleared by the agent's next
+lifecycle event.
 
 A session that belongs to an agent cannot be removed on its own; remove the
 agent and its terminal goes too. Sessions restored after a daemon restart are
