@@ -288,6 +288,22 @@ func (s *Server) setTaskAutoStart(rawParams json.RawMessage) (workflow.Task, err
 	}
 	return s.tasks.SetAutoStart(params.TaskID, params.Agent, params.Prompt)
 }
+
+// setTaskBudget records what an agent working this task may spend. Zero for
+// both limits clears the budget; an empty action means warn.
+func (s *Server) setTaskBudget(rawParams json.RawMessage) (workflow.Task, error) {
+	var params struct {
+		TaskID  string `json:"task_id"`
+		Tokens  int64  `json:"tokens"`
+		Seconds int64  `json:"seconds"`
+		Action  string `json:"action"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return workflow.Task{}, fmt.Errorf("decode task budget params: %w", err)
+	}
+	return s.tasks.SetBudget(params.TaskID, params.Tokens, params.Seconds, params.Action)
+}
+
 // createTaskWorktree gives a task its own git worktree and branch,
 // sibling to its workspace's directory, so an agent can work on it without
 // disturbing the workspace's primary checkout.

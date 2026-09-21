@@ -137,6 +137,9 @@ type controllableSession struct {
 	options   agent.LaunchOptions
 	process   *pty.Process
 	closeOnce sync.Once
+	// interrupts counts how many times the daemon asked this session to
+	// interrupt, which is how a budget test observes a stop.
+	interrupts atomic.Int64
 }
 
 // ptyControllableSession is a controllable session that owns a real process,
@@ -171,7 +174,10 @@ func (s *controllableSession) Prompt(ctx context.Context, text string) error {
 	}
 	return nil
 }
-func (s *controllableSession) Interrupt(ctx context.Context) error { return nil }
+func (s *controllableSession) Interrupt(ctx context.Context) error {
+	s.interrupts.Add(1)
+	return nil
+}
 func (s *controllableSession) Events() <-chan agent.LifecycleEvent { return s.events }
 func (s *controllableSession) Close() error {
 	s.closeOnce.Do(func() {

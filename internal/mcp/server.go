@@ -71,6 +71,12 @@ func NewServer(client *ipc.Client, version string) *sdk.Server {
 		Name:        "task_auto_start",
 		Description: "Declare that an agent should be launched on a task as soon as every dependency is done, so a chain runs without waiting on each link; call with no adapter to clear a declaration that has not fired. Launch happens in the background and is recorded on the task.",
 	}, taskAutoStart(client))
+
+	sdk.AddTool(server, &sdk.Tool{
+		Name:        "task_set_budget",
+		Description: "Set what an agent working a task may spend before attention is raised, and optionally stop it: a token budget checked against the provider's transcript, a time budget bounding one session, or both. action 'stop' interrupts the agent; the default 'warn' only raises attention. Zero limits clear the budget.",
+	}, taskSetBudget(client))
+
 	sdk.AddTool(server, &sdk.Tool{
 		Name:        "task_start",
 		Description: "Launch an agent to work a task, in the task's git worktree when it has one, assign the task to it, and tell it what to do. The prompt defaults to the task's own title and description, and is held until the agent's session reports it has started, so there is no need to wait before calling this. The task moves to in_progress once the agent acts on it. Use agent_list to see which adapters are available and what is already running.",
@@ -294,6 +300,22 @@ func taskAutoStart(client *ipc.Client) sdk.ToolHandlerFor[taskAutoStartInput, wo
 		})
 	}
 }
+
+type taskSetBudgetInput struct {
+	TaskID  string `json:"task_id"`
+	Tokens  int64  `json:"tokens,omitempty" jsonschema:"token ceiling for the agents working this task; 0 means no token budget"`
+	Seconds int64  `json:"seconds,omitempty" jsonschema:"wall-clock ceiling for one agent session, in seconds; 0 means no time budget"`
+	Action  string `json:"action,omitempty" jsonschema:"warn (default) raises attention, stop also interrupts the agent"`
+}
+
+func taskSetBudget(client *ipc.Client) sdk.ToolHandlerFor[taskSetBudgetInput, workflow.Task] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in taskSetBudgetInput) (*sdk.CallToolResult, workflow.Task, error) {
+		return callIPC[workflow.Task](ctx, client, "task.setBudget", map[string]any{
+			"task_id": in.TaskID, "tokens": in.Tokens, "seconds": in.Seconds, "action": in.Action,
+		})
+	}
+}
+
 type taskStartInput struct {
 	TaskID  string  `json:"task_id"`
 	Adapter string  `json:"adapter,omitempty" jsonschema:"which agent to launch; may be omitted when exactly one adapter is available"`

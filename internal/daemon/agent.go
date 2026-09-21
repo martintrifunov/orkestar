@@ -12,6 +12,7 @@ import (
 
 	"github.com/martintrifunov/orkestar/internal/agent"
 	"github.com/martintrifunov/orkestar/internal/ipc"
+	"github.com/martintrifunov/orkestar/internal/usage"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -37,7 +38,11 @@ type Agent struct {
 	// the underlying PTY into the same terminal buffer/subscriber machinery
 	// used by plain terminal sessions, so this ID can be attached to with
 	// terminal.attach exactly like any other terminal.
-	TerminalID string    `json:"terminal_id,omitempty"`
+	TerminalID string `json:"terminal_id,omitempty"`
+	// TokensUsed is what the provider's transcript reports for this session,
+	// when the adapter writes one. It is what a task's token budget is
+	// checked against; an adapter that reports nothing leaves it zero.
+	TokensUsed int64     `json:"tokens_used,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
@@ -75,6 +80,22 @@ type agentSession struct {
 	// two, and anything written before then is typed into nothing.
 	opening string
 	started bool
+
+	// transcriptPath and transcriptOffset track how far the provider's
+	// transcript has been read for token usage, so each hook pays for the
+	// bytes appended since the last one rather than the whole file.
+	transcriptPath   string
+	transcriptOffset int64
+	// codexRollout is the located transcript for a Codex session; the lookup
+	// is attempted once because the files are found by glob.
+	codexRollout       string
+	codexRolloutLooked bool
+	// budgetFlagged records that a crossed budget has already raised
+	// attention, so the check does not repeat on every hook and tick.
+	budgetFlagged bool
+	// budgetStopped records that a stop budget already interrupted this
+	// session, so a further check does not interrupt it again.
+	budgetStopped bool
 }
 
 func newAgentSession(metadata Agent, session agent.Session) *agentSession {
@@ -636,6 +657,10 @@ type AgentExplanation struct {
 	Resumable   bool                `json:"resumable"`
 	Reasons     []string            `json:"reasons"`
 	Permissions []PermissionRequest `json:"permissions,omitempty"`
+	// Budget is the task's limit and what this session has spent against it,
+	// when the task has one. It is how a warning the daemon raised can be
+	// read as a number rather than a sentence.
+	Budget *BudgetStatus `json:"budget,omitempty"`
 }
 
 func (s *Server) explainAgent(raw json.RawMessage) (AgentExplanation, error) {
@@ -706,6 +731,16 @@ func (s *Server) explainAgent(raw json.RawMessage) (AgentExplanation, error) {
 	if metadata.TaskID != "" {
 		reasons = append(reasons, "working task "+metadata.TaskID)
 	}
+	budget := s.budgetStatus(metadata)
+	switch {
+	case budget == nil:
+	case budget.TokenBudget > 0 || budget.TimeBudgetSeconds > 0:
+		reasons = append(reasons, fmt.Sprintf("budget: %s tokens of %s, %s of %s elapsed; action %s",
+			usage.FormatTokens(budget.TokensUsed), usage.FormatTokens(budget.TokenBudget),
+			(time.Duration(budget.ElapsedSeconds)*time.Second).Round(time.Minute),
+			(time.Duration(budget.TimeBudgetSeconds)*time.Second).Round(time.Minute),
+			budget.Action))
+	}
 	switch {
 	case metadata.NativeSessionID == "":
 		reasons = append(reasons, "no native session ID, so it cannot be resumed")
@@ -720,6 +755,7 @@ func (s *Server) explainAgent(raw json.RawMessage) (AgentExplanation, error) {
 		Resumable:   resumable,
 		Reasons:     reasons,
 		Permissions: permissions,
+		Budget:      budget,
 	}, nil
 }
 

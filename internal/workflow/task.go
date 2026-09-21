@@ -82,6 +82,12 @@ type Task struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// The two ways a task's budget can be enforced when it is crossed.
+const (
+	BudgetActionWarn = "warn"
+	BudgetActionStop = "stop"
+)
+
 // Board tracks tasks across workspaces and enforces dependency and
 // transition rules. It has no knowledge of workspaces, agents, or IPC; the
 // daemon translates between those and Board calls.
@@ -370,6 +376,40 @@ func (b *Board) SetAutoStartError(taskID, reason string) (Task, error) {
 	b.notify()
 	return task, nil
 }
+
+// SetBudget records how much an agent working this task may spend, and what
+// crossing the limit does. Zero for both limits clears the budget. Tokens are
+// the primary unit because that is what agents report; time is the fallback
+// for an agent that reports nothing.
+func (b *Board) SetBudget(taskID string, tokens, seconds int64, action string) (Task, error) {
+	if tokens < 0 || seconds < 0 {
+		return Task{}, errors.New("budgets cannot be negative")
+	}
+	switch action {
+	case "", BudgetActionWarn, BudgetActionStop:
+	default:
+		return Task{}, fmt.Errorf("invalid budget action %q", action)
+	}
+	if action == "" {
+		action = BudgetActionWarn
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	task, ok := b.tasks[taskID]
+	if !ok {
+		return Task{}, fmt.Errorf("task %q does not exist", taskID)
+	}
+	task.TokenBudget = tokens
+	task.TimeBudgetSeconds = seconds
+	task.BudgetAction = action
+	task.UpdatedAt = time.Now().UTC()
+	b.tasks[taskID] = task
+	b.notify()
+	return task, nil
+}
+
 // SetWorktree records the git worktree path and branch associated with a
 // task. It only tracks metadata; creating or removing the worktree on disk
 // is the caller's responsibility (see internal/git).

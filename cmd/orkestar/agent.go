@@ -26,6 +26,11 @@ func runHook() error {
 		Notification string `json:"notification_type"`
 		SubagentID   string `json:"agent_id"`
 		PermissionID string `json:"permission_id"`
+		// Providers that write a transcript name it here; the daemon reads
+		// token usage from it. Bridges that compute their own total send
+		// tokens instead.
+		TranscriptPath string          `json:"transcript_path"`
+		Tokens         int64           `json:"tokens"`
 	}
 	if err := json.NewDecoder(io.LimitReader(os.Stdin, 1024*1024)).Decode(&raw); err != nil {
 		return err

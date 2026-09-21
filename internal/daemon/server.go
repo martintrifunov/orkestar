@@ -380,6 +380,8 @@ func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Re
 		result, err = s.assignTask(request.Params)
 	case "task.setAutoStart":
 		result, err = s.setTaskAutoStart(request.Params)
+	case "task.setBudget":
+		result, err = s.setTaskBudget(request.Params)
 	case "task.createWorktree":
 		result, err = s.createTaskWorktree(ctx, request.Params)
 	case "task.removeWorktree":

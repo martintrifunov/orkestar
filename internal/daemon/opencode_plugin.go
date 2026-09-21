@@ -1,7 +1,8 @@
 package daemon
 
-// The plugin forwards only lifecycle identifiers, never message/prompt bodies.
-// Permission requests remain in OpenCode's own UI if the bridge is unavailable.
+// The plugin forwards lifecycle identifiers, token totals, and the command a
+// permission is about — never message or prompt bodies. Permission requests
+// remain in OpenCode's own UI if the bridge is unavailable.
 const openCodePlugin = `import { spawn } from "node:child_process";
 function send(input) {
   return new Promise(resolve => {
@@ -22,6 +23,8 @@ export const OrkestarPlugin = async ({ client }) => {
   const children = new Set();
   const known = new Set();
   const pending = new Set();
+  const messageTotals = new Map();
+  const sessionTotals = new Map();
   let lifecycle = Promise.resolve();
   return {
     event: async ({ event }) => {
@@ -31,6 +34,20 @@ export const OrkestarPlugin = async ({ client }) => {
       if (!session_id) return;
       if (info.parentID) children.add(session_id);
       if (children.has(session_id)) return;
+      // Token usage rides on message updates, which are not lifecycle
+      // events. Report growth as its own event so a budget can stop a
+      // runaway turn while it is running rather than after it finishes.
+      const t = info.tokens;
+      if (t && info.id) {
+        const total = (t.input||0)+(t.output||0)+(t.reasoning||0)+((t.cache&&t.cache.read)||0)+((t.cache&&t.cache.write)||0);
+        const previous = messageTotals.get(info.id) || 0;
+        if (total > previous) {
+          messageTotals.set(info.id, total);
+          const sessionTotal = (sessionTotals.get(session_id) || 0) + (total - previous);
+          sessionTotals.set(session_id, sessionTotal);
+          void send({hook_event_name: "Usage", session_id, tokens: sessionTotal});
+        }
+      }
       let hook_event_name;
       if ((event.type === "session.created" || event.type === "session.updated") && !known.has(session_id)) {
         known.add(session_id);

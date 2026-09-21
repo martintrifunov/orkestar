@@ -717,6 +717,7 @@ Usage:
   orkestar task status <task-id> <pending|in_progress|done|cancelled>
   orkestar task assign <task-id> <agent-id>
   orkestar task auto-start <task-id> <agent> [--prompt=text] | orkestar task auto-start <task-id> --clear
+  orkestar task budget <task-id> [--tokens=N] [--seconds=N] [--action=warn|stop] [--clear]
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]

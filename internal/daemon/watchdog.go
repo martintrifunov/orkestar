@@ -33,6 +33,7 @@ func (s *Server) watchdogLoop() {
 			return
 		case <-ticker.C:
 			s.checkAgentDurations()
+			s.checkAgentBudgets()
 		}
 	}
 }

@@ -28,6 +28,13 @@ type HookInput struct {
 	Tool            string `json:"tool"`
 	Notification    string `json:"notification"`
 	PermissionID    string `json:"permission_id"`
+	// TranscriptPath is where the provider keeps the session transcript, when
+	// its hook payload names one. The daemon reads token usage from it.
+	TranscriptPath string `json:"transcript_path"`
+	// Tokens is an absolute session total a bridge computed itself, which is
+	// how the OpenCode plugin reports usage. It takes precedence over the
+	// transcript, which only Claude and Codex write.
+	Tokens int64 `json:"tokens"`
 }
 
 func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string]string, error) {
@@ -41,6 +48,17 @@ func (s *Server) hookEvent(ctx context.Context, raw json.RawMessage) (map[string
 	s.mu.RUnlock()
 	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(p.Token)) != 1 || entry == nil {
 		return nil, fmt.Errorf("invalid agent hook identity")
+	}
+	// Usage is observed on every hook and enforced right away, so a runaway
+	// turn can be stopped at the tool call that crossed the line rather than
+	// at the end of the turn.
+	s.observeUsage(entry, p)
+	s.enforceBudget(entry)
+	if p.Event == "Usage" {
+		if err := s.persist(); err != nil {
+			return nil, err
+		}
+		return map[string]string{}, nil
 	}
 	state := agent.StateReady
 	switch p.Event {

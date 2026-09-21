@@ -16,6 +16,7 @@ import (
 	"github.com/martintrifunov/orkestar/internal/daemon"
 	"github.com/martintrifunov/orkestar/internal/ipc"
 	"github.com/martintrifunov/orkestar/internal/runtimepath"
+	"github.com/martintrifunov/orkestar/internal/usage"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -98,6 +99,8 @@ func runTask(paths runtimepath.Paths, args []string) error {
 		return taskAssign(paths, args[1:])
 	case "auto-start":
 		return taskAutoStart(paths, args[1:])
+	case "budget":
+		return taskBudget(paths, args[1:])
 	case "worktree":
 		return taskWorktree(paths, args[1:])
 	case "wait":
@@ -118,6 +121,7 @@ var errTaskUsage = errors.New(`usage:
   orkestar task status <task-id> <pending|in_progress|done|cancelled>
   orkestar task assign <task-id> <agent-id>
   orkestar task auto-start <task-id> <agent> [--prompt=text] | orkestar task auto-start <task-id> --clear
+  orkestar task budget <task-id> [--tokens=N] [--seconds=N] [--action=warn|stop] [--clear]
   orkestar task worktree create <task-id> [branch]
   orkestar task worktree remove <task-id>
   orkestar task wait <task-id> [done|finished|startable] [--timeout=300]
@@ -363,6 +367,61 @@ func taskAutoStart(paths runtimepath.Paths, args []string) error {
 	printTask(task)
 	return nil
 }
+
+// taskBudget records what an agent working a task may spend. A token budget
+// is checked against what the provider's transcript reports; a time budget
+// bounds one session and works for every adapter.
+func taskBudget(paths runtimepath.Paths, args []string) error {
+	if len(args) < 1 {
+		return errTaskUsage
+	}
+	taskID := args[0]
+	var tokens, seconds int64
+	action := ""
+	clear := false
+	for _, argument := range args[1:] {
+		switch {
+		case argument == "--clear":
+			clear = true
+		case strings.HasPrefix(argument, "--tokens="):
+			value, err := strconv.ParseInt(strings.TrimPrefix(argument, "--tokens="), 10, 64)
+			if err != nil || value < 0 {
+				return fmt.Errorf("--tokens must be a non-negative integer")
+			}
+			tokens = value
+		case strings.HasPrefix(argument, "--seconds="):
+			value, err := strconv.ParseInt(strings.TrimPrefix(argument, "--seconds="), 10, 64)
+			if err != nil || value < 0 {
+				return fmt.Errorf("--seconds must be a non-negative integer")
+			}
+			seconds = value
+		case strings.HasPrefix(argument, "--action="):
+			action = strings.TrimPrefix(argument, "--action=")
+			if action != workflow.BudgetActionWarn && action != workflow.BudgetActionStop {
+				return fmt.Errorf("--action must be warn or stop")
+			}
+		default:
+			return fmt.Errorf("unknown flag %q\n\n%s", argument, errTaskUsage.Error())
+		}
+	}
+	if clear {
+		tokens, seconds, action = 0, 0, ""
+	}
+	if !clear && tokens == 0 && seconds == 0 {
+		return fmt.Errorf("a budget needs --tokens or --seconds\n\n%s", errTaskUsage.Error())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var task workflow.Task
+	if err := ipc.NewClient(paths.Socket).Call(ctx, "task.setBudget", map[string]any{
+		"task_id": taskID, "tokens": tokens, "seconds": seconds, "action": action,
+	}, &task); err != nil {
+		return err
+	}
+	printTask(task)
+	return nil
+}
 func taskWorktree(paths runtimepath.Paths, args []string) error {
 	if len(args) < 2 {
 		return errTaskUsage
@@ -471,5 +530,25 @@ func printTask(task workflow.Task) {
 	if task.AssigneeAgentID != "" {
 		assignee = task.AssigneeAgentID
 	}
-	fmt.Printf("%s\t%-11s\t%v\t%s\t%s\t%s\n", task.ID, task.Status, task.AutoReview, worktree, assignee, task.Title)
+	auto := "-"
+	switch {
+	case task.AutoStartError != "":
+		auto = "!" + task.AutoStartError
+	case task.AutoStart:
+		auto = task.AutoAgent
+	}
+	budget := "-"
+	switch {
+	case task.TokenBudget > 0:
+		budget = usage.FormatTokens(task.TokenBudget)
+		if task.BudgetAction == workflow.BudgetActionStop {
+			budget += "/stop"
+		}
+	case task.TimeBudgetSeconds > 0:
+		budget = (time.Duration(task.TimeBudgetSeconds) * time.Second).String()
+		if task.BudgetAction == workflow.BudgetActionStop {
+			budget += "/stop"
+		}
+	}
+	fmt.Printf("%s\t%-11s\t%v\t%s\t%s\t%s\t%s\t%s\n", task.ID, task.Status, task.AutoReview, worktree, assignee, auto, budget, task.Title)
 }

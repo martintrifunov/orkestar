@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/martintrifunov/orkestar/internal/daemon"
+	"github.com/martintrifunov/orkestar/internal/usage"
 	"github.com/martintrifunov/orkestar/internal/workflow"
 )
 
@@ -25,7 +26,7 @@ type sidebarTemplates struct {
 // rendering cannot drift apart.
 var sidebarTokens = map[string][]string{
 	"task":    {"status", "title", "id", "branch", "worktree", "assignee", "depends", "review"},
-	"agent":   {"adapter", "state", "machine", "task", "id", "attention", "terminal"},
+	"agent":   {"adapter", "state", "machine", "task", "id", "attention", "terminal", "usage"},
 	"session": {"state", "command", "id", "directory"},
 }
 
@@ -125,10 +126,17 @@ func (m Model) taskRow(task workflow.Task) string {
 func (m Model) agentRow(scoped scopedAgent) string {
 	if m.settings.Sidebar.Agent == "" {
 		line := scoped.Agent.Adapter + "  " + scoped.Agent.State
+		if scoped.Agent.TokensUsed > 0 {
+			line += "  " + usage.FormatTokens(scoped.Agent.TokensUsed) + " tok"
+		}
 		if len(m.machines) > 1 {
 			line += "  [" + scoped.MachineLabel + "]"
 		}
 		return line
+	}
+	usageText := ""
+	if scoped.Agent.TokensUsed > 0 {
+		usageText = usage.FormatTokens(scoped.Agent.TokensUsed) + " tok"
 	}
 	return sidebarRow(m.settings.Sidebar.Agent, map[string]string{
 		"adapter":   scoped.Agent.Adapter,
@@ -138,6 +146,7 @@ func (m Model) agentRow(scoped scopedAgent) string {
 		"id":        scoped.Agent.ID,
 		"attention": scoped.Agent.AttentionReason,
 		"terminal":  scoped.Agent.TerminalID,
+		"usage":     usageText,
 	})
 }
 
