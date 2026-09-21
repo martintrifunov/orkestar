@@ -307,6 +307,9 @@ func (m *Model) paneAction(key string) (tea.Cmd, bool) {
 		return nil, true
 	case ActionLayouts:
 		return m.openLayouts(), true
+	case ActionSearch:
+		m.openSearch()
+		return nil, true
 	case ActionRecordings:
 		m.openRecordings()
 		return nil, true
@@ -404,6 +407,9 @@ func (m Model) promptView() string {
 	if m.layoutsOpen {
 		return m.layoutsView()
 	}
+	if m.searchOpen {
+		return m.searchView()
+	}
 	if m.renaming != nil {
 		return "Rename pane\n\nName: " + m.renameTo + "▏" +
 			"\n\nEnter renames · an empty name restores the default · Esc cancels"
@@ -452,6 +458,9 @@ func (m Model) updatePrompt(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.layoutsOpen {
 		return m.updateLayouts(k)
+	}
+	if m.searchOpen {
+		return m.updateSearch(k)
 	}
 	if m.renaming != nil {
 		return m.updateRenamePrompt(k)

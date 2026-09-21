@@ -198,6 +198,15 @@ type Model struct {
 	namingLayout bool
 	layoutName   string
 	layoutsDir   string
+	// searchOpen is the global-search overlay: a query over every terminal's
+	// screen and scrollback, the board and the artifacts. searchResults mixes
+	// daemon results with client-side pane-label matches, which the daemon
+	// cannot see.
+	searchOpen    bool
+	searchQuery   string
+	searchResults []daemon.SearchResult
+	searchAt      int
+	searchErr     error
 	// recordingsOpen lists the recording artifacts on the board, and
 	// recordingAt is the one Enter replays.
 	recordingsOpen bool
@@ -390,6 +399,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 	m.templates, m.templatesErr, m.templatesWorkspace = nil, nil, ""
 	m.templateAt, m.templateStart = 0, false
 	m.managingMachines, m.addingMachine = false, false
+	m.searchOpen, m.searchResults, m.searchErr = false, nil, nil
 	m.recordingsOpen, m.recordings, m.recordingAt = false, nil, 0
 	m.savedMachines, m.machinesErr = nil, nil
 	m.machineHost, m.machineLabel, m.machineSession, m.machineField = "", "", "", 0
@@ -429,7 +439,7 @@ func (m *Model) switchMachine(delta int) tea.Cmd {
 // area.
 func (m Model) prompting() bool {
 	return m.filePrompt || m.settingsOpen || m.taskPrompt || m.renaming != nil ||
-		m.managingMachines || m.addingMachine || m.layoutsOpen
+		m.managingMachines || m.addingMachine || m.layoutsOpen || m.searchOpen
 }
 
 func (m Model) Init() tea.Cmd {
@@ -1172,6 +1182,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Machine removed; its panes stay until this session restarts"
 		}
 		m.forgetMachineLayout(message.id)
+	case searchResultsMsg:
+		if message.machineID != "" && message.machineID != m.currentMachine().ID {
+			return m, nil
+		}
+		m.searchResults, m.searchErr = message.results, message.err
+		m.searchAt = 0
 	case replayTickMsg:
 		if message.pane == nil || message.pane.replay == nil || !message.pane.replay.playing {
 			return m, nil

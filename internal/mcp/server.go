@@ -118,6 +118,11 @@ func NewServer(client *ipc.Client, version string) *sdk.Server {
 	}, agentExplain(client))
 
 	sdk.AddTool(server, &sdk.Tool{
+		Name:        "search",
+		Description: "Search what Orkestar is holding: every terminal's visible screen and scrollback, tasks, artifacts and templates. Use it to find where another agent hit an error instead of reading panes one at a time.",
+	}, searchTool(client))
+
+	sdk.AddTool(server, &sdk.Tool{
 		Name:        "terminal_start",
 		Description: "Run an argv command in a workspace as a daemon-owned terminal and return it. The process keeps running while nobody is attached.",
 	}, terminalStart(client))
@@ -195,6 +200,25 @@ type workspaceCreateInput struct {
 func workspaceCreate(client *ipc.Client) sdk.ToolHandlerFor[workspaceCreateInput, daemon.Workspace] {
 	return func(ctx context.Context, _ *sdk.CallToolRequest, in workspaceCreateInput) (*sdk.CallToolResult, daemon.Workspace, error) {
 		return callIPC[daemon.Workspace](ctx, client, "workspace.create", map[string]string{"directory": in.Directory})
+	}
+}
+
+type searchInput struct {
+	Query       string `json:"query"`
+	WorkspaceID string `json:"workspace_id,omitempty" jsonschema:"limit the search to one workspace"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"maximum results; defaults to 100"`
+}
+
+type searchOutput struct {
+	Query   string                `json:"query"`
+	Results []daemon.SearchResult `json:"results"`
+}
+
+func searchTool(client *ipc.Client) sdk.ToolHandlerFor[searchInput, searchOutput] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, in searchInput) (*sdk.CallToolResult, searchOutput, error) {
+		return callIPC[searchOutput](ctx, client, "search.query", map[string]any{
+			"query": in.Query, "workspace_id": in.WorkspaceID, "limit": in.Limit,
+		})
 	}
 }
 

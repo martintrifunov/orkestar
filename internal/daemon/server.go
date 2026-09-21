@@ -373,6 +373,8 @@ func (s *Server) handleRequest(ctx context.Context, request ipc.Request) (ipc.Re
 		result, err = s.policyAudit(request.Params)
 	case "policy.check":
 		result, err = s.checkPolicy(request.Params)
+	case "search.query":
+		result, err = s.searchQuery(request.Params)
 	case "task.create":
 		result, err = s.createTask(request.Params)
 	case "template.list":

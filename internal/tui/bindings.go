@@ -68,6 +68,8 @@ const (
 	ActionRenamePane  Action = "rename-pane"
 	ActionDiscardEdit Action = "discard-editor"
 	ActionDetachPanel Action = "detach-panel"
+	// ActionSearch opens the global search over panes, tasks and artifacts.
+	ActionSearch Action = "search"
 	// ActionRecordings lists terminal recordings and replays one.
 	ActionRecordings Action = "recordings"
 )
@@ -113,6 +115,7 @@ func defaultBindings() map[Action]string {
 		ActionRenamePane:   "r",
 		ActionDiscardEdit:  "x",
 		ActionDetachPanel:  "tab",
+		ActionSearch:       "/",
 		ActionRecordings:   "R",
 	}
 }
@@ -176,6 +179,7 @@ var placements = map[Action]placement{
 	ActionSettings:    prefixed,
 	ActionDiscardEdit: prefixed,
 	ActionRenamePane:  prefixed,
+	ActionSearch:      prefixed,
 	ActionRecordings:  prefixed,
 
 	ActionNewAgent: both,
@@ -295,6 +299,8 @@ func (m Model) helpLine() string {
 		return "Enter saves · Tab switches field · Esc cancels"
 	case m.managingMachines:
 		return "a add · e enable/disable · x remove · esc close"
+	case m.searchOpen:
+		return "type a query · enter search/open · ↑/↓ select · esc close"
 	case m.recordingsOpen:
 		return "↑/↓ select · enter replay · esc close"
 	case m.prompting():
